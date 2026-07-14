@@ -31,6 +31,9 @@ bld/
 .idea/
 .vscode/
 
+# Local development worktrees
+.worktrees/
+
 # EF Core migrations/database
 *.mdf
 *.ldf
