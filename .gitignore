@@ -1,0 +1,43 @@
+# dotnet / VS gitignore
+[Db]
+*.db
+*.db-shm
+*.db-wal
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Re]leases/
+x64/
+x86/
+SDKRedirects/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio 2015/2017/2019/2022 cache directory
+.vs/
+# Other IDEs
+.idea/
+.vscode/
+
+# EF Core migrations/database
+*.mdf
+*.ldf
+*.sdf
+
+# Publishing
+publish/
+# ASP.NET Core
+appsettings.Development.json
+appsettings.Production.json
