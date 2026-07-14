@@ -21,6 +21,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Location> Locations { get; set; }
 
+    public DbSet<Supplier> Suppliers { get; set; }
+
+    public DbSet<Customer> Customers { get; set; }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -43,6 +47,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
         builder.Entity<Location>()
             .HasIndex(l => l.Code)
+            .IsUnique();
+
+        builder.Entity<Supplier>()
+            .HasIndex(s => s.Code)
+            .IsUnique();
+
+        builder.Entity<Customer>()
+            .HasIndex(c => c.Code)
             .IsUnique();
 
         builder.Entity<Zone>()
