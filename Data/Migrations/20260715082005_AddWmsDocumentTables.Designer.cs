@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WmsMes.Web.Data;
 
@@ -11,9 +12,11 @@ using WmsMes.Web.Data;
 namespace WmsMes.Web.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260715082005_AddWmsDocumentTables")]
+    partial class AddWmsDocumentTables
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -620,143 +623,6 @@ namespace WmsMes.Web.Data.Migrations
                     b.ToTable("StockTransactions");
                 });
 
-            modelBuilder.Entity("WmsMes.Web.Domain.Entities.StockTransfer", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("TransferDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("TransferNo")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TransferNo")
-                        .IsUnique();
-
-                    b.ToTable("StockTransfers");
-                });
-
-            modelBuilder.Entity("WmsMes.Web.Domain.Entities.StockTransferLine", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("FromLocationId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("LotId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("ProductId")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("Qty")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<int>("StockTransferId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("ToLocationId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FromLocationId");
-
-                    b.HasIndex("LotId");
-
-                    b.HasIndex("ProductId");
-
-                    b.HasIndex("StockTransferId");
-
-                    b.HasIndex("ToLocationId");
-
-                    b.ToTable("StockTransferLines");
-                });
-
-            modelBuilder.Entity("WmsMes.Web.Domain.Entities.Stocktake", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("LocationId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
-
-                    b.Property<string>("StocktakeNo")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("LocationId");
-
-                    b.HasIndex("StocktakeNo")
-                        .IsUnique();
-
-                    b.ToTable("Stocktakes");
-                });
-
-            modelBuilder.Entity("WmsMes.Web.Domain.Entities.StocktakeLine", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("LotId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("ProductId")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("QtyCounted")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal>("QtyDiscrepancy")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal>("QtySystem")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<int>("StocktakeId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("LotId");
-
-                    b.HasIndex("ProductId");
-
-                    b.HasIndex("StocktakeId");
-
-                    b.ToTable("StocktakeLines");
-                });
-
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.Supplier", b =>
                 {
                     b.Property<int>("Id")
@@ -1102,87 +968,6 @@ namespace WmsMes.Web.Data.Migrations
                     b.Navigation("Product");
                 });
 
-            modelBuilder.Entity("WmsMes.Web.Domain.Entities.StockTransferLine", b =>
-                {
-                    b.HasOne("WmsMes.Web.Domain.Entities.Location", "FromLocation")
-                        .WithMany()
-                        .HasForeignKey("FromLocationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("WmsMes.Web.Domain.Entities.Lot", "Lot")
-                        .WithMany()
-                        .HasForeignKey("LotId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("WmsMes.Web.Domain.Entities.Product", "Product")
-                        .WithMany()
-                        .HasForeignKey("ProductId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("WmsMes.Web.Domain.Entities.StockTransfer", "StockTransfer")
-                        .WithMany("Lines")
-                        .HasForeignKey("StockTransferId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("WmsMes.Web.Domain.Entities.Location", "ToLocation")
-                        .WithMany()
-                        .HasForeignKey("ToLocationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("FromLocation");
-
-                    b.Navigation("Lot");
-
-                    b.Navigation("Product");
-
-                    b.Navigation("StockTransfer");
-
-                    b.Navigation("ToLocation");
-                });
-
-            modelBuilder.Entity("WmsMes.Web.Domain.Entities.Stocktake", b =>
-                {
-                    b.HasOne("WmsMes.Web.Domain.Entities.Location", "Location")
-                        .WithMany()
-                        .HasForeignKey("LocationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Location");
-                });
-
-            modelBuilder.Entity("WmsMes.Web.Domain.Entities.StocktakeLine", b =>
-                {
-                    b.HasOne("WmsMes.Web.Domain.Entities.Lot", "Lot")
-                        .WithMany()
-                        .HasForeignKey("LotId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("WmsMes.Web.Domain.Entities.Product", "Product")
-                        .WithMany()
-                        .HasForeignKey("ProductId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("WmsMes.Web.Domain.Entities.Stocktake", "Stocktake")
-                        .WithMany("Lines")
-                        .HasForeignKey("StocktakeId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Lot");
-
-                    b.Navigation("Product");
-
-                    b.Navigation("Stocktake");
-                });
-
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.Zone", b =>
                 {
                     b.HasOne("WmsMes.Web.Domain.Entities.Warehouse", "Warehouse")
@@ -1200,16 +985,6 @@ namespace WmsMes.Web.Data.Migrations
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.GoodsReceipt", b =>
-                {
-                    b.Navigation("Lines");
-                });
-
-            modelBuilder.Entity("WmsMes.Web.Domain.Entities.StockTransfer", b =>
-                {
-                    b.Navigation("Lines");
-                });
-
-            modelBuilder.Entity("WmsMes.Web.Domain.Entities.Stocktake", b =>
                 {
                     b.Navigation("Lines");
                 });

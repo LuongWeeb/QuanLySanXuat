@@ -5,6 +5,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.Hubs;
 using WmsMes.Web.Repositories;
 using WmsMes.Web.Services;
 
@@ -12,6 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
+builder.Services.AddSignalR();
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -51,6 +53,7 @@ builder.Services.AddAuthentication()
 
 builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
 builder.Services.AddScoped<IProductService, ProductService>();
+builder.Services.AddScoped<IInventoryService, InventoryService>();
 
 var app = builder.Build();
 
@@ -73,6 +76,8 @@ app.UseAuthorization();
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
+
+app.MapHub<InventoryHub>("/inventoryHub");
 
 using (var scope = app.Services.CreateScope())
 {
