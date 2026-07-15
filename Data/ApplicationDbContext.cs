@@ -25,6 +25,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Customer> Customers { get; set; }
 
+    public DbSet<Lot> Lots { get; set; }
+
+    public DbSet<StockBalance> StockBalances { get; set; }
+
+    public DbSet<StockTransaction> StockTransactions { get; set; }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -56,6 +62,50 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<Customer>()
             .HasIndex(c => c.Code)
             .IsUnique();
+
+        builder.Entity<Lot>()
+            .HasIndex(l => l.LotNo)
+            .IsUnique();
+
+        builder.Entity<StockBalance>()
+            .HasIndex(sb => new { sb.ProductId, sb.LotId, sb.LocationId })
+            .IsUnique();
+
+        builder.Entity<StockBalance>()
+            .HasOne(sb => sb.Product)
+            .WithMany()
+            .HasForeignKey(sb => sb.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<StockBalance>()
+            .HasOne(sb => sb.Lot)
+            .WithMany()
+            .HasForeignKey(sb => sb.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<StockBalance>()
+            .HasOne(sb => sb.Location)
+            .WithMany()
+            .HasForeignKey(sb => sb.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<StockTransaction>()
+            .HasOne(st => st.Product)
+            .WithMany()
+            .HasForeignKey(st => st.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<StockTransaction>()
+            .HasOne(st => st.Lot)
+            .WithMany()
+            .HasForeignKey(st => st.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<StockTransaction>()
+            .HasOne(st => st.Location)
+            .WithMany()
+            .HasForeignKey(st => st.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<Zone>()
             .HasOne(z => z.Warehouse)
