@@ -1,18 +1,27 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.AspNetCore.SignalR;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
+using WmsMes.Web.Hubs;
 
 namespace WmsMes.Web.Services;
 
 public class InventoryService : IInventoryService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IHubContext<InventoryHub>? _hubContext;
 
     public InventoryService(ApplicationDbContext context)
+        : this(context, null)
+    {
+    }
+
+    public InventoryService(ApplicationDbContext context, IHubContext<InventoryHub>? hubContext)
     {
         _context = context;
+        _hubContext = hubContext;
     }
 
     public async Task<IEnumerable<StockBalance>> GetSuggestedLotsAsync(int productId, decimal qty)
@@ -148,6 +157,7 @@ public class InventoryService : IInventoryService
             receipt.Status = DocumentStatus.Completed;
             await _context.SaveChangesAsync();
             await CommitIfRelationalAsync(transaction);
+            await NotifyStockChangedAsync();
             return true;
         }
         catch
@@ -202,6 +212,7 @@ public class InventoryService : IInventoryService
             issue.Status = DocumentStatus.Completed;
             await _context.SaveChangesAsync();
             await CommitIfRelationalAsync(transaction);
+            await NotifyStockChangedAsync();
             return true;
         }
         catch
@@ -308,6 +319,7 @@ public class InventoryService : IInventoryService
             stocktake.Status = StocktakeStatus.Completed;
             await _context.SaveChangesAsync();
             await CommitIfRelationalAsync(transaction);
+            await NotifyStockChangedAsync();
             return true;
         }
         catch
@@ -337,6 +349,14 @@ public class InventoryService : IInventoryService
         if (transaction is not null)
         {
             await transaction.RollbackAsync();
+        }
+    }
+
+    private async Task NotifyStockChangedAsync()
+    {
+        if (_hubContext is not null)
+        {
+            await _hubContext.Clients.All.SendAsync("ReceiveStockUpdate");
         }
     }
 }
