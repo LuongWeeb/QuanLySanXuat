@@ -31,6 +31,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<StockTransaction> StockTransactions { get; set; }
 
+    public DbSet<GoodsReceipt> GoodsReceipts { get; set; }
+
+    public DbSet<GoodsReceiptLine> GoodsReceiptLines { get; set; }
+
+    public DbSet<GoodsIssue> GoodsIssues { get; set; }
+
+    public DbSet<GoodsIssueLine> GoodsIssueLines { get; set; }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -105,6 +113,56 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasOne(st => st.Location)
             .WithMany()
             .HasForeignKey(st => st.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<GoodsReceipt>()
+            .HasIndex(r => r.ReceiptNo)
+            .IsUnique();
+
+        builder.Entity<GoodsIssue>()
+            .HasIndex(i => i.IssueNo)
+            .IsUnique();
+
+        builder.Entity<GoodsReceiptLine>()
+            .HasOne(line => line.GoodsReceipt)
+            .WithMany(receipt => receipt.Lines)
+            .HasForeignKey(line => line.GoodsReceiptId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<GoodsReceiptLine>()
+            .HasOne(line => line.Product)
+            .WithMany()
+            .HasForeignKey(line => line.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<GoodsReceiptLine>()
+            .HasOne(line => line.Location)
+            .WithMany()
+            .HasForeignKey(line => line.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<GoodsIssueLine>()
+            .HasOne(line => line.GoodsIssue)
+            .WithMany(issue => issue.Lines)
+            .HasForeignKey(line => line.GoodsIssueId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<GoodsIssueLine>()
+            .HasOne(line => line.Product)
+            .WithMany()
+            .HasForeignKey(line => line.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<GoodsIssueLine>()
+            .HasOne(line => line.Lot)
+            .WithMany()
+            .HasForeignKey(line => line.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<GoodsIssueLine>()
+            .HasOne(line => line.Location)
+            .WithMany()
+            .HasForeignKey(line => line.LocationId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<Zone>()
