@@ -1,4 +1,4 @@
-namespace foundation_phase_1.Models;
+namespace WmsMes.Web.Models;
 
 public class ErrorViewModel
 {

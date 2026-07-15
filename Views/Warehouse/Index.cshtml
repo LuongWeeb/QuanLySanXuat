@@ -1,0 +1,53 @@
+@model IEnumerable<WmsMes.Web.Domain.Entities.Warehouse>
+@{
+    ViewData["Title"] = "Cấu trúc kho";
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Storage map</p>
+        <h2>Kho, khu vực và vị trí</h2>
+    </div>
+</section>
+
+<section class="warehouse-grid">
+@foreach (var warehouse in Model)
+{
+    <article class="warehouse-node">
+        <header>
+            <div>
+                <code>@warehouse.Code</code>
+                <h3>@warehouse.Name</h3>
+            </div>
+            <span class="status-pill @(warehouse.IsActive ? "is-active" : "is-muted")">
+                @(warehouse.IsActive ? "Hoạt động" : "Ngừng")
+            </span>
+        </header>
+        <div class="zone-list">
+        @foreach (var zone in warehouse.Zones.OrderBy(zone => zone.Code))
+        {
+            <section class="zone-node">
+                <div class="zone-heading">
+                    <span><code>@zone.Code</code> @zone.Name</span>
+                    <span>@zone.Locations.Count vị trí</span>
+                </div>
+                <div class="location-list">
+                @foreach (var location in zone.Locations.OrderBy(location => location.Code))
+                {
+                    <span class="location-chip">@location.Code</span>
+                }
+                </div>
+            </section>
+        }
+        </div>
+    </article>
+}
+</section>
+
+@if (!Model.Any())
+{
+    <div class="empty-state">
+        <h2>Chưa có dữ liệu kho</h2>
+        <p>Thêm dữ liệu warehouse, zone và location qua migration/seed hoặc màn hình quản trị ở các giai đoạn sau.</p>
+    </div>
+}

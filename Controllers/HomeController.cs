@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using foundation_phase_1.Models;
+using WmsMes.Web.Models;
 
-namespace foundation_phase_1.Controllers;
+namespace WmsMes.Web.Controllers;
 
+[Authorize]
 public class HomeController : Controller
 {
     private readonly ILogger<HomeController> _logger;

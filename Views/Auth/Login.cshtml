@@ -1,0 +1,52 @@
+@model WmsMes.Web.ViewModels.LoginViewModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Đăng nhập - WMS MES</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@500;600&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body class="login-page">
+    <main class="login-panel" aria-label="Đăng nhập WMS MES">
+        <section class="login-copy">
+            <p class="eyebrow">Secure operations console</p>
+            <h1>WMS MES</h1>
+            <p>Quản lý danh mục nền tảng, phân quyền và dữ liệu vận hành sản xuất trong một giao diện gọn, rõ, dễ quét.</p>
+            <div class="login-metrics">
+                <span><strong>7</strong> vai trò</span>
+                <span><strong>Hybrid</strong> auth</span>
+                <span><strong>RBAC</strong> ready</span>
+            </div>
+        </section>
+        <section class="login-card">
+            <h2>Đăng nhập</h2>
+            <p class="muted-text">Dùng tài khoản mẫu, ví dụ admin@wmsmes.com.</p>
+            <form asp-action="Login" asp-controller="Auth" method="post">
+                <div asp-validation-summary="ModelOnly" class="text-danger small mb-3"></div>
+                <div class="mb-3">
+                    <label asp-for="Email" class="form-label">Email</label>
+                    <input asp-for="Email" class="form-control" autocomplete="username" />
+                    <span asp-validation-for="Email" class="text-danger small"></span>
+                </div>
+                <div class="mb-3">
+                    <label asp-for="Password" class="form-label">Mật khẩu</label>
+                    <input asp-for="Password" class="form-control" autocomplete="current-password" />
+                    <span asp-validation-for="Password" class="text-danger small"></span>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">Đăng nhập</button>
+            </form>
+        </section>
+    </main>
+    <script src="~/lib/jquery/dist/jquery.min.js"></script>
+    <script src="~/lib/jquery-validation/dist/jquery.validate.min.js"></script>
+    <script src="~/lib/jquery-validation-unobtrusive/jquery.validate.unobtrusive.min.js"></script>
+</body>
+</html>
