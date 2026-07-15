@@ -39,6 +39,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<GoodsIssueLine> GoodsIssueLines { get; set; }
 
+    public DbSet<StockTransfer> StockTransfers { get; set; }
+
+    public DbSet<StockTransferLine> StockTransferLines { get; set; }
+
+    public DbSet<Stocktake> Stocktakes { get; set; }
+
+    public DbSet<StocktakeLine> StocktakeLines { get; set; }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -163,6 +171,68 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasOne(line => line.Location)
             .WithMany()
             .HasForeignKey(line => line.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<StockTransfer>()
+            .HasIndex(t => t.TransferNo)
+            .IsUnique();
+
+        builder.Entity<Stocktake>()
+            .HasIndex(s => s.StocktakeNo)
+            .IsUnique();
+
+        builder.Entity<StockTransferLine>()
+            .HasOne(line => line.StockTransfer)
+            .WithMany(transfer => transfer.Lines)
+            .HasForeignKey(line => line.StockTransferId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<StockTransferLine>()
+            .HasOne(line => line.Product)
+            .WithMany()
+            .HasForeignKey(line => line.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<StockTransferLine>()
+            .HasOne(line => line.Lot)
+            .WithMany()
+            .HasForeignKey(line => line.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<StockTransferLine>()
+            .HasOne(line => line.FromLocation)
+            .WithMany()
+            .HasForeignKey(line => line.FromLocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<StockTransferLine>()
+            .HasOne(line => line.ToLocation)
+            .WithMany()
+            .HasForeignKey(line => line.ToLocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<Stocktake>()
+            .HasOne(stocktake => stocktake.Location)
+            .WithMany()
+            .HasForeignKey(stocktake => stocktake.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<StocktakeLine>()
+            .HasOne(line => line.Stocktake)
+            .WithMany(stocktake => stocktake.Lines)
+            .HasForeignKey(line => line.StocktakeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<StocktakeLine>()
+            .HasOne(line => line.Product)
+            .WithMany()
+            .HasForeignKey(line => line.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<StocktakeLine>()
+            .HasOne(line => line.Lot)
+            .WithMany()
+            .HasForeignKey(line => line.LotId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<Zone>()
