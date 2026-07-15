@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WmsMes.Web", "WmsMes.Web.csproj", "{EEFD55C7-D7E2-4631-8ADE-ECAF0D1610FD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WmsMes.Tests", "WmsMes.Tests\WmsMes.Tests.csproj", "{F14B6555-9266-48DB-8447-3D1397F62796}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EEFD55C7-D7E2-4631-8ADE-ECAF0D1610FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EEFD55C7-D7E2-4631-8ADE-ECAF0D1610FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EEFD55C7-D7E2-4631-8ADE-ECAF0D1610FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EEFD55C7-D7E2-4631-8ADE-ECAF0D1610FD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F14B6555-9266-48DB-8447-3D1397F62796}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F14B6555-9266-48DB-8447-3D1397F62796}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F14B6555-9266-48DB-8447-3D1397F62796}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F14B6555-9266-48DB-8447-3D1397F62796}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

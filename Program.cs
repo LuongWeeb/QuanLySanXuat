@@ -5,6 +5,8 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.Repositories;
+using WmsMes.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -46,6 +48,9 @@ builder.Services.AddAuthentication()
                 Encoding.UTF8.GetBytes("SuperSecretKeyWmsMesProject2026SecureLongKey"))
         };
     });
+
+builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
+builder.Services.AddScoped<IProductService, ProductService>();
 
 var app = builder.Build();
 
