@@ -1,0 +1,46 @@
+@model IEnumerable<WmsMes.Web.Domain.Entities.WorkOrderStep>
+@using WmsMes.Web.Domain.Enums
+@{
+    ViewData["Title"] = "Trạm vận hành sản xuất";
+}
+
+<section class="worker-grid">
+    @foreach (var step in Model)
+    {
+        <article class="worker-card">
+            <div>
+                <div class="d-flex justify-content-between gap-3">
+                    <div>
+                        <p class="eyebrow mb-1">@step.WorkOrder?.Code</p>
+                        <h2>@step.WorkOrder?.Product?.Name</h2>
+                    </div>
+                    <span class="status-pill">@step.Status</span>
+                </div>
+                <dl class="worker-meta">
+                    <div>
+                        <dt>Công đoạn</dt>
+                        <dd>@step.StepNumber - @step.StepName</dd>
+                    </div>
+                    <div>
+                        <dt>Trạm</dt>
+                        <dd>@step.WorkCenter?.Name</dd>
+                    </div>
+                </dl>
+            </div>
+
+            @if (step.Status == WorkOrderStepStatus.Pending)
+            {
+                <form asp-action="Start" asp-route-id="@step.Id" method="post">
+                    <button type="submit" class="btn btn-warning btn-lg w-100 worker-action">BẮT ĐẦU</button>
+                </form>
+            }
+            else if (step.Status == WorkOrderStepStatus.InProgress)
+            {
+                <form asp-action="Complete" asp-route-id="@step.Id" method="post" class="d-flex gap-2">
+                    <input type="number" name="qtyOk" class="form-control form-control-lg" min="0" step="0.01" placeholder="SL đạt" required />
+                    <button type="submit" class="btn btn-success btn-lg worker-action">HOÀN THÀNH</button>
+                </form>
+            }
+        </article>
+    }
+</section>

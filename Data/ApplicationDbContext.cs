@@ -47,6 +47,24 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<StocktakeLine> StocktakeLines { get; set; }
 
+    public DbSet<BOM> BOMs { get; set; }
+
+    public DbSet<BOMItem> BOMItems { get; set; }
+
+    public DbSet<WorkCenter> WorkCenters { get; set; }
+
+    public DbSet<Routing> Routings { get; set; }
+
+    public DbSet<RoutingStep> RoutingSteps { get; set; }
+
+    public DbSet<WorkOrder> WorkOrders { get; set; }
+
+    public DbSet<WorkOrderStep> WorkOrderSteps { get; set; }
+
+    public DbSet<MaterialReservation> MaterialReservations { get; set; }
+
+    public DbSet<LotGenealogy> LotGenealogies { get; set; }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -233,6 +251,92 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasOne(line => line.Lot)
             .WithMany()
             .HasForeignKey(line => line.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<WorkCenter>()
+            .HasIndex(w => w.Code)
+            .IsUnique();
+
+        builder.Entity<WorkOrder>()
+            .HasIndex(w => w.Code)
+            .IsUnique();
+
+        builder.Entity<BOM>()
+            .HasMany(b => b.Items)
+            .WithOne(i => i.Bom)
+            .HasForeignKey(i => i.BomId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<BOMItem>()
+            .HasOne(i => i.ComponentProduct)
+            .WithMany()
+            .HasForeignKey(i => i.ComponentProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<Routing>()
+            .HasMany(r => r.Steps)
+            .WithOne(s => s.Routing)
+            .HasForeignKey(s => s.RoutingId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<RoutingStep>()
+            .HasOne(s => s.WorkCenter)
+            .WithMany()
+            .HasForeignKey(s => s.WorkCenterId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<WorkOrder>()
+            .HasMany(w => w.Steps)
+            .WithOne(s => s.WorkOrder)
+            .HasForeignKey(s => s.WorkOrderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<WorkOrderStep>()
+            .HasOne(s => s.WorkCenter)
+            .WithMany()
+            .HasForeignKey(s => s.WorkCenterId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<MaterialReservation>()
+            .HasOne(r => r.WorkOrder)
+            .WithMany()
+            .HasForeignKey(r => r.WorkOrderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<MaterialReservation>()
+            .HasOne(r => r.Product)
+            .WithMany()
+            .HasForeignKey(r => r.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<MaterialReservation>()
+            .HasOne(r => r.Lot)
+            .WithMany()
+            .HasForeignKey(r => r.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<MaterialReservation>()
+            .HasOne(r => r.Location)
+            .WithMany()
+            .HasForeignKey(r => r.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<Lot>()
+            .HasOne(l => l.WorkOrder)
+            .WithMany()
+            .HasForeignKey(l => l.WorkOrderId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<LotGenealogy>()
+            .HasOne(g => g.OutputLot)
+            .WithMany()
+            .HasForeignKey(g => g.OutputLotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<LotGenealogy>()
+            .HasOne(g => g.InputLot)
+            .WithMany()
+            .HasForeignKey(g => g.InputLotId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<Zone>()

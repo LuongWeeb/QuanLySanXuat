@@ -25,4 +25,7 @@ public class Lot
     public decimal Qty { get; set; }
 
     public int? WorkOrderId { get; set; }
+
+    [ForeignKey(nameof(WorkOrderId))]
+    public virtual WorkOrder? WorkOrder { get; set; }
 }

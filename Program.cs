@@ -11,6 +11,10 @@ using WmsMes.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
+
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 builder.Services.AddSignalR();
@@ -54,6 +58,8 @@ builder.Services.AddAuthentication()
 builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
+builder.Services.AddScoped<IMrpService, MrpService>();
+builder.Services.AddScoped<IWorkOrderService, WorkOrderService>();
 
 var app = builder.Build();
 
@@ -78,6 +84,7 @@ app.MapControllerRoute(
     pattern: "{controller=Home}/{action=Index}/{id?}");
 
 app.MapHub<InventoryHub>("/inventoryHub");
+app.MapHub<ProductionHub>("/productionHub");
 
 using (var scope = app.Services.CreateScope())
 {
