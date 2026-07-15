@@ -9,4 +9,8 @@ public interface IInventoryService
     Task<bool> CompleteGoodsReceiptAsync(int receiptId, string userId);
 
     Task<bool> CompleteGoodsIssueAsync(int issueId, string userId);
+
+    Task<bool> StartStocktakeAsync(int stocktakeId);
+
+    Task<bool> ApproveStocktakeAsync(int stocktakeId, string userId);
 }

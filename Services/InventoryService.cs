@@ -211,6 +211,112 @@ public class InventoryService : IInventoryService
         }
     }
 
+    public async Task<bool> StartStocktakeAsync(int stocktakeId)
+    {
+        await using var transaction = await BeginTransactionIfRelationalAsync();
+        try
+        {
+            var stocktake = await _context.Stocktakes
+                .FirstOrDefaultAsync(s => s.Id == stocktakeId);
+
+            if (stocktake is null || stocktake.Status != StocktakeStatus.Draft)
+            {
+                return false;
+            }
+
+            var balances = await _context.StockBalances
+                .Where(sb => sb.LocationId == stocktake.LocationId)
+                .ToListAsync();
+
+            foreach (var balance in balances)
+            {
+                var qtySystem = balance.QtyAvailable;
+                balance.QtyOnHold += balance.QtyAvailable;
+                balance.QtyAvailable = 0;
+
+                await _context.StocktakeLines.AddAsync(new StocktakeLine
+                {
+                    StocktakeId = stocktakeId,
+                    ProductId = balance.ProductId,
+                    LotId = balance.LotId,
+                    QtySystem = qtySystem,
+                    QtyCounted = 0,
+                    QtyDiscrepancy = 0
+                });
+            }
+
+            stocktake.Status = StocktakeStatus.Counting;
+            await _context.SaveChangesAsync();
+            await CommitIfRelationalAsync(transaction);
+            return true;
+        }
+        catch
+        {
+            await RollbackIfRelationalAsync(transaction);
+            throw;
+        }
+    }
+
+    public async Task<bool> ApproveStocktakeAsync(int stocktakeId, string userId)
+    {
+        await using var transaction = await BeginTransactionIfRelationalAsync();
+        try
+        {
+            var stocktake = await _context.Stocktakes
+                .Include(s => s.Lines)
+                .FirstOrDefaultAsync(s => s.Id == stocktakeId);
+
+            if (stocktake is null || stocktake.Status != StocktakeStatus.AwaitingApproval)
+            {
+                return false;
+            }
+
+            foreach (var line in stocktake.Lines)
+            {
+                var balance = await _context.StockBalances
+                    .FirstOrDefaultAsync(sb =>
+                        sb.ProductId == line.ProductId &&
+                        sb.LotId == line.LotId &&
+                        sb.LocationId == stocktake.LocationId);
+
+                if (balance is null)
+                {
+                    continue;
+                }
+
+                var discrepancy = line.QtyCounted - line.QtySystem;
+                line.QtyDiscrepancy = discrepancy;
+                balance.QtyAvailable = line.QtyCounted;
+                balance.QtyOnHold = Math.Max(0, balance.QtyOnHold - line.QtySystem);
+
+                if (discrepancy != 0)
+                {
+                    await _context.StockTransactions.AddAsync(new StockTransaction
+                    {
+                        Type = TransactionType.Adjust,
+                        ProductId = line.ProductId,
+                        LotId = line.LotId,
+                        LocationId = stocktake.LocationId,
+                        Qty = discrepancy,
+                        TransactionDate = DateTime.UtcNow,
+                        UserId = userId,
+                        ReferenceNo = stocktake.StocktakeNo
+                    });
+                }
+            }
+
+            stocktake.Status = StocktakeStatus.Completed;
+            await _context.SaveChangesAsync();
+            await CommitIfRelationalAsync(transaction);
+            return true;
+        }
+        catch
+        {
+            await RollbackIfRelationalAsync(transaction);
+            throw;
+        }
+    }
+
     private async Task<IDbContextTransaction?> BeginTransactionIfRelationalAsync()
     {
         return _context.Database.IsRelational()

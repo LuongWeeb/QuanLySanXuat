@@ -110,6 +110,67 @@ public class InventoryServiceTests
         Assert.Empty(context.StockTransactions);
     }
 
+    [Fact]
+    public async Task StartStocktakeAsync_FreezesLocationBalancesAndCreatesCountingLines()
+    {
+        await using var context = CreateContext();
+        await SeedRequiredMasterDataAsync(context);
+        context.Lots.Add(new Lot { Id = 1, ProductId = 1, LotNo = "LOT-001", Qty = 10 });
+        context.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 10, QtyOnHold = 2 });
+        context.Stocktakes.Add(new Stocktake { Id = 1, StocktakeNo = "ST-001", LocationId = 1, Status = StocktakeStatus.Draft });
+        await context.SaveChangesAsync();
+
+        var service = new InventoryService(context);
+
+        var started = await service.StartStocktakeAsync(1);
+
+        Assert.True(started);
+        var balance = await context.StockBalances.SingleAsync();
+        Assert.Equal(0, balance.QtyAvailable);
+        Assert.Equal(12, balance.QtyOnHold);
+        var line = await context.StocktakeLines.SingleAsync();
+        Assert.Equal(10, line.QtySystem);
+        Assert.Equal(0, line.QtyCounted);
+        Assert.Equal(StocktakeStatus.Counting, (await context.Stocktakes.FindAsync(1))!.Status);
+    }
+
+    [Fact]
+    public async Task ApproveStocktakeAsync_ReleasesHoldAndWritesAdjustTransactionForDiscrepancy()
+    {
+        await using var context = CreateContext();
+        await SeedRequiredMasterDataAsync(context);
+        context.Lots.Add(new Lot { Id = 1, ProductId = 1, LotNo = "LOT-001", Qty = 10 });
+        context.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 0, QtyOnHold = 10 });
+        context.Stocktakes.Add(new Stocktake
+        {
+            Id = 1,
+            StocktakeNo = "ST-001",
+            LocationId = 1,
+            Status = StocktakeStatus.AwaitingApproval,
+            Lines =
+            {
+                new StocktakeLine { ProductId = 1, LotId = 1, QtySystem = 10, QtyCounted = 8 }
+            }
+        });
+        await context.SaveChangesAsync();
+
+        var service = new InventoryService(context);
+
+        var approved = await service.ApproveStocktakeAsync(1, "manager-1");
+
+        Assert.True(approved);
+        var balance = await context.StockBalances.SingleAsync();
+        Assert.Equal(8, balance.QtyAvailable);
+        Assert.Equal(0, balance.QtyOnHold);
+        var line = await context.StocktakeLines.SingleAsync();
+        Assert.Equal(-2, line.QtyDiscrepancy);
+        var transaction = await context.StockTransactions.SingleAsync();
+        Assert.Equal(TransactionType.Adjust, transaction.Type);
+        Assert.Equal(-2, transaction.Qty);
+        Assert.Equal("ST-001", transaction.ReferenceNo);
+        Assert.Equal(StocktakeStatus.Completed, (await context.Stocktakes.FindAsync(1))!.Status);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
