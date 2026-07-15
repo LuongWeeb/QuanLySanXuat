@@ -192,6 +192,70 @@ a:focus-visible {
   margin-bottom: 14px;
 }
 
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.metric-card {
+  min-height: 84px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.metric-card span {
+  display: block;
+  color: var(--color-subtle);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.metric-card strong {
+  display: block;
+  margin-top: 8px;
+  font-family: "Fira Code", Consolas, monospace;
+  font-size: 1.45rem;
+}
+
+.connection-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-secondary);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+
+.connection-pill.is-live .connection-dot {
+  background: var(--color-accent);
+}
+
+.connection-pill.is-waiting .connection-dot {
+  background: #ca8a04;
+}
+
+.connection-pill.is-offline .connection-dot {
+  background: var(--color-danger);
+}
+
 .data-panel,
 .warehouse-node,
 .empty-state,
@@ -229,6 +293,18 @@ a:focus-visible {
 
 .data-table tbody tr:hover {
   background: #f1f5f9;
+}
+
+.table-subtext {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-subtle);
+  font-size: 0.82rem;
+}
+
+.hold-value.has-hold {
+  color: #b45309;
+  font-weight: 700;
 }
 
 code {
@@ -415,7 +491,11 @@ code {
   }
 
   .side-nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .app-topbar,
@@ -442,6 +522,10 @@ code {
   .topbar-actions {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .metric-grid {
+    grid-template-columns: 1fr;
   }
 }
 
