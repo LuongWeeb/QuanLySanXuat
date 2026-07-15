@@ -30,6 +30,9 @@ public class GoodsReceiptLine
     [Column(TypeName = "decimal(18,2)")]
     public decimal Qty { get; set; }
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal UnitPrice { get; set; }
+
     [Required]
     public int LocationId { get; set; }
 

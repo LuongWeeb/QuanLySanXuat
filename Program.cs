@@ -60,6 +60,9 @@ builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<IMrpService, MrpService>();
 builder.Services.AddScoped<IWorkOrderService, WorkOrderService>();
+builder.Services.AddScoped<ICostingService, CostingService>();
+builder.Services.AddScoped<IQcService, QcService>();
+builder.Services.AddScoped<ITraceabilityService, TraceabilityService>();
 
 var app = builder.Build();
 
@@ -85,6 +88,7 @@ app.MapControllerRoute(
 
 app.MapHub<InventoryHub>("/inventoryHub");
 app.MapHub<ProductionHub>("/productionHub");
+app.MapHub<QualityHub>("/qualityHub");
 
 using (var scope = app.Services.CreateScope())
 {
@@ -93,7 +97,9 @@ using (var scope = app.Services.CreateScope())
     {
         var roleManager = services.GetRequiredService<RoleManager<ApplicationRole>>();
         var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
+        var dbContext = services.GetRequiredService<ApplicationDbContext>();
         await DbSeeder.SeedRolesAndUsersAsync(roleManager, userManager);
+        await DbSeeder.SeedQcInfrastructureAsync(dbContext);
     }
     catch (Exception ex)
     {

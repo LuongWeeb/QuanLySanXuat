@@ -65,6 +65,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<LotGenealogy> LotGenealogies { get; set; }
 
+    public DbSet<QCChecklist> QCChecklists { get; set; }
+
+    public DbSet<QCChecklistItem> QCChecklistItems { get; set; }
+
+    public DbSet<QCInspection> QCInspections { get; set; }
+
+    public DbSet<QCInspectionLine> QCInspectionLines { get; set; }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -337,6 +345,36 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasOne(g => g.InputLot)
             .WithMany()
             .HasForeignKey(g => g.InputLotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<QCChecklist>()
+            .HasMany(c => c.Items)
+            .WithOne(i => i.QCChecklist)
+            .HasForeignKey(i => i.QCChecklistId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<QCInspection>()
+            .HasMany(i => i.Lines)
+            .WithOne(l => l.QCInspection)
+            .HasForeignKey(l => l.QCInspectionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<QCChecklist>()
+            .HasOne(c => c.Product)
+            .WithMany()
+            .HasForeignKey(c => c.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<QCInspection>()
+            .HasOne(i => i.WorkOrder)
+            .WithMany()
+            .HasForeignKey(i => i.WorkOrderId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<QCInspection>()
+            .HasOne(i => i.Lot)
+            .WithMany()
+            .HasForeignKey(i => i.LotId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<Zone>()

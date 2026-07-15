@@ -1,0 +1,227 @@
+using Microsoft.EntityFrameworkCore;
+using WmsMes.Web.Data;
+using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.Domain.Enums;
+using WmsMes.Web.Services;
+
+namespace WmsMes.Tests;
+
+public class QcAndReportingTests
+{
+    private static ApplicationDbContext CreateContext()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        return new ApplicationDbContext(options);
+    }
+
+    [Fact]
+    public async Task CompleteWorkOrderAsync_PutsFinishedLotOnHoldForQc()
+    {
+        await using var context = CreateContext();
+        await SeedManufacturingDataAsync(context);
+
+        var service = new WorkOrderService(context);
+
+        var completed = await service.CompleteWorkOrderAsync(100, "worker");
+
+        Assert.True(completed);
+        var outputLot = await context.Lots.SingleAsync(l => l.WorkOrderId == 100);
+        var outputBalance = await context.StockBalances.SingleAsync(sb => sb.LotId == outputLot.Id);
+        Assert.Equal(0m, outputBalance.QtyAvailable);
+        Assert.Equal(8m, outputBalance.QtyOnHold);
+    }
+
+    [Fact]
+    public async Task SubmitQCInspectionAsync_ReleasesHoldAndSetsUnitCost_WhenInspectionPasses()
+    {
+        await using var context = CreateContext();
+        await SeedQcDataAsync(context);
+
+        var service = new QcService(context, new CostingService(context));
+        var inspection = new QCInspection
+        {
+            WorkOrderId = 100,
+            LotId = 20,
+            Result = QCResult.PASS,
+            Lines =
+            {
+                new QCInspectionLine { ParameterName = "Do am", ValueInspected = "12" }
+            }
+        };
+
+        var submitted = await service.SubmitQCInspectionAsync(inspection, "qc-user");
+
+        Assert.True(submitted);
+        var balance = await context.StockBalances.SingleAsync(sb => sb.LotId == 20);
+        Assert.Equal(8m, balance.QtyAvailable);
+        Assert.Equal(0m, balance.QtyOnHold);
+        Assert.Equal(150m, (await context.Lots.SingleAsync(l => l.Id == 20)).UnitPrice);
+        Assert.True((await context.QCInspections.Include(i => i.Lines).SingleAsync()).Lines.Single().IsOK);
+    }
+
+    [Fact]
+    public async Task SubmitQCInspectionAsync_MovesRejectedHoldToQuarantine()
+    {
+        await using var context = CreateContext();
+        await SeedQcDataAsync(context);
+
+        var service = new QcService(context, new CostingService(context));
+        var inspection = new QCInspection
+        {
+            WorkOrderId = 100,
+            LotId = 20,
+            Result = QCResult.PASS,
+            Note = "Ngoai nguong",
+            Lines =
+            {
+                new QCInspectionLine { ParameterName = "Do am", ValueInspected = "20" }
+            }
+        };
+
+        var submitted = await service.SubmitQCInspectionAsync(inspection, "qc-user");
+
+        Assert.True(submitted);
+        var balance = await context.StockBalances.SingleAsync(sb => sb.LotId == 20);
+        Assert.Equal(0m, balance.QtyAvailable);
+        Assert.Equal(8m, balance.QtyOnHold);
+        Assert.Equal(2, balance.LocationId);
+        Assert.Equal(QCResult.REJECT, (await context.QCInspections.SingleAsync()).Result);
+        Assert.Contains(await context.StockTransfers.Include(t => t.Lines).ToListAsync(),
+            transfer => transfer.Lines.Any(line => line.LotId == 20 && line.ToLocationId == 2 && line.Qty == 8m));
+    }
+
+    [Fact]
+    public async Task CalculateProductionCostAsync_UsesInputLotGenealogyAndActualLotPrices()
+    {
+        await using var context = CreateContext();
+        await SeedQcDataAsync(context);
+
+        var service = new CostingService(context);
+
+        var cost = await service.CalculateProductionCostAsync(100);
+
+        Assert.Equal(150m, cost);
+    }
+
+    [Fact]
+    public async Task GetBackwardTraceAsync_ReturnsRecursiveInputLotTree()
+    {
+        await using var context = CreateContext();
+        await SeedQcDataAsync(context);
+        var service = new TraceabilityService(context);
+
+        var root = await service.GetBackwardTraceAsync("FG-LOT");
+
+        Assert.NotNull(root);
+        Assert.Equal("FG-LOT", root.LotNo);
+        var material = Assert.Single(root.Children);
+        Assert.Equal("MAT-LOT", material.LotNo);
+        Assert.Equal(12m, material.Qty);
+    }
+
+    private static async Task SeedManufacturingDataAsync(ApplicationDbContext context)
+    {
+        await SeedCommonMasterDataAsync(context);
+        context.WorkOrders.Add(new WorkOrder
+        {
+            Id = 100,
+            Code = "WO-001",
+            ProductId = 1,
+            Qty = 8m,
+            DueDate = DateTime.Today,
+            Status = WorkOrderStatus.InProgress
+        });
+        context.WorkOrderSteps.Add(new WorkOrderStep
+        {
+            Id = 1000,
+            WorkOrderId = 100,
+            StepNumber = 10,
+            StepName = "Dong goi",
+            WorkCenterId = 1,
+            QtyOK = 8m,
+            Status = WorkOrderStepStatus.Completed
+        });
+        context.Lots.Add(new Lot { Id = 10, ProductId = 2, LotNo = "MAT-LOT", Qty = 100m, UnitPrice = 100m });
+        context.MaterialReservations.Add(new MaterialReservation
+        {
+            WorkOrderId = 100,
+            ProductId = 2,
+            LotId = 10,
+            LocationId = 1,
+            QtyReserved = 12m
+        });
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 2,
+            LotId = 10,
+            LocationId = 1,
+            QtyReserved = 12m
+        });
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task SeedQcDataAsync(ApplicationDbContext context)
+    {
+        await SeedCommonMasterDataAsync(context);
+        context.WorkOrders.Add(new WorkOrder
+        {
+            Id = 100,
+            Code = "WO-001",
+            ProductId = 1,
+            Qty = 8m,
+            DueDate = DateTime.Today,
+            Status = WorkOrderStatus.Completed
+        });
+        context.Lots.AddRange(
+            new Lot { Id = 10, ProductId = 2, LotNo = "MAT-LOT", Qty = 100m, UnitPrice = 100m },
+            new Lot { Id = 20, ProductId = 1, LotNo = "FG-LOT", Qty = 8m, WorkOrderId = 100 });
+        context.LotGenealogies.Add(new LotGenealogy { OutputLotId = 20, InputLotId = 10, QtyConsumed = 12m });
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 1,
+            LotId = 20,
+            LocationId = 1,
+            QtyAvailable = 0m,
+            QtyOnHold = 8m
+        });
+        context.QCChecklists.Add(new QCChecklist
+        {
+            Id = 1,
+            ProductId = 1,
+            Name = "QC thanh pham",
+            IsActive = true,
+            Items =
+            {
+                new QCChecklistItem
+                {
+                    ParameterName = "Do am",
+                    MinVal = 10m,
+                    MaxVal = 15m,
+                    Unit = "%",
+                    IsRequired = true
+                }
+            }
+        });
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task SeedCommonMasterDataAsync(ApplicationDbContext context)
+    {
+        context.UnitOfMeasures.Add(new UnitOfMeasure { Id = 1, Code = "PCS", Name = "Pieces" });
+        context.Products.AddRange(
+            new Product { Id = 1, Code = "FG-01", Name = "Finished Good", BaseUomId = 1, IsManufactured = true },
+            new Product { Id = 2, Code = "MAT-01", Name = "Material", BaseUomId = 1 });
+        context.Warehouses.Add(new Warehouse { Id = 1, Code = "WH", Name = "Main Warehouse" });
+        context.Zones.AddRange(
+            new Zone { Id = 1, WarehouseId = 1, Code = "FG", Name = "Finished Goods" },
+            new Zone { Id = 2, WarehouseId = 1, Code = "QUAR", Name = "Quarantine" });
+        context.Locations.AddRange(
+            new Location { Id = 1, ZoneId = 1, Code = "FG-01", Name = "Default Finished Goods" },
+            new Location { Id = 2, ZoneId = 2, Code = QcService.QuarantineLocationCode, Name = "QC Quarantine" });
+        context.WorkCenters.Add(new WorkCenter { Id = 1, Code = "WC-01", Name = "Line 1" });
+        await context.SaveChangesAsync();
+    }
+}

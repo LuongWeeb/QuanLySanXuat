@@ -24,6 +24,9 @@ public class Lot
     [Column(TypeName = "decimal(18,2)")]
     public decimal Qty { get; set; }
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal UnitPrice { get; set; }
+
     public int? WorkOrderId { get; set; }
 
     [ForeignKey(nameof(WorkOrderId))]

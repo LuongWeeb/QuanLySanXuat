@@ -269,7 +269,8 @@ public class WorkOrderService : IWorkOrderService
                 ProductId = workOrder.ProductId,
                 LotId = finishedLot.Id,
                 LocationId = 1,
-                QtyAvailable = finalQty
+                QtyAvailable = 0m,
+                QtyOnHold = finalQty
             });
             _context.StockTransactions.Add(new StockTransaction
             {

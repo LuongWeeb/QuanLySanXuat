@@ -109,13 +109,18 @@ public class InventoryService : IInventoryService
                         ProductId = line.ProductId,
                         ManufactureDate = line.ManufactureDate,
                         ExpiryDate = line.ExpiryDate,
-                        Qty = line.Qty
+                        Qty = line.Qty,
+                        UnitPrice = line.UnitPrice
                     };
                     await _context.Lots.AddAsync(lot);
                     await _context.SaveChangesAsync();
                 }
                 else
                 {
+                    var totalQty = lot.Qty + line.Qty;
+                    lot.UnitPrice = totalQty > 0
+                        ? Math.Round(((lot.Qty * lot.UnitPrice) + (line.Qty * line.UnitPrice)) / totalQty, 2, MidpointRounding.AwayFromZero)
+                        : line.UnitPrice;
                     lot.Qty += line.Qty;
                 }
 

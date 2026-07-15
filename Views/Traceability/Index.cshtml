@@ -1,0 +1,119 @@
+@{
+    ViewData["Title"] = "Truy vết phả hệ lô";
+}
+
+<section class="stack-lg">
+    <div class="panel">
+        <div class="d-flex flex-wrap align-items-end justify-content-between gap-3">
+            <div>
+                <p class="eyebrow">Lot traceability</p>
+                <h2 class="section-title">Truy vết phả hệ lô</h2>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <input id="lotInput" class="form-control" style="min-width: 260px" placeholder="Nhap so lo" />
+                <select id="directionInput" class="form-select" style="width: 150px">
+                    <option value="backward">Nguoc</option>
+                    <option value="forward">Xuoi</option>
+                </select>
+                <button class="btn btn-primary" type="button" onclick="loadTraceTree()">Tim</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel trace-panel">
+        <svg id="traceCanvas" role="img" aria-label="So do truy vet lo"></svg>
+        <p id="traceEmpty" class="empty-state">Nhap so lo de xem so do truy vet.</p>
+    </div>
+</section>
+
+@section Scripts {
+    <script>
+        async function loadTraceTree() {
+            const lotNo = document.getElementById("lotInput").value.trim();
+            const direction = document.getElementById("directionInput").value;
+            const svg = document.getElementById("traceCanvas");
+            const empty = document.getElementById("traceEmpty");
+
+            svg.innerHTML = "";
+            if (!lotNo) {
+                empty.textContent = "Nhap so lo de xem so do truy vet.";
+                empty.style.display = "block";
+                return;
+            }
+
+            const response = await fetch(`/Traceability/GetTree?lotNo=${encodeURIComponent(lotNo)}&direction=${direction}`);
+            const data = await response.json();
+            if (!data) {
+                empty.textContent = `Khong tim thay lo ${lotNo}.`;
+                empty.style.display = "block";
+                return;
+            }
+
+            empty.style.display = "none";
+            const nodes = [];
+            flattenTree(data, 0, 0, nodes);
+
+            const rowHeight = 96;
+            const colWidth = 250;
+            const width = Math.max(720, (Math.max(...nodes.map(n => n.depth)) + 1) * colWidth + 80);
+            const height = Math.max(360, nodes.length * rowHeight + 40);
+            svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+            nodes.forEach(node => {
+                if (node.parentIndex !== null) {
+                    const parent = nodes[node.parentIndex];
+                    drawLine(svg, parent.depth * colWidth + 220, parent.row * rowHeight + 58, node.depth * colWidth + 32, node.row * rowHeight + 58);
+                }
+            });
+
+            nodes.forEach(node => drawNode(svg, node.depth * colWidth + 24, node.row * rowHeight + 24, node.item));
+        }
+
+        function flattenTree(item, depth, parentIndex, nodes) {
+            const currentIndex = nodes.length;
+            nodes.push({ item, depth, row: currentIndex, parentIndex: parentIndex ?? null });
+            (item.children || []).forEach(child => flattenTree(child, depth + 1, currentIndex, nodes));
+        }
+
+        function drawLine(svg, x1, y1, x2, y2) {
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", x1);
+            line.setAttribute("y1", y1);
+            line.setAttribute("x2", x2);
+            line.setAttribute("y2", y2);
+            line.setAttribute("stroke", "#94a3b8");
+            line.setAttribute("stroke-width", "2");
+            svg.appendChild(line);
+        }
+
+        function drawNode(svg, x, y, node) {
+            const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            rect.setAttribute("x", x);
+            rect.setAttribute("y", y);
+            rect.setAttribute("width", "200");
+            rect.setAttribute("height", "68");
+            rect.setAttribute("rx", "8");
+            rect.setAttribute("fill", "#ffffff");
+            rect.setAttribute("stroke", "#0f766e");
+            rect.setAttribute("stroke-width", "2");
+            group.appendChild(rect);
+
+            addText(group, x + 14, y + 24, node.lotNo, "700", "#0f172a");
+            addText(group, x + 14, y + 44, `${node.productCode} - ${node.productName}`, "500", "#475569");
+            addText(group, x + 14, y + 60, `SL: ${node.qty}`, "500", "#0f766e");
+            svg.appendChild(group);
+        }
+
+        function addText(group, x, y, value, weight, color) {
+            const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            text.setAttribute("x", x);
+            text.setAttribute("y", y);
+            text.setAttribute("font-size", "13");
+            text.setAttribute("font-weight", weight);
+            text.setAttribute("fill", color);
+            text.textContent = value || "";
+            group.appendChild(text);
+        }
+    </script>
+}
