@@ -51,6 +51,7 @@ builder.Services.AddAuthentication()
 
 builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
 builder.Services.AddScoped<IProductService, ProductService>();
+builder.Services.AddScoped<IInventoryService, InventoryService>();
 
 var app = builder.Build();
 
