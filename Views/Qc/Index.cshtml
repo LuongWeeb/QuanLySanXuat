@@ -1,0 +1,9 @@
+@model IEnumerable<WmsMes.Web.Domain.Entities.Lot>
+@{ ViewData["Title"] = "Kiểm định QC"; }
+<section class="toolbar-row"><div><p class="eyebrow">Quality Control</p><h2>Lô hàng chờ kiểm định</h2></div></section>
+@if (TempData["StatusMessage"] is string message) { <div class="alert alert-info mt-3" role="status">@message</div> }
+<section class="data-panel mt-3"><div class="table-responsive"><table class="table data-table align-middle">
+<thead><tr><th>Số lô</th><th>Sản phẩm</th><th class="text-end">Số lượng lô</th><th>Trạng thái</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead><tbody>
+@foreach(var lot in Model){<tr><td><code>@lot.LotNo</code></td><td>@lot.Product?.Code - @lot.Product?.Name</td><td class="text-end">@lot.Qty.ToString("N2")</td><td><span class="status-pill">On Hold</span></td><td class="text-end"><a class="btn btn-sm btn-primary" asp-action="Inspect" asp-route-lotId="@lot.Id">Kiểm định</a></td></tr>}
+@if(!Model.Any()){<tr><td colspan="5" class="text-center text-muted py-4">Không có lô hàng chờ kiểm định.</td></tr>}
+</tbody></table></div></section>
