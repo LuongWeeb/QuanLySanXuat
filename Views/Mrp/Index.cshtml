@@ -1,17 +1,29 @@
 @model IEnumerable<WmsMes.Web.DTOs.MrpResultDto>?
+@using WmsMes.Web.Domain.Entities
 @{
     ViewData["Title"] = "Lập kế hoạch MRP";
+    var products = ViewData["Products"] as IEnumerable<Product> ?? Enumerable.Empty<Product>();
+    var selectedProductId = ViewData["ProductId"]?.ToString();
 }
 
 <section class="ops-panel">
+    <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
     <form asp-action="Calculate" method="post" class="row g-3 align-items-end">
         <div class="col-md-5">
-            <label class="form-label" for="productId">ID sản phẩm cần sản xuất</label>
-            <input id="productId" type="number" name="productId" class="form-control" min="1" value="@ViewData["ProductId"]" required />
+            <label class="form-label" for="productId">Sản phẩm cần sản xuất</label>
+            <select id="productId" name="productId" class="form-select" required aria-describedby="productId-validation">
+                <option value="">-- Chọn sản phẩm --</option>
+                @foreach (var product in products)
+                {
+                    <option value="@product.Id" selected="@(selectedProductId == product.Id.ToString())">@product.Code - @product.Name</option>
+                }
+            </select>
+            <span id="productId-validation" class="text-danger">@Html.ValidationMessage("productId")</span>
         </div>
         <div class="col-md-4">
             <label class="form-label" for="qty">Số lượng kế hoạch</label>
-            <input id="qty" type="number" name="qty" class="form-control" min="0.01" step="0.01" value="@ViewData["Qty"]" required />
+            <input id="qty" type="number" name="qty" class="form-control" min="0.01" step="0.01" value="@ViewData["Qty"]" required aria-describedby="qty-validation" />
+            <span id="qty-validation" class="text-danger">@Html.ValidationMessage("qty")</span>
         </div>
         <div class="col-md-3">
             <button type="submit" class="btn btn-primary w-100">Tính MRP</button>
