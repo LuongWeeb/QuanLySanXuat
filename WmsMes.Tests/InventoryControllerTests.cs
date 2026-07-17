@@ -103,4 +103,50 @@ public class InventoryControllerTests
         Assert.Equal(4, line.LocationId);
         inventoryService.Verify(service => service.CompleteGoodsReceiptAsync(receipt.Id, "system"), Times.Once);
     }
+
+    [Fact]
+    public async Task CreateReceipt_Post_WhenCompletionReturnsFalse_ShowsErrorAndRemovesDraft()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Create_False_{Guid.NewGuid()}")
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        var inventoryService = new Mock<IInventoryService>();
+        inventoryService.Setup(service => service.CompleteGoodsReceiptAsync(It.IsAny<int>(), "system"))
+            .ReturnsAsync(false);
+        var controller = new InventoryController(context, inventoryService.Object)
+        {
+            TempData = Mock.Of<ITempDataDictionary>()
+        };
+
+        var result = await controller.CreateReceipt(2, 3, "LOT-FALSE", 12.5m, 4.25m, 4);
+
+        Assert.IsType<ViewResult>(result);
+        Assert.False(controller.ModelState.IsValid);
+        Assert.Empty(await context.GoodsReceipts.ToListAsync());
+        Assert.Empty(await context.GoodsReceiptLines.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreateReceipt_Post_WhenCompletionThrows_ShowsErrorAndRemovesDraft()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Create_Exception_{Guid.NewGuid()}")
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        var inventoryService = new Mock<IInventoryService>();
+        inventoryService.Setup(service => service.CompleteGoodsReceiptAsync(It.IsAny<int>(), "system"))
+            .ThrowsAsync(new InvalidOperationException("completion failed"));
+        var controller = new InventoryController(context, inventoryService.Object)
+        {
+            TempData = Mock.Of<ITempDataDictionary>()
+        };
+
+        var result = await controller.CreateReceipt(2, 3, "LOT-ERROR", 12.5m, 4.25m, 4);
+
+        Assert.IsType<ViewResult>(result);
+        Assert.False(controller.ModelState.IsValid);
+        Assert.Empty(await context.GoodsReceipts.ToListAsync());
+        Assert.Empty(await context.GoodsReceiptLines.ToListAsync());
+    }
 }

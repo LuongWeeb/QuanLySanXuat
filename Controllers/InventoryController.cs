@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -111,17 +112,40 @@ public class InventoryController : Controller
             }
         };
 
-        _context.GoodsReceipts.Add(receipt);
-        await _context.SaveChangesAsync();
-
         if (_inventoryService is null)
         {
             throw new InvalidOperationException("IInventoryService is required to complete a goods receipt.");
         }
 
-        await _inventoryService.CompleteGoodsReceiptAsync(receipt.Id, "system");
-        TempData["StatusMessage"] = $"Đã nhập kho lô hàng {lotNo.Trim()} thành công.";
-        return RedirectToAction(nameof(Receipts));
+        await using var transaction = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+
+        try
+        {
+            _context.GoodsReceipts.Add(receipt);
+            await _context.SaveChangesAsync();
+
+            var completed = await _inventoryService.CompleteGoodsReceiptAsync(receipt.Id, "system");
+            if (!completed)
+            {
+                await RollbackReceiptAsync(receipt, transaction);
+                return await ReceiptCompletionErrorAsync("Không thể hoàn tất phiếu nhập kho. Vui lòng thử lại.");
+            }
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync();
+            }
+
+            TempData["StatusMessage"] = $"Đã nhập kho lô hàng {lotNo.Trim()} thành công.";
+            return RedirectToAction(nameof(Receipts));
+        }
+        catch (Exception)
+        {
+            await RollbackReceiptAsync(receipt, transaction);
+            return await ReceiptCompletionErrorAsync("Có lỗi khi hoàn tất phiếu nhập kho. Vui lòng thử lại.");
+        }
     }
 
     private async Task LoadReceiptSelectionsAsync()
@@ -141,5 +165,25 @@ public class InventoryController : Controller
             .OrderBy(location => location.Code)
             .AsNoTracking()
             .ToListAsync();
+    }
+
+    private async Task RollbackReceiptAsync(GoodsReceipt receipt, IDbContextTransaction? transaction)
+    {
+        if (transaction is not null)
+        {
+            await transaction.RollbackAsync();
+            _context.ChangeTracker.Clear();
+            return;
+        }
+
+        _context.GoodsReceipts.Remove(receipt);
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task<IActionResult> ReceiptCompletionErrorAsync(string message)
+    {
+        ModelState.AddModelError(string.Empty, message);
+        await LoadReceiptSelectionsAsync();
+        return View();
     }
 }

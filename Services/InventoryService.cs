@@ -336,7 +336,7 @@ public class InventoryService : IInventoryService
 
     private async Task<IDbContextTransaction?> BeginTransactionIfRelationalAsync()
     {
-        return _context.Database.IsRelational()
+        return _context.Database.IsRelational() && _context.Database.CurrentTransaction is null
             ? await _context.Database.BeginTransactionAsync()
             : null;
     }
