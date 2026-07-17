@@ -88,6 +88,31 @@ public class QcControllerTests
         Assert.False(controller.ModelState.IsValid); service.VerifyNoOtherCalls();
     }
 
+    [Fact]
+    public async Task Submit_OmitsBlankOptionalChecklistItemFromServiceLines()
+    {
+        await using var db=new ApplicationDbContext(Options()); var lot=Lot("L",true); db.StockBalances.Add(Balance(lot,1)); var list=Checklist(lot.Product!,"A",true,"Required"); list.Items.Add(new QCChecklistItem{ParameterName="Optional",IsRequired=false}); db.QCChecklists.Add(list); await db.SaveChangesAsync();
+        QCInspection? captured=null; var service=new Mock<IQcService>(); service.Setup(x=>x.SubmitQCInspectionAsync(It.IsAny<QCInspection>(),"qc")).Callback<QCInspection,string>((x,_)=>captured=x).ReturnsAsync(true);
+        await Controller(db,service.Object,"qc").Inspect(new QcInspectionInputModel{LotId=lot.Id,ChecklistId=list.Id,Result=QCResult.PASS,Measurements=[new(){ChecklistItemId=list.Items.First().Id,Value="12"},new(){ChecklistItemId=list.Items.Last().Id,Value=" "}]});
+        Assert.Equal("Required",Assert.Single(captured!.Lines).ParameterName);
+    }
+
+    [Fact]
+    public async Task Submit_WithoutAuthenticatedUserRejectsAndNeverCallsService()
+    {
+        await using var db=new ApplicationDbContext(Options()); var lot=Lot("L",true); db.StockBalances.Add(Balance(lot,1)); var list=Checklist(lot.Product!,"A",true,"M"); db.QCChecklists.Add(list); await db.SaveChangesAsync();
+        var service=new Mock<IQcService>(); var controller=Controller(db,service.Object);
+        var result=Assert.IsType<RedirectToActionResult>(await controller.Inspect(new QcInspectionInputModel{LotId=lot.Id,ChecklistId=list.Id,Result=QCResult.PASS,Measurements=[new(){ChecklistItemId=list.Items.Single().Id,Value="12"}]}));
+        Assert.Equal(nameof(QcController.Inspect),result.ActionName); service.VerifyNoOtherCalls(); Assert.Contains("danh tính",controller.TempData["StatusMessage"]!.ToString(),StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void InspectView_RendersAllModelStateErrors()
+    {
+        var path=Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,"..","..","..","..","Views","Qc","Inspect.cshtml"));
+        Assert.Contains("asp-validation-summary=\"All\"",File.ReadAllText(path));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

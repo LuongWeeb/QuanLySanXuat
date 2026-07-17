@@ -59,11 +59,19 @@ public class QcController : Controller
             return View(model);
         }
 
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            TempData["StatusMessage"] = "Không thể xác định danh tính người kiểm định. Vui lòng đăng nhập lại.";
+            return RedirectToAction(nameof(Inspect), new { lotId = lot.Id });
+        }
+
         var inspection = new QCInspection { LotId = lot.Id, WorkOrderId = lot.WorkOrderId!.Value, Result = input.Result, Note = input.Note?.Trim() ?? string.Empty,
-            Lines = checklist.Items.Select(item => new QCInspectionLine { ParameterName = item.ParameterName, ValueInspected = values.GetValueOrDefault(item.Id, string.Empty).Trim() }).ToList() };
+            Lines = checklist.Items.Where(item => !string.IsNullOrWhiteSpace(values.GetValueOrDefault(item.Id)))
+                .Select(item => new QCInspectionLine { ParameterName = item.ParameterName, ValueInspected = values[item.Id].Trim() }).ToList() };
         try
         {
-            var success = await _qcService.SubmitQCInspectionAsync(inspection, User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "system");
+            var success = await _qcService.SubmitQCInspectionAsync(inspection, userId);
             TempData["StatusMessage"] = success ? $"Đã lưu kết quả kiểm định lô {lot.LotNo}." : "Không thể lưu kết quả kiểm định. Lô có thể không còn ở trạng thái chờ QC.";
             return success ? RedirectToAction(nameof(Index)) : RedirectToAction(nameof(Inspect), new { lotId = lot.Id });
         }

@@ -44,6 +44,19 @@ public class QcService : IQcService
                 return false;
             }
 
+            if (await _context.QCInspections.AnyAsync(i => i.LotId == inspection.LotId))
+            {
+                return false;
+            }
+
+            var balances = await _context.StockBalances
+                .Where(sb => sb.LotId == inspection.LotId && sb.QtyOnHold > 0)
+                .ToListAsync();
+            if (balances.Count == 0)
+            {
+                return false;
+            }
+
             inspection.InspectionTime = DateTime.UtcNow;
             inspection.InspectorId = userId;
             await EvaluateLinesAsync(inspection, lot.ProductId);
@@ -56,22 +69,21 @@ public class QcService : IQcService
             await _context.QCInspections.AddAsync(inspection);
             await _context.SaveChangesAsync();
 
-            var balance = await _context.StockBalances
-                .FirstOrDefaultAsync(sb => sb.LotId == inspection.LotId && sb.QtyOnHold > 0);
-            if (balance is null)
-            {
-                return false;
-            }
-
             if (inspection.Result == QCResult.PASS)
             {
-                balance.QtyAvailable += balance.QtyOnHold;
-                balance.QtyOnHold = 0m;
+                foreach (var balance in balances)
+                {
+                    balance.QtyAvailable += balance.QtyOnHold;
+                    balance.QtyOnHold = 0m;
+                }
                 lot.UnitPrice = await _costingService.CalculateProductionCostAsync(inspection.WorkOrderId);
             }
             else if (inspection.Result == QCResult.REJECT)
             {
-                await MoveHoldToQuarantineAsync(balance, userId);
+                foreach (var balance in balances)
+                {
+                    await MoveHoldToQuarantineAsync(balance, userId);
+                }
             }
 
             await _context.SaveChangesAsync();

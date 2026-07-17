@@ -94,6 +94,33 @@ public class QcAndReportingTests
     }
 
     [Fact]
+    public async Task SubmitQCInspectionAsync_SecondSubmissionForLotIsRejectedWithoutDuplicate()
+    {
+        await using var context = CreateContext(); await SeedQcDataAsync(context); var service = new QcService(context, new CostingService(context));
+        var first = new QCInspection { WorkOrderId=100,LotId=20,Result=QCResult.PASS,Lines={new QCInspectionLine{ParameterName="Do am",ValueInspected="12"}}};
+        var second = new QCInspection { WorkOrderId=100,LotId=20,Result=QCResult.REJECT,Lines={new QCInspectionLine{ParameterName="Do am",ValueInspected="20"}}};
+        Assert.True(await service.SubmitQCInspectionAsync(first,"qc-1"));
+        Assert.False(await service.SubmitQCInspectionAsync(second,"qc-2"));
+        Assert.Single(await context.QCInspections.ToListAsync());
+    }
+
+    [Fact]
+    public void QcInspectionModel_HasUniqueLotConstraintForConcurrentSubmissions()
+    {
+        using var context=CreateContext(); var entity=context.Model.FindEntityType(typeof(QCInspection))!;
+        Assert.Contains(entity.GetIndexes(),x=>x.IsUnique && x.Properties.Select(p=>p.Name).SequenceEqual(new[]{nameof(QCInspection.LotId)}));
+    }
+
+    [Fact]
+    public async Task SubmitQCInspectionAsync_ReleasesEveryOnHoldBalanceForLot()
+    {
+        await using var context=CreateContext(); await SeedQcDataAsync(context); context.StockBalances.Add(new StockBalance{ProductId=1,LotId=20,LocationId=2,QtyOnHold=2}); await context.SaveChangesAsync();
+        var service=new QcService(context,new CostingService(context)); var inspection=new QCInspection{WorkOrderId=100,LotId=20,Result=QCResult.PASS,Lines={new QCInspectionLine{ParameterName="Do am",ValueInspected="12"}}};
+        Assert.True(await service.SubmitQCInspectionAsync(inspection,"qc"));
+        var balances=await context.StockBalances.Where(x=>x.LotId==20).ToListAsync(); Assert.All(balances,x=>Assert.Equal(0,x.QtyOnHold)); Assert.Equal(10,balances.Sum(x=>x.QtyAvailable));
+    }
+
+    [Fact]
     public async Task CalculateProductionCostAsync_UsesInputLotGenealogyAndActualLotPrices()
     {
         await using var context = CreateContext();

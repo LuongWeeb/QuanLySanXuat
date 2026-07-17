@@ -383,6 +383,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasForeignKey(i => i.LotId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.Entity<QCInspection>()
+            .HasIndex(i => i.LotId)
+            .IsUnique();
+
         builder.Entity<Zone>()
             .HasOne(z => z.Warehouse)
             .WithMany(w => w.Zones)
