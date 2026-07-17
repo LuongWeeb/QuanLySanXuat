@@ -100,6 +100,9 @@ using (var scope = app.Services.CreateScope())
         var dbContext = services.GetRequiredService<ApplicationDbContext>();
         await DbSeeder.SeedRolesAndUsersAsync(roleManager, userManager);
         await DbSeeder.SeedQcInfrastructureAsync(dbContext);
+        await DbSeeder.SeedUnitOfMeasuresAsync(dbContext);
+        await DbSeeder.SeedWarehouseStructureAsync(dbContext);
+        await DbSeeder.SeedComprehensiveSampleDataAsync(dbContext, userManager);
     }
     catch (Exception ex)
     {
