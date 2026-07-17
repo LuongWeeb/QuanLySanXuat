@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging.Abstractions;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -12,16 +13,23 @@ public class InventoryService : IInventoryService
 {
     private readonly ApplicationDbContext _context;
     private readonly IHubContext<InventoryHub>? _hubContext;
+    private readonly ILogger<InventoryService> _logger;
 
     public InventoryService(ApplicationDbContext context)
-        : this(context, null)
+        : this(context, null, null)
     {
     }
 
     public InventoryService(ApplicationDbContext context, IHubContext<InventoryHub>? hubContext)
+        : this(context, hubContext, null)
+    {
+    }
+
+    public InventoryService(ApplicationDbContext context, IHubContext<InventoryHub>? hubContext, ILogger<InventoryService>? logger)
     {
         _context = context;
         _hubContext = hubContext;
+        _logger = logger ?? NullLogger<InventoryService>.Instance;
     }
 
     public async Task<IEnumerable<StockBalance>> GetSuggestedLotsAsync(int productId, decimal qty)
@@ -90,6 +98,7 @@ public class InventoryService : IInventoryService
 
     private async Task<bool> CompleteGoodsReceiptCoreAsync(int receiptId, string userId, bool notify)
     {
+        var hasAmbientTransaction = _context.Database.CurrentTransaction is not null;
         await using var transaction = await BeginTransactionIfRelationalAsync();
         try
         {
@@ -168,14 +177,15 @@ public class InventoryService : IInventoryService
             receipt.Status = DocumentStatus.Completed;
             await _context.SaveChangesAsync();
             await CommitIfRelationalAsync(transaction);
-            if (notify) await NotifyStockChangedAsync();
-            return true;
         }
         catch
         {
             await RollbackIfRelationalAsync(transaction);
             throw;
         }
+
+        if (notify && !hasAmbientTransaction) await NotifyStockChangedSafelyAsync();
+        return true;
     }
 
     public Task<bool> CompleteGoodsIssueAsync(int issueId, string userId) =>
@@ -186,6 +196,7 @@ public class InventoryService : IInventoryService
 
     private async Task<bool> CompleteGoodsIssueCoreAsync(int issueId, string userId, bool notify)
     {
+        var hasAmbientTransaction = _context.Database.CurrentTransaction is not null;
         await using var transaction = await BeginTransactionIfRelationalAsync();
         try
         {
@@ -247,14 +258,16 @@ public class InventoryService : IInventoryService
             issue.Status = DocumentStatus.Completed;
             await _context.SaveChangesAsync();
             await CommitIfRelationalAsync(transaction);
-            if (notify) await NotifyStockChangedAsync();
-            return true;
         }
         catch
         {
             await RollbackIfRelationalAsync(transaction);
             throw;
         }
+
+
+        if (notify && !hasAmbientTransaction) await NotifyStockChangedSafelyAsync();
+        return true;
     }
 
     public async Task<bool> StartStocktakeAsync(int stocktakeId)
@@ -392,6 +405,18 @@ public class InventoryService : IInventoryService
         if (_hubContext is not null)
         {
             await _hubContext.Clients.All.SendAsync("ReceiveStockUpdate");
+        }
+    }
+
+    private async Task NotifyStockChangedSafelyAsync()
+    {
+        try
+        {
+            await NotifyStockChangedAsync();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Inventory operation committed but realtime notification failed.");
         }
     }
 }

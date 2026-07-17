@@ -1,13 +1,113 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
+using Moq;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Services;
+using WmsMes.Web.Hubs;
 
 namespace WmsMes.Tests;
 
 public class InventoryServiceTests
 {
+    [Fact]
+    public async Task CompleteGoodsReceiptAsync_WhenPostCommitHubFails_ReturnsSuccessWithDurableInventory()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.GoodsReceipts.Add(new GoodsReceipt { Id = 1, ReceiptNo = "GR-HUB", Status = DocumentStatus.Draft,
+            Lines = { new GoodsReceiptLine { ProductId = 1, LocationId = 1, LotNo = "LOT-HUB", Qty = 4 } } });
+        await context.SaveChangesAsync();
+        var (hub, logger, client) = ThrowingHub();
+
+        var completed = await new InventoryService(context, hub.Object, logger.Object)
+            .CompleteGoodsReceiptAsync(1, "user-1");
+
+        Assert.True(completed);
+        context.ChangeTracker.Clear();
+        Assert.Equal(DocumentStatus.Completed, (await context.GoodsReceipts.SingleAsync()).Status);
+        Assert.Equal(4, (await context.StockBalances.SingleAsync()).QtyAvailable);
+        Assert.Single(await context.StockTransactions.ToListAsync());
+        client.Verify(x => x.SendCoreAsync("ReceiveStockUpdate", It.IsAny<object?[]>(), default), Times.Once);
+        VerifyWarning(logger);
+    }
+
+    [Fact]
+    public async Task CompleteGoodsIssueAsync_WhenPostCommitHubFails_ReturnsSuccessWithDurableInventory()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.Customers.Add(new Customer { Id = 1, Code = "C", Name = "Customer" });
+        context.Lots.Add(new Lot { Id = 1, ProductId = 1, LotNo = "LOT", Qty = 5 });
+        context.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 5 });
+        context.GoodsIssues.Add(new GoodsIssue { Id = 1, IssueNo = "GI-HUB", CustomerId = 1, Status = DocumentStatus.Draft,
+            Lines = { new GoodsIssueLine { ProductId = 1, LotId = 1, LocationId = 1, Qty = 2 } } });
+        await context.SaveChangesAsync();
+        var (hub, logger, client) = ThrowingHub();
+
+        var completed = await new InventoryService(context, hub.Object, logger.Object)
+            .CompleteGoodsIssueAsync(1, "user-1");
+
+        Assert.True(completed);
+        context.ChangeTracker.Clear();
+        Assert.Equal(DocumentStatus.Completed, (await context.GoodsIssues.SingleAsync()).Status);
+        Assert.Equal(3, (await context.StockBalances.SingleAsync()).QtyAvailable);
+        Assert.Single(await context.StockTransactions.ToListAsync());
+        client.Verify(x => x.SendCoreAsync("ReceiveStockUpdate", It.IsAny<object?[]>(), default), Times.Once);
+        VerifyWarning(logger);
+    }
+
+    [Fact]
+    public async Task CompleteGoodsReceiptAsync_WithAmbientTransaction_DefersSingleNotificationToOwner()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.GoodsReceipts.Add(new GoodsReceipt { Id = 1, ReceiptNo = "GR-AMBIENT", Status = DocumentStatus.Draft,
+            Lines = { new GoodsReceiptLine { ProductId = 1, LocationId = 1, LotNo = "LOT-AMBIENT", Qty = 1 } } });
+        await context.SaveChangesAsync();
+        var client = new Mock<IClientProxy>();
+        var clients = new Mock<IHubClients>(); clients.SetupGet(x => x.All).Returns(client.Object);
+        var hub = new Mock<IHubContext<InventoryHub>>(); hub.SetupGet(x => x.Clients).Returns(clients.Object);
+        var service = new InventoryService(context, hub.Object);
+        await using var transaction = await context.Database.BeginTransactionAsync();
+
+        Assert.True(await service.CompleteGoodsReceiptAsync(1, "user"));
+        client.Verify(x => x.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), default), Times.Never);
+        await transaction.CommitAsync();
+        await service.NotifyStockChangedAsync();
+
+        client.Verify(x => x.SendCoreAsync("ReceiveStockUpdate", It.IsAny<object?[]>(), default), Times.Once);
+    }
+
+    private static (Mock<IHubContext<InventoryHub>> hub, Mock<ILogger<InventoryService>> logger, Mock<IClientProxy> client) ThrowingHub()
+    {
+        var client = new Mock<IClientProxy>();
+        client.Setup(x => x.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("hub unavailable"));
+        var clients = new Mock<IHubClients>(); clients.SetupGet(x => x.All).Returns(client.Object);
+        var hub = new Mock<IHubContext<InventoryHub>>(); hub.SetupGet(x => x.Clients).Returns(clients.Object);
+        return (hub, new Mock<ILogger<InventoryService>>(), client);
+    }
+
+    private static void VerifyWarning(Mock<ILogger<InventoryService>> logger) =>
+        logger.Verify(x => x.Log(LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+
     [Fact]
     public async Task GetSuggestedLotsAsync_UsesFefoAndSplitsRequestedQuantity()
     {

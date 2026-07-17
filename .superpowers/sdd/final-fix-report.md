@@ -46,3 +46,10 @@
 ## Verification
 
 Final focused/full/build results are recorded in the handoff after fresh verification.
+
+## Standalone inventory notification follow-up
+
+- Standalone receipt and issue completion now finish and commit the owned relational transaction before entering best-effort SignalR notification handling.
+- A hub exception is caught and logged outside the transactional try/catch, so it cannot trigger rollback-after-commit or change the successful business result.
+- When an ambient transaction already exists, the service emits no pre-commit event. The transaction owner performs exactly one explicit notification after commit.
+- Relational SQLite tests with a throwing hub prove receipt and issue inventory, document status, and stock transactions remain durable while each method returns success. A separate ambient-transaction test proves notification is deferred and emitted once by the owner.
