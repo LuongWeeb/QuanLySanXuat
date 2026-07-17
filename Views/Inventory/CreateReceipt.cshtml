@@ -1,0 +1,59 @@
+@{
+    ViewData["Title"] = "Tạo phiếu nhập kho";
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Goods Receipt</p>
+        <h2>Tạo Phiếu Nhập kho mới</h2>
+    </div>
+</section>
+
+<div class="ops-panel mt-3 col-md-8">
+    <form asp-action="CreateReceipt" method="post">
+        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+        <div class="mb-3">
+            <label for="supplierId" class="form-label">Nhà cung cấp</label>
+            <select id="supplierId" name="supplierId" class="form-select" required>
+                @foreach (var supplier in ViewBag.Suppliers)
+                {
+                    <option value="@supplier.Id">@supplier.Name</option>
+                }
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="productId" class="form-label">Nguyên vật liệu/Sản phẩm</label>
+            <select id="productId" name="productId" class="form-select" required>
+                @foreach (var product in ViewBag.Products)
+                {
+                    <option value="@product.Id">@product.Code - @product.Name</option>
+                }
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="lotNo" class="form-label">Số lô (Lot No)</label>
+            <input id="lotNo" name="lotNo" class="form-control" required />
+        </div>
+        <div class="mb-3">
+            <label for="qty" class="form-label">Số lượng</label>
+            <input id="qty" name="qty" type="number" class="form-control" min="0.01" step="0.01" required />
+        </div>
+        <div class="mb-3">
+            <label for="unitPrice" class="form-label">Đơn giá</label>
+            <input id="unitPrice" name="unitPrice" type="number" class="form-control" min="0" step="0.01" required />
+        </div>
+        <div class="mb-3">
+            <label for="locationId" class="form-label">Vị trí lưu trữ</label>
+            <select id="locationId" name="locationId" class="form-select" required>
+                @foreach (var location in ViewBag.Locations)
+                {
+                    <option value="@location.Id">@location.Code</option>
+                }
+            </select>
+        </div>
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">Xác nhận nhập kho</button>
+            <a class="btn btn-outline-secondary" asp-action="Receipts">Hủy</a>
+        </div>
+    </form>
+</div>
