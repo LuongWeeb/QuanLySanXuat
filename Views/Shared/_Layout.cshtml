@@ -21,13 +21,24 @@
             </span>
         </a>
         <nav class="side-nav">
-            <a asp-controller="Home" asp-action="Index">Tổng quan</a>
-            <a asp-controller="Inventory" asp-action="Index">Tồn kho realtime</a>
-            <a asp-controller="Mrp" asp-action="Index">Lập kế hoạch MRP</a>
+            <div class="nav-section-title">Tổng quan</div>
+            <a asp-controller="Home" asp-action="Index">Dashboard</a>
+
+            <div class="nav-section-title">Quản lý Kho (WMS)</div>
+            <a asp-controller="Inventory" asp-action="Index">Số dư tồn kho</a>
+            <a asp-controller="Inventory" asp-action="Receipts">Nhập kho</a>
+            <a asp-controller="Inventory" asp-action="Issues">Xuất kho</a>
+            <a asp-controller="Warehouse" asp-action="Index">Kho & Vị trí</a>
+
+            <div class="nav-section-title">Quản lý Sản xuất (MES)</div>
+            <a asp-controller="WorkOrder" asp-action="Index">Lệnh sản xuất</a>
             <a asp-controller="Worker" asp-action="Index">Trạm vận hành</a>
-            <a asp-controller="Traceability" asp-action="Index">Truy vết lô</a>
-            <a asp-controller="Product" asp-action="Index">Sản phẩm</a>
-            <a asp-controller="Warehouse" asp-action="Index">Kho & vị trí</a>
+            <a asp-controller="Mrp" asp-action="Index">Lập kế hoạch MRP</a>
+            <a asp-controller="Product" asp-action="Index">Sản phẩm (SKU)</a>
+
+            <div class="nav-section-title">Kiểm soát Chất lượng & Truy vết</div>
+            <a asp-controller="Qc" asp-action="Index">Kiểm định chất lượng</a>
+            <a asp-controller="Traceability" asp-action="Index">Truy vết lô hàng</a>
         </nav>
     </aside>
     <div class="app-main">
