@@ -157,6 +157,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasIndex(i => i.IssueNo)
             .IsUnique();
 
+        builder.Entity<GoodsIssue>()
+            .HasOne(issue => issue.Customer)
+            .WithMany(customer => customer.GoodsIssues)
+            .HasForeignKey(issue => issue.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.Entity<GoodsReceiptLine>()
             .HasOne(line => line.GoodsReceipt)
             .WithMany(receipt => receipt.Lines)

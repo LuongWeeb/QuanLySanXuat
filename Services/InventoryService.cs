@@ -188,18 +188,36 @@ public class InventoryService : IInventoryService
 
             foreach (var line in issue.Lines)
             {
-                var balance = await _context.StockBalances
-                    .FirstOrDefaultAsync(sb =>
-                        sb.ProductId == line.ProductId &&
-                        sb.LotId == line.LotId &&
-                        sb.LocationId == line.LocationId);
-
-                if (balance is null || balance.QtyAvailable < line.Qty)
+                if (_context.Database.IsRelational())
                 {
-                    throw new InvalidOperationException("Not enough available stock. Negative stock is not allowed.");
+                    var updated = await _context.StockBalances
+                        .Where(sb =>
+                            sb.ProductId == line.ProductId &&
+                            sb.LotId == line.LotId &&
+                            sb.LocationId == line.LocationId &&
+                            sb.QtyAvailable >= line.Qty)
+                        .ExecuteUpdateAsync(setters => setters
+                            .SetProperty(sb => sb.QtyAvailable, sb => sb.QtyAvailable - line.Qty));
+                    if (updated == 0)
+                    {
+                        throw new InvalidOperationException("Not enough available stock. Negative stock is not allowed.");
+                    }
                 }
+                else
+                {
+                    var balance = await _context.StockBalances
+                        .FirstOrDefaultAsync(sb =>
+                            sb.ProductId == line.ProductId &&
+                            sb.LotId == line.LotId &&
+                            sb.LocationId == line.LocationId);
 
-                balance.QtyAvailable -= line.Qty;
+                    if (balance is null || balance.QtyAvailable < line.Qty)
+                    {
+                        throw new InvalidOperationException("Not enough available stock. Negative stock is not allowed.");
+                    }
+
+                    balance.QtyAvailable -= line.Qty;
+                }
 
                 await _context.StockTransactions.AddAsync(new StockTransaction
                 {

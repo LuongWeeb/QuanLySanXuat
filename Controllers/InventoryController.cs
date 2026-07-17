@@ -57,6 +57,7 @@ public class InventoryController : Controller
     public async Task<IActionResult> Issues()
     {
         var issues = await _context.GoodsIssues
+            .Include(issue => issue.Customer)
             .Include(issue => issue.Lines)
                 .ThenInclude(line => line.Product)
             .Include(issue => issue.Lines)
@@ -81,17 +82,43 @@ public class InventoryController : Controller
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Roles = "Admin,Warehouse,Manager")]
-    public async Task<IActionResult> CreateIssue(int productId, int lotId, decimal qty, int locationId)
+    public async Task<IActionResult> CreateIssue(int customerId, int productId, int lotId, decimal qty, int locationId)
     {
+        var customerIsActive = await _context.Customers
+            .AsNoTracking()
+            .AnyAsync(customer => customer.Id == customerId && customer.IsActive);
+        if (!customerIsActive)
+        {
+            ModelState.AddModelError(nameof(customerId), "Khách hàng không hợp lệ hoặc đã ngừng hoạt động.");
+        }
+
         if (qty <= 0)
         {
             ModelState.AddModelError(nameof(qty), "Số lượng phải lớn hơn 0.");
         }
 
         var balance = await _context.StockBalances
+            .Include(item => item.Product)
+            .Include(item => item.Lot)
+            .Include(item => item.Location)
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.ProductId == productId && item.LotId == lotId && item.LocationId == locationId);
-        if (balance is null || balance.QtyAvailable < qty)
+        if (balance?.Product is null || !balance.Product.IsActive)
+        {
+            ModelState.AddModelError(nameof(productId), "Sản phẩm không hợp lệ hoặc đã ngừng hoạt động.");
+        }
+
+        if (balance?.Lot is null || balance.Lot.ProductId != productId)
+        {
+            ModelState.AddModelError(nameof(lotId), "Lô hàng không thuộc sản phẩm đã chọn.");
+        }
+
+        if (balance?.Location is null || !balance.Location.IsActive)
+        {
+            ModelState.AddModelError(nameof(locationId), "Vị trí không hợp lệ hoặc đã ngừng hoạt động.");
+        }
+
+        if (qty > 0 && (balance is null || balance.QtyAvailable < qty))
         {
             ModelState.AddModelError(nameof(qty), "Số lượng xuất vượt quá tồn kho khả dụng của lô tại vị trí đã chọn.");
         }
@@ -112,6 +139,7 @@ public class InventoryController : Controller
             IssueNo = $"GI-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
             IssueDate = DateTime.UtcNow,
             Status = DocumentStatus.Draft,
+            CustomerId = customerId,
             Lines =
             {
                 new GoodsIssueLine { ProductId = productId, LotId = lotId, Qty = qty, LocationId = locationId }
@@ -269,10 +297,16 @@ public class InventoryController : Controller
             .Include(balance => balance.Location)
             .Where(balance => balance.QtyAvailable > 0 && balance.Product!.IsActive && balance.Location!.IsActive)
             .OrderBy(balance => balance.Product!.Code)
-            .ThenBy(balance => balance.Lot!.ExpiryDate ?? DateTime.MaxValue)
-            .ThenBy(balance => balance.Lot!.ManufactureDate ?? DateTime.MaxValue)
+            .ThenBy(balance => balance.Product!.ShelfLifeDays.HasValue
+                ? balance.Lot!.ExpiryDate ?? DateTime.MaxValue
+                : DateTime.MinValue)
             .ThenBy(balance => balance.LotId)
             .ThenBy(balance => balance.Location!.Code)
+            .AsNoTracking()
+            .ToListAsync();
+        ViewBag.Customers = await _context.Customers
+            .Where(customer => customer.IsActive)
+            .OrderBy(customer => customer.Code)
             .AsNoTracking()
             .ToListAsync();
     }

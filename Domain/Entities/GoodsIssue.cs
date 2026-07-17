@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using WmsMes.Web.Domain.Enums;
 
 namespace WmsMes.Web.Domain.Entities;
@@ -16,6 +17,12 @@ public class GoodsIssue
 
     [Required]
     public DocumentStatus Status { get; set; } = DocumentStatus.Draft;
+
+    [Required]
+    public int CustomerId { get; set; }
+
+    [ForeignKey(nameof(CustomerId))]
+    public virtual Customer? Customer { get; set; }
 
     public virtual ICollection<GoodsIssueLine> Lines { get; set; } = new List<GoodsIssueLine>();
 }

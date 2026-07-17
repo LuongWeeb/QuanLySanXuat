@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using Microsoft.Data.Sqlite;
 using Moq;
 using WmsMes.Web.Controllers;
 using WmsMes.Web.Data;
@@ -19,8 +20,8 @@ public class InventoryControllerTests
             .Options;
         await using var context = new ApplicationDbContext(options);
         context.GoodsIssues.AddRange(
-            new GoodsIssue { IssueNo = "GI-OLD", IssueDate = new DateTime(2026, 1, 1), Lines = { new GoodsIssueLine { Product = new Product { Code = "P-OLD", Name = "Old" }, Lot = new Lot { LotNo = "L-OLD", ProductId = 1 }, Location = new Location { Code = "A", Name = "A", Zone = new Zone { Code = "Z", Name = "Z" } }, Qty = 1 } } },
-            new GoodsIssue { IssueNo = "GI-NEW", IssueDate = new DateTime(2026, 2, 1), Lines = { new GoodsIssueLine { Product = new Product { Code = "P-NEW", Name = "New" }, Lot = new Lot { LotNo = "L-NEW", ProductId = 2 }, Location = new Location { Code = "B", Name = "B", Zone = new Zone { Code = "Z2", Name = "Z2" } }, Qty = 2 } } });
+            new GoodsIssue { IssueNo = "GI-OLD", IssueDate = new DateTime(2026, 1, 1), Customer = new Customer { Code = "C-OLD", Name = "Old Customer" }, Lines = { new GoodsIssueLine { Product = new Product { Code = "P-OLD", Name = "Old" }, Lot = new Lot { LotNo = "L-OLD", ProductId = 1 }, Location = new Location { Code = "A", Name = "A", Zone = new Zone { Code = "Z", Name = "Z" } }, Qty = 1 } } },
+            new GoodsIssue { IssueNo = "GI-NEW", IssueDate = new DateTime(2026, 2, 1), Customer = new Customer { Code = "C-NEW", Name = "New Customer" }, Lines = { new GoodsIssueLine { Product = new Product { Code = "P-NEW", Name = "New" }, Lot = new Lot { LotNo = "L-NEW", ProductId = 2 }, Location = new Location { Code = "B", Name = "B", Zone = new Zone { Code = "Z2", Name = "Z2" } }, Qty = 2 } } });
         await context.SaveChangesAsync();
         var controller = new InventoryController(context);
 
@@ -62,18 +63,18 @@ public class InventoryControllerTests
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"Inv_Issue_Post_{Guid.NewGuid()}").Options;
         await using var context = new ApplicationDbContext(options);
-        context.StockBalances.Add(new StockBalance { ProductId = 3, LotId = 4, LocationId = 5, QtyAvailable = 10 });
-        await context.SaveChangesAsync();
+        var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
         service.Setup(item => item.CompleteGoodsIssueAsync(It.IsAny<int>(), "system")).ReturnsAsync(true);
         var controller = new InventoryController(context, service.Object) { TempData = Mock.Of<ITempDataDictionary>() };
 
-        var result = await controller.CreateIssue(3, 4, 2.5m, 5);
+        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 2.5m, seeded.locationId);
 
         Assert.Equal(nameof(InventoryController.Issues), Assert.IsType<RedirectToActionResult>(result).ActionName);
         var issue = await context.GoodsIssues.Include(item => item.Lines).SingleAsync();
+        Assert.Equal(seeded.customerId, issue.CustomerId);
         var line = Assert.Single(issue.Lines);
-        Assert.Equal((3, 4, 2.5m, 5), (line.ProductId, line.LotId, line.Qty, line.LocationId));
+        Assert.Equal((seeded.productId, seeded.lotId, 2.5m, seeded.locationId), (line.ProductId, line.LotId, line.Qty, line.LocationId));
         service.Verify(item => item.CompleteGoodsIssueAsync(issue.Id, "system"), Times.Once);
     }
 
@@ -85,12 +86,11 @@ public class InventoryControllerTests
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"Inv_Issue_Stock_{Guid.NewGuid()}").Options;
         await using var context = new ApplicationDbContext(options);
-        context.StockBalances.Add(new StockBalance { ProductId = 3, LotId = 4, LocationId = 5, QtyAvailable = 10 });
-        await context.SaveChangesAsync();
+        var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
         var controller = new InventoryController(context, service.Object);
 
-        var result = await controller.CreateIssue(3, 4, qty, 5);
+        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, qty, seeded.locationId);
 
         Assert.IsType<ViewResult>(result);
         Assert.False(controller.ModelState.IsValid);
@@ -106,19 +106,194 @@ public class InventoryControllerTests
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"Inv_Issue_Fail_{Guid.NewGuid()}").Options;
         await using var context = new ApplicationDbContext(options);
-        context.StockBalances.Add(new StockBalance { ProductId = 3, LotId = 4, LocationId = 5, QtyAvailable = 10 });
-        await context.SaveChangesAsync();
+        var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
         var setup = service.Setup(item => item.CompleteGoodsIssueAsync(It.IsAny<int>(), "system"));
         if (throws) setup.ThrowsAsync(new InvalidOperationException("failed")); else setup.ReturnsAsync(false);
         var controller = new InventoryController(context, service.Object);
 
-        var result = await controller.CreateIssue(3, 4, 2, 5);
+        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 2, seeded.locationId);
 
         Assert.IsType<ViewResult>(result);
         Assert.False(controller.ModelState.IsValid);
         Assert.Empty(await context.GoodsIssues.ToListAsync());
         Assert.Empty(await context.GoodsIssueLines.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreateIssue_Get_LoadsActiveCustomersAndUsesCanonicalFefoFifoOrder()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Issue_Policy_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        context.Customers.AddRange(
+            new Customer { Code = "C-A", Name = "Active", IsActive = true },
+            new Customer { Code = "C-X", Name = "Inactive", IsActive = false });
+        var fefo = new Product { Code = "FEFO", Name = "FEFO", ShelfLifeDays = 30 };
+        var fifo = new Product { Code = "FIFO", Name = "FIFO", ShelfLifeDays = null };
+        var location = new Location { Code = "L", Name = "L", Zone = new Zone { Code = "Z", Name = "Z" } };
+        context.StockBalances.AddRange(
+            new StockBalance { Product = fefo, Lot = new Lot { LotNo = "FEFO-LATE", Product = fefo, ExpiryDate = new DateTime(2027, 1, 1) }, Location = location, QtyAvailable = 1 },
+            new StockBalance { Product = fefo, Lot = new Lot { LotNo = "FEFO-EARLY", Product = fefo, ExpiryDate = new DateTime(2026, 1, 1) }, Location = location, QtyAvailable = 1 },
+            new StockBalance { Product = fifo, Lot = new Lot { Id = 20, LotNo = "FIFO-20", Product = fifo, ExpiryDate = new DateTime(2025, 1, 1) }, Location = location, QtyAvailable = 1 },
+            new StockBalance { Product = fifo, Lot = new Lot { Id = 10, LotNo = "FIFO-10", Product = fifo, ExpiryDate = new DateTime(2028, 1, 1) }, Location = location, QtyAvailable = 1 });
+        await context.SaveChangesAsync();
+        var controller = new InventoryController(context);
+
+        await controller.CreateIssue();
+
+        object customersObject = controller.ViewBag.Customers;
+        Assert.Equal("C-A", Assert.Single(Assert.IsAssignableFrom<IEnumerable<Customer>>(customersObject)).Code);
+        object balancesObject = controller.ViewBag.AvailableBalances;
+        var balances = Assert.IsAssignableFrom<IEnumerable<StockBalance>>(balancesObject).ToList();
+        Assert.Equal(new[] { "FEFO-EARLY", "FEFO-LATE" }, balances.Where(x => x.Product!.Code == "FEFO").Select(x => x.Lot!.LotNo));
+        Assert.Equal(new[] { "FIFO-10", "FIFO-20" }, balances.Where(x => x.Product!.Code == "FIFO").Select(x => x.Lot!.LotNo));
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task CreateIssue_Post_RejectsInactiveProductOrLocationWithKeyedError(bool inactiveProduct, bool inactiveLocation)
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Issue_Inactive_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        var product = new Product { Code = "P", Name = "P", IsActive = !inactiveProduct };
+        var lot = new Lot { LotNo = "LOT", Product = product };
+        var location = new Location { Code = "L", Name = "L", IsActive = !inactiveLocation, Zone = new Zone { Code = "Z", Name = "Z" } };
+        context.Customers.Add(new Customer { Id = 6, Code = "C", Name = "C" });
+        context.StockBalances.Add(new StockBalance { Product = product, Lot = lot, Location = location, QtyAvailable = 10 });
+        await context.SaveChangesAsync();
+        var controller = new InventoryController(context, Mock.Of<IInventoryService>());
+
+        var result = await controller.CreateIssue(6, product.Id, lot.Id, 1, location.Id);
+
+        Assert.IsType<ViewResult>(result);
+        var key = inactiveProduct ? "productId" : "locationId";
+        Assert.True(controller.ModelState.ContainsKey(key));
+        Assert.Empty(context.GoodsIssues);
+    }
+
+    [Fact]
+    public async Task CreateIssue_Post_RejectsForgedLotProductTupleWithKeyedError()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Issue_Forged_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        var product = new Product { Code = "P", Name = "P" };
+        var other = new Product { Code = "OTHER", Name = "Other" };
+        var location = new Location { Code = "L", Name = "L", Zone = new Zone { Code = "Z", Name = "Z" } };
+        var lot = new Lot { LotNo = "LOT", Product = other };
+        context.Customers.Add(new Customer { Id = 6, Code = "C", Name = "C" });
+        context.StockBalances.Add(new StockBalance { Product = other, Lot = lot, Location = location, QtyAvailable = 10 });
+        await context.SaveChangesAsync();
+        var controller = new InventoryController(context, Mock.Of<IInventoryService>());
+
+        var result = await controller.CreateIssue(6, product.Id, lot.Id, 1, location.Id);
+
+        Assert.IsType<ViewResult>(result);
+        Assert.True(controller.ModelState.ContainsKey("lotId"));
+        Assert.Empty(context.GoodsIssues);
+    }
+
+    [Fact]
+    public async Task CreateIssue_Post_WithSqlite_CommitsIssueCustomerAndStockDeductionAtomically()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var seeded = await SeedIssueStockAsync(context);
+        var controller = new InventoryController(context, new InventoryService(context)) { TempData = Mock.Of<ITempDataDictionary>() };
+
+        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 3, seeded.locationId);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        context.ChangeTracker.Clear();
+        Assert.Equal(seeded.customerId, (await context.GoodsIssues.SingleAsync()).CustomerId);
+        Assert.Equal(7, (await context.StockBalances.SingleAsync()).QtyAvailable);
+        Assert.Single(await context.StockTransactions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreateIssue_Post_WithSqlite_RollsBackDraftWhenCompletionFails()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var seeded = await SeedIssueStockAsync(context);
+        var service = new Mock<IInventoryService>();
+        service.Setup(x => x.CompleteGoodsIssueAsync(It.IsAny<int>(), "system")).ReturnsAsync(false);
+        var controller = new InventoryController(context, service.Object);
+
+        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 3, seeded.locationId);
+
+        Assert.IsType<ViewResult>(result);
+        context.ChangeTracker.Clear();
+        Assert.Empty(await context.GoodsIssues.ToListAsync());
+        Assert.Equal(10, (await context.StockBalances.SingleAsync()).QtyAvailable);
+    }
+
+    [Fact]
+    public async Task CompleteGoodsIssue_WithStaleRelationalContext_PreventsOversell()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        int firstIssueId;
+        int secondIssueId;
+        await using (var seedContext = new ApplicationDbContext(options))
+        {
+            await seedContext.Database.EnsureCreatedAsync();
+            var seeded = await SeedIssueStockAsync(seedContext);
+            var first = NewIssue(seeded, "GI-FIRST", 7);
+            var second = NewIssue(seeded, "GI-SECOND", 7);
+            seedContext.GoodsIssues.AddRange(first, second);
+            await seedContext.SaveChangesAsync();
+            firstIssueId = first.Id;
+            secondIssueId = second.Id;
+        }
+
+        await using var staleContext = new ApplicationDbContext(options);
+        _ = await staleContext.StockBalances.SingleAsync();
+        await using (var freshContext = new ApplicationDbContext(options))
+        {
+            Assert.True(await new InventoryService(freshContext).CompleteGoodsIssueAsync(firstIssueId, "first"));
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new InventoryService(staleContext).CompleteGoodsIssueAsync(secondIssueId, "second"));
+
+        staleContext.ChangeTracker.Clear();
+        Assert.Equal(3, (await staleContext.StockBalances.SingleAsync()).QtyAvailable);
+        Assert.Equal(WmsMes.Web.Domain.Enums.DocumentStatus.Draft, (await staleContext.GoodsIssues.FindAsync(secondIssueId))!.Status);
+        Assert.Single(await staleContext.StockTransactions.ToListAsync());
+    }
+
+    private static GoodsIssue NewIssue((int customerId, int productId, int lotId, int locationId) seeded, string issueNo, decimal qty)
+    {
+        return new GoodsIssue
+        {
+            IssueNo = issueNo,
+            CustomerId = seeded.customerId,
+            Lines = { new GoodsIssueLine { ProductId = seeded.productId, LotId = seeded.lotId, LocationId = seeded.locationId, Qty = qty } }
+        };
+    }
+
+    private static async Task<(int customerId, int productId, int lotId, int locationId)> SeedIssueStockAsync(ApplicationDbContext context)
+    {
+        var customer = new Customer { Code = "C", Name = "Customer" };
+        var uom = new UnitOfMeasure { Code = "EA", Name = "Each" };
+        var product = new Product { Code = "P", Name = "Product", BaseUom = uom };
+        var lot = new Lot { LotNo = "LOT", Product = product, Qty = 10 };
+        var location = new Location { Code = "L", Name = "Location", Zone = new Zone { Code = "Z", Name = "Zone", Warehouse = new Warehouse { Code = "W", Name = "Warehouse" } } };
+        context.Customers.Add(customer);
+        context.StockBalances.Add(new StockBalance { Product = product, Lot = lot, Location = location, QtyAvailable = 10 });
+        await context.SaveChangesAsync();
+        return (customer.Id, product.Id, lot.Id, location.Id);
     }
 
     [Fact]

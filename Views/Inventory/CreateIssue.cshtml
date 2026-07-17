@@ -2,6 +2,7 @@
 @{
     ViewData["Title"] = "Tạo phiếu xuất kho";
     var balances = (IEnumerable<StockBalance>)ViewBag.AvailableBalances;
+    var customers = (IEnumerable<Customer>)ViewBag.Customers;
 }
 
 <section class="toolbar-row"><div><p class="eyebrow">Goods Issue</p><h2>Tạo Phiếu Xuất kho mới</h2></div></section>
@@ -9,6 +10,17 @@
 <div class="ops-panel mt-3 col-md-8">
     <form asp-action="CreateIssue" method="post">
         <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+        <div class="mb-3">
+            <label for="customerId" class="form-label">Khách hàng</label>
+            <select id="customerId" name="customerId" class="form-select" required>
+                <option value="">-- Chọn khách hàng --</option>
+                @foreach (var customer in customers)
+                {
+                    <option value="@customer.Id">@customer.Code - @customer.Name</option>
+                }
+            </select>
+            @Html.ValidationMessage("customerId", null, new { @class = "text-danger" })
+        </div>
         <div class="mb-3">
             <label for="stockSelection" class="form-label">Sản phẩm / Lô / Vị trí khả dụng (FEFO/FIFO)</label>
             <select id="stockSelection" class="form-select" required>
@@ -24,10 +36,14 @@
             <input id="productId" name="productId" type="hidden" />
             <input id="lotId" name="lotId" type="hidden" />
             <input id="locationId" name="locationId" type="hidden" />
+            @Html.ValidationMessage("productId", null, new { @class = "text-danger d-block" })
+            @Html.ValidationMessage("lotId", null, new { @class = "text-danger d-block" })
+            @Html.ValidationMessage("locationId", null, new { @class = "text-danger d-block" })
         </div>
         <div class="mb-3">
             <label for="qty" class="form-label">Số lượng xuất</label>
             <input id="qty" name="qty" type="number" class="form-control" min="0.01" step="0.01" required />
+            @Html.ValidationMessage("qty", null, new { @class = "text-danger" })
         </div>
         <div class="d-flex gap-2"><button type="submit" class="btn btn-primary">Xác nhận xuất kho</button><a class="btn btn-outline-secondary" asp-action="Issues">Hủy</a></div>
     </form>

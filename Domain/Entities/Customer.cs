@@ -24,4 +24,6 @@ public class Customer
     public string Email { get; set; } = string.Empty;
 
     public bool IsActive { get; set; } = true;
+
+    public virtual ICollection<GoodsIssue> GoodsIssues { get; set; } = new List<GoodsIssue>();
 }
