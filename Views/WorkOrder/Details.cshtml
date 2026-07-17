@@ -4,19 +4,20 @@
 @{
     ViewData["Title"] = $"Lệnh {Model.Code}";
     var reservations = ViewData["Reservations"] as IEnumerable<MaterialReservation> ?? Enumerable.Empty<MaterialReservation>();
+    var canManage = User.IsInRole("Admin") || User.IsInRole("Manager");
 }
 
 <section class="toolbar-row">
     <div><p class="eyebrow">Work Order</p><h2>@Model.Code</h2></div>
     <div class="d-flex gap-2">
         <a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a>
-        @if (Model.Status is WorkOrderStatus.Draft or WorkOrderStatus.Pending)
+        @if (canManage && (Model.Status is WorkOrderStatus.Draft or WorkOrderStatus.Pending))
         {
             <form asp-action="Approve" asp-route-id="@Model.Id" method="post">
                 <button class="btn btn-primary" type="submit">Phê duyệt</button>
             </form>
         }
-        @if (Model.Status == WorkOrderStatus.InProgress)
+        @if (canManage && Model.Status == WorkOrderStatus.InProgress)
         {
             <form asp-action="Complete" asp-route-id="@Model.Id" method="post">
                 <button class="btn btn-success" type="submit">Xác nhận hoàn thành</button>

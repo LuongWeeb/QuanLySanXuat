@@ -6,6 +6,7 @@ using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Services;
+using WmsMes.Web.ViewModels;
 
 namespace WmsMes.Web.Controllers;
 
@@ -14,11 +15,13 @@ public class WorkOrderController : Controller
 {
     private readonly ApplicationDbContext _context;
     private readonly IWorkOrderService _workOrderService;
+    private readonly ILogger<WorkOrderController> _logger;
 
-    public WorkOrderController(ApplicationDbContext context, IWorkOrderService workOrderService)
+    public WorkOrderController(ApplicationDbContext context, IWorkOrderService workOrderService, ILogger<WorkOrderController> logger)
     {
         _context = context;
         _workOrderService = workOrderService;
+        _logger = logger;
     }
 
     public async Task<IActionResult> Index()
@@ -56,25 +59,33 @@ public class WorkOrderController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Create(WorkOrder workOrder)
+    public async Task<IActionResult> Create(WorkOrderCreateInputModel input)
     {
-        if (string.IsNullOrWhiteSpace(workOrder.Code))
-            ModelState.AddModelError(nameof(workOrder.Code), "Mã lệnh là bắt buộc.");
-        if (workOrder.Qty <= 0)
-            ModelState.AddModelError(nameof(workOrder.Qty), "Số lượng phải lớn hơn 0.");
-        if (workOrder.DueDate == default)
-            ModelState.AddModelError(nameof(workOrder.DueDate), "Hạn hoàn thành là bắt buộc.");
-        if (!await _context.Products.AnyAsync(x => x.Id == workOrder.ProductId && x.IsManufactured && x.IsActive))
-            ModelState.AddModelError(nameof(workOrder.ProductId), "Thành phẩm không hợp lệ hoặc đã ngừng hoạt động.");
+        if (string.IsNullOrWhiteSpace(input.Code))
+            ModelState.AddModelError(nameof(input.Code), "Mã lệnh là bắt buộc.");
+        if (input.Qty <= 0)
+            ModelState.AddModelError(nameof(input.Qty), "Số lượng phải lớn hơn 0.");
+        if (input.DueDate is null)
+            ModelState.AddModelError(nameof(input.DueDate), "Hạn hoàn thành là bắt buộc.");
+        if (!await _context.Products.AnyAsync(x => x.Id == input.ProductId && x.IsManufactured && x.IsActive))
+            ModelState.AddModelError(nameof(input.ProductId), "Thành phẩm không hợp lệ hoặc đã ngừng hoạt động.");
 
         if (!ModelState.IsValid)
         {
             await LoadProductsAsync();
-            return View(workOrder);
+            return View(input);
         }
 
-        workOrder.Code = workOrder.Code.Trim();
-        workOrder.Status = WorkOrderStatus.Draft;
+        var workOrder = new WorkOrder
+        {
+            Code = input.Code.Trim(),
+            ProductId = input.ProductId,
+            Qty = input.Qty,
+            DueDate = input.DueDate!.Value,
+            Status = WorkOrderStatus.Draft,
+            BomVersion = string.Empty,
+            RoutingVersion = string.Empty
+        };
         _context.WorkOrders.Add(workOrder);
         await _context.SaveChangesAsync();
         TempData["StatusMessage"] = $"Đã tạo lệnh sản xuất nháp {workOrder.Code}.";
@@ -83,6 +94,7 @@ public class WorkOrderController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Roles = "Admin,Manager")]
     public async Task<IActionResult> Approve(int id)
     {
         try
@@ -94,13 +106,15 @@ public class WorkOrderController : Controller
         }
         catch (Exception ex)
         {
-            TempData["StatusMessage"] = $"Lỗi khi duyệt lệnh: {ex.Message}";
+            _logger.LogError(ex, "Failed to approve work order {WorkOrderId}.", id);
+            TempData["StatusMessage"] = "Không thể phê duyệt lệnh sản xuất. Vui lòng thử lại hoặc liên hệ quản trị viên.";
         }
         return RedirectToAction(nameof(Details), new { id });
     }
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Roles = "Admin,Manager")]
     public async Task<IActionResult> Complete(int id)
     {
         try
@@ -112,7 +126,8 @@ public class WorkOrderController : Controller
         }
         catch (Exception ex)
         {
-            TempData["StatusMessage"] = $"Lỗi khi hoàn thành lệnh: {ex.Message}";
+            _logger.LogError(ex, "Failed to complete work order {WorkOrderId}.", id);
+            TempData["StatusMessage"] = "Không thể hoàn thành lệnh sản xuất. Vui lòng thử lại hoặc liên hệ quản trị viên.";
         }
         return RedirectToAction(nameof(Details), new { id });
     }

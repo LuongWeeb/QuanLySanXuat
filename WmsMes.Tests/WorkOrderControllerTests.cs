@@ -1,14 +1,19 @@
 using System.Security.Claims;
+using System.ComponentModel.DataAnnotations;
+using System.Reflection;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Moq;
 using WmsMes.Web.Controllers;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Services;
+using WmsMes.Web.ViewModels;
 
 namespace WmsMes.Tests;
 
@@ -25,7 +30,7 @@ public class WorkOrderControllerTests
         context.WorkOrders.AddRange(Order(product, "WO-1", new DateTime(2026, 7, 20)), Order(product, "WO-2", new DateTime(2026, 7, 25)));
         await context.SaveChangesAsync();
 
-        var result = await new WorkOrderController(context, Mock.Of<IWorkOrderService>()).Index();
+        var result = await Controller(context).Index();
 
         var model = Assert.IsAssignableFrom<IEnumerable<WorkOrder>>(Assert.IsType<ViewResult>(result).Model).ToList();
         Assert.Equal(new[] { "WO-2", "WO-1" }, model.Select(x => x.Code));
@@ -36,7 +41,7 @@ public class WorkOrderControllerTests
     public async Task Details_WhenMissing_ReturnsNotFound()
     {
         await using var context = new ApplicationDbContext(Options($"WO_Missing_{Guid.NewGuid()}"));
-        var result = await new WorkOrderController(context, Mock.Of<IWorkOrderService>()).Details(404);
+        var result = await Controller(context).Details(404);
         Assert.IsType<NotFoundResult>(result);
     }
 
@@ -56,7 +61,7 @@ public class WorkOrderControllerTests
         });
         await context.SaveChangesAsync();
 
-        var result = await new WorkOrderController(context, Mock.Of<IWorkOrderService>()).Details(order.Id);
+        var result = await Controller(context).Details(order.Id);
 
         var view = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<WorkOrder>(view.Model);
@@ -72,7 +77,7 @@ public class WorkOrderControllerTests
         context.Products.AddRange(Product("VALID"), Product("INACTIVE", active: false), Product("PURCHASED", false));
         await context.SaveChangesAsync();
 
-        var result = await new WorkOrderController(context, Mock.Of<IWorkOrderService>()).Create();
+        var result = await Controller(context).Create();
 
         Assert.IsType<ViewResult>(result);
         var products = Assert.IsAssignableFrom<IEnumerable<Product>>(Assert.IsType<ViewResult>(result).ViewData["Products"]);
@@ -87,9 +92,7 @@ public class WorkOrderControllerTests
         context.Products.Add(product);
         await context.SaveChangesAsync();
         var controller = Controller(context);
-        var order = Order(null, "WO-NEW", DateTime.UtcNow.AddDays(2));
-        order.ProductId = product.Id;
-        order.Status = WorkOrderStatus.Completed;
+        var order = new WorkOrderCreateInputModel { Code = "WO-NEW", ProductId = product.Id, Qty = 10, DueDate = DateTime.UtcNow.AddDays(2) };
 
         var result = await controller.Create(order);
 
@@ -97,6 +100,8 @@ public class WorkOrderControllerTests
         var saved = await context.WorkOrders.SingleAsync();
         Assert.Equal(WorkOrderStatus.Draft, saved.Status);
         Assert.Equal("WO-NEW", saved.Code);
+        Assert.Equal(string.Empty, saved.BomVersion);
+        Assert.Equal(string.Empty, saved.RoutingVersion);
     }
 
     [Theory]
@@ -109,9 +114,7 @@ public class WorkOrderControllerTests
         context.Products.Add(product);
         await context.SaveChangesAsync();
         var controller = Controller(context);
-        var order = Order(null, code, DateTime.UtcNow.AddDays(2));
-        order.ProductId = product.Id;
-        order.Qty = qty;
+        var order = new WorkOrderCreateInputModel { Code = code, ProductId = product.Id, Qty = qty, DueDate = DateTime.UtcNow.AddDays(2) };
 
         var result = await controller.Create(order);
 
@@ -129,14 +132,63 @@ public class WorkOrderControllerTests
         await context.SaveChangesAsync();
         var forgedId = context.Products.First().Id;
         var controller = Controller(context);
-        var order = Order(null, "WO-FORGED", DateTime.UtcNow.AddDays(1));
-        order.ProductId = forgedId;
+        var order = new WorkOrderCreateInputModel { Code = "WO-FORGED", ProductId = forgedId, Qty = 10, DueDate = DateTime.UtcNow.AddDays(1) };
 
         var result = await controller.Create(order);
 
         Assert.IsType<ViewResult>(result);
-        Assert.True(controller.ModelState.ContainsKey(nameof(WorkOrder.ProductId)));
+        Assert.True(controller.ModelState.ContainsKey(nameof(WorkOrderCreateInputModel.ProductId)));
         Assert.Empty(context.WorkOrders);
+    }
+
+    [Fact]
+    public void CreateInputModel_ExposesOnlyIntendedBindableFieldsAndUsesMvcValidationMetadata()
+    {
+        var properties = typeof(WorkOrderCreateInputModel).GetProperties().Select(x => x.Name).OrderBy(x => x).ToArray();
+        Assert.Equal(new[] { "Code", "DueDate", "ProductId", "Qty" }, properties);
+
+        var invalid = new WorkOrderCreateInputModel();
+        var results = new List<ValidationResult>();
+        Assert.False(Validator.TryValidateObject(invalid, new ValidationContext(invalid), results, validateAllProperties: true));
+        Assert.Contains(results, x => x.MemberNames.Contains(nameof(WorkOrderCreateInputModel.Code)));
+        Assert.Contains(results, x => x.MemberNames.Contains(nameof(WorkOrderCreateInputModel.ProductId)));
+        Assert.Contains(results, x => x.MemberNames.Contains(nameof(WorkOrderCreateInputModel.Qty)));
+        Assert.Contains(results, x => x.MemberNames.Contains(nameof(WorkOrderCreateInputModel.DueDate)));
+    }
+
+    [Fact]
+    public async Task CreatePost_ConstructsEntityServerSideAndCannotOverpostEntityState()
+    {
+        var parameter = typeof(WorkOrderController).GetMethod(nameof(WorkOrderController.Create), new[] { typeof(WorkOrderCreateInputModel) })!.GetParameters().Single();
+        Assert.Equal(typeof(WorkOrderCreateInputModel), parameter.ParameterType);
+
+        await using var context = new ApplicationDbContext(Options($"WO_Overpost_{Guid.NewGuid()}"));
+        var product = Product("FG");
+        context.Products.Add(product);
+        await context.SaveChangesAsync();
+        var controller = Controller(context);
+
+        await controller.Create(new WorkOrderCreateInputModel { Code = " WO-SAFE ", ProductId = product.Id, Qty = 4, DueDate = new DateTime(2026, 8, 1) });
+
+        var saved = await context.WorkOrders.SingleAsync();
+        Assert.True(saved.Id > 0); // database owns the identity
+        Assert.Equal(WorkOrderStatus.Draft, saved.Status);
+        Assert.Empty(saved.Steps);
+        Assert.Equal("WO-SAFE", saved.Code);
+        Assert.Equal(string.Empty, saved.BomVersion);
+        Assert.Equal(string.Empty, saved.RoutingVersion);
+    }
+
+    [Theory]
+    [InlineData(nameof(WorkOrderController.Approve))]
+    [InlineData(nameof(WorkOrderController.Complete))]
+    public void ApprovalActions_RequireAdminOrManagerAndAntiforgery(string actionName)
+    {
+        var method = typeof(WorkOrderController).GetMethod(actionName)!;
+        var authorize = Assert.Single(method.GetCustomAttributes<AuthorizeAttribute>());
+        Assert.Equal("Admin,Manager", authorize.Roles);
+        Assert.Single(method.GetCustomAttributes<ValidateAntiForgeryTokenAttribute>());
+        Assert.Single(method.GetCustomAttributes<HttpPostAttribute>());
     }
 
     [Theory]
@@ -162,11 +214,13 @@ public class WorkOrderControllerTests
         await using var context = new ApplicationDbContext(Options($"WO_ApproveError_{Guid.NewGuid()}"));
         var service = new Mock<IWorkOrderService>();
         service.Setup(x => x.ApproveWorkOrderAsync(7, "system")).ThrowsAsync(new InvalidOperationException("thiếu vật tư"));
-        var controller = Controller(context, service.Object);
+        var logger = new Mock<ILogger<WorkOrderController>>();
+        var controller = Controller(context, service.Object, logger: logger.Object);
 
         await controller.Approve(7);
 
-        Assert.Contains("thiếu vật tư", controller.TempData["StatusMessage"]!.ToString());
+        Assert.Equal("Không thể phê duyệt lệnh sản xuất. Vui lòng thử lại hoặc liên hệ quản trị viên.", controller.TempData["StatusMessage"]);
+        logger.Verify(x => x.Log(LogLevel.Error, It.IsAny<EventId>(), It.Is<It.IsAnyType>((_, _) => true), It.IsAny<Exception>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
     }
 
     [Theory]
@@ -191,16 +245,18 @@ public class WorkOrderControllerTests
         await using var context = new ApplicationDbContext(Options($"WO_CompleteError_{Guid.NewGuid()}"));
         var service = new Mock<IWorkOrderService>();
         service.Setup(x => x.CompleteWorkOrderAsync(8, "system")).ThrowsAsync(new InvalidOperationException("còn công đoạn"));
-        var controller = Controller(context, service.Object);
+        var logger = new Mock<ILogger<WorkOrderController>>();
+        var controller = Controller(context, service.Object, logger: logger.Object);
 
         await controller.Complete(8);
 
-        Assert.Contains("còn công đoạn", controller.TempData["StatusMessage"]!.ToString());
+        Assert.Equal("Không thể hoàn thành lệnh sản xuất. Vui lòng thử lại hoặc liên hệ quản trị viên.", controller.TempData["StatusMessage"]);
+        logger.Verify(x => x.Log(LogLevel.Error, It.IsAny<EventId>(), It.Is<It.IsAnyType>((_, _) => true), It.IsAny<Exception>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
     }
 
-    private static WorkOrderController Controller(ApplicationDbContext context, IWorkOrderService? service = null, string? userId = null)
+    private static WorkOrderController Controller(ApplicationDbContext context, IWorkOrderService? service = null, string? userId = null, ILogger<WorkOrderController>? logger = null)
     {
-        var controller = new WorkOrderController(context, service ?? Mock.Of<IWorkOrderService>())
+        var controller = new WorkOrderController(context, service ?? Mock.Of<IWorkOrderService>(), logger ?? Mock.Of<ILogger<WorkOrderController>>())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
