@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -10,6 +11,7 @@ namespace WmsMes.Web.Services;
 
 public class WorkOrderService : IWorkOrderService
 {
+    public const string FinishedGoodsQcLocationCode = "LOC-FG-01";
     private readonly ApplicationDbContext _context;
     private readonly IHubContext<ProductionHub>? _productionHub;
 
@@ -53,6 +55,20 @@ public class WorkOrderService : IWorkOrderService
                 return false;
             }
 
+            if (_context.Database.IsRelational())
+            {
+                var claimed = await _context.WorkOrders
+                    .Where(order => order.Id == workOrderId &&
+                        (order.Status == WorkOrderStatus.Draft || order.Status == WorkOrderStatus.Pending))
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(order => order.Status, WorkOrderStatus.Approved));
+                if (claimed == 0)
+                {
+                    await RollbackIfSupportedAsync(transaction);
+                    return false;
+                }
+                workOrder.Status = WorkOrderStatus.Approved;
+            }
+
             var bom = await _context.BOMs
                 .Include(b => b.Items)
                 .FirstOrDefaultAsync(b => b.ProductId == workOrder.ProductId && b.IsActive);
@@ -80,9 +96,11 @@ public class WorkOrderService : IWorkOrderService
 
             foreach (var requirement in requirements)
             {
-                var available = await _context.StockBalances
+                var availableQuantities = await _context.StockBalances
                     .Where(sb => sb.ProductId == requirement.ProductId)
-                    .SumAsync(sb => sb.QtyAvailable);
+                    .Select(sb => sb.QtyAvailable)
+                    .ToListAsync();
+                var available = availableQuantities.Sum();
 
                 if (available < requirement.QtyRequired)
                 {
@@ -248,6 +266,11 @@ public class WorkOrderService : IWorkOrderService
             }
 
             var finalQty = workOrder.Steps.OrderByDescending(s => s.StepNumber).First().QtyOK;
+            var qcLocationId = await _context.Locations
+                .Where(location => location.Code == FinishedGoodsQcLocationCode && location.IsActive)
+                .Select(location => (int?)location.Id)
+                .SingleOrDefaultAsync()
+                ?? throw new InvalidOperationException($"Active QC inspection location {FinishedGoodsQcLocationCode} was not found.");
             var today = DateTime.Today;
             var prefix = $"{product.Code}-{today:yyyyMMdd}-";
             var existingCount = await _context.Lots.CountAsync(l => l.LotNo.StartsWith(prefix));
@@ -268,7 +291,7 @@ public class WorkOrderService : IWorkOrderService
             {
                 ProductId = workOrder.ProductId,
                 LotId = finishedLot.Id,
-                LocationId = 1,
+                LocationId = qcLocationId,
                 QtyAvailable = 0m,
                 QtyOnHold = finalQty
             });
@@ -277,7 +300,7 @@ public class WorkOrderService : IWorkOrderService
                 Type = TransactionType.Receipt,
                 ProductId = workOrder.ProductId,
                 LotId = finishedLot.Id,
-                LocationId = 1,
+                LocationId = qcLocationId,
                 Qty = finalQty,
                 TransactionDate = DateTime.UtcNow,
                 UserId = userId,
@@ -334,7 +357,7 @@ public class WorkOrderService : IWorkOrderService
     private async Task<IDbContextTransaction?> BeginTransactionIfSupportedAsync()
     {
         return _context.Database.IsRelational()
-            ? await _context.Database.BeginTransactionAsync()
+            ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable)
             : null;
     }
 

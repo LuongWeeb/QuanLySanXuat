@@ -82,7 +82,13 @@ public class InventoryService : IInventoryService
         return suggestions;
     }
 
-    public async Task<bool> CompleteGoodsReceiptAsync(int receiptId, string userId)
+    public Task<bool> CompleteGoodsReceiptAsync(int receiptId, string userId) =>
+        CompleteGoodsReceiptCoreAsync(receiptId, userId, notify: true);
+
+    public Task<bool> CompleteGoodsReceiptWithoutNotificationAsync(int receiptId, string userId) =>
+        CompleteGoodsReceiptCoreAsync(receiptId, userId, notify: false);
+
+    private async Task<bool> CompleteGoodsReceiptCoreAsync(int receiptId, string userId, bool notify)
     {
         await using var transaction = await BeginTransactionIfRelationalAsync();
         try
@@ -162,7 +168,7 @@ public class InventoryService : IInventoryService
             receipt.Status = DocumentStatus.Completed;
             await _context.SaveChangesAsync();
             await CommitIfRelationalAsync(transaction);
-            await NotifyStockChangedAsync();
+            if (notify) await NotifyStockChangedAsync();
             return true;
         }
         catch
@@ -172,7 +178,13 @@ public class InventoryService : IInventoryService
         }
     }
 
-    public async Task<bool> CompleteGoodsIssueAsync(int issueId, string userId)
+    public Task<bool> CompleteGoodsIssueAsync(int issueId, string userId) =>
+        CompleteGoodsIssueCoreAsync(issueId, userId, notify: true);
+
+    public Task<bool> CompleteGoodsIssueWithoutNotificationAsync(int issueId, string userId) =>
+        CompleteGoodsIssueCoreAsync(issueId, userId, notify: false);
+
+    private async Task<bool> CompleteGoodsIssueCoreAsync(int issueId, string userId, bool notify)
     {
         await using var transaction = await BeginTransactionIfRelationalAsync();
         try
@@ -235,7 +247,7 @@ public class InventoryService : IInventoryService
             issue.Status = DocumentStatus.Completed;
             await _context.SaveChangesAsync();
             await CommitIfRelationalAsync(transaction);
-            await NotifyStockChangedAsync();
+            if (notify) await NotifyStockChangedAsync();
             return true;
         }
         catch
@@ -375,7 +387,7 @@ public class InventoryService : IInventoryService
         }
     }
 
-    private async Task NotifyStockChangedAsync()
+    public async Task NotifyStockChangedAsync()
     {
         if (_hubContext is not null)
         {

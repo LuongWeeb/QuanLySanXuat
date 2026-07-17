@@ -329,7 +329,7 @@ public class QcAndReportingTests
             new Zone { Id = 1, WarehouseId = 1, Code = "FG", Name = "Finished Goods" },
             new Zone { Id = 2, WarehouseId = 1, Code = "QUAR", Name = "Quarantine" });
         context.Locations.AddRange(
-            new Location { Id = 1, ZoneId = 1, Code = "FG-01", Name = "Default Finished Goods" },
+            new Location { Id = 1, ZoneId = 1, Code = WorkOrderService.FinishedGoodsQcLocationCode, Name = "Default Finished Goods" },
             new Location { Id = 2, ZoneId = 2, Code = QcService.QuarantineLocationCode, Name = "QC Quarantine" });
         context.WorkCenters.Add(new WorkCenter { Id = 1, Code = "WC-01", Name = "Line 1" });
         await context.SaveChangesAsync();

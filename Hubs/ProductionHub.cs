@@ -6,8 +6,4 @@ namespace WmsMes.Web.Hubs;
 [Authorize]
 public class ProductionHub : Hub
 {
-    public async Task NotifyProgressChange()
-    {
-        await Clients.All.SendAsync("ReceiveProgressUpdate");
-    }
 }

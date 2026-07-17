@@ -81,6 +81,13 @@ public class HomeControllerTests
     }
 
     [Fact]
+    public void RealtimeHubs_DoNotExposeClientCallableBroadcastMethods()
+    {
+        Assert.Empty(typeof(InventoryHub).GetMethods().Where(method => method.DeclaringType == typeof(InventoryHub)));
+        Assert.Empty(typeof(ProductionHub).GetMethods().Where(method => method.DeclaringType == typeof(ProductionHub)));
+    }
+
+    [Fact]
     public void Metrics_DisablesResponseCaching()
     {
         var attribute = typeof(HomeController).GetMethod(nameof(HomeController.Metrics))!

@@ -1,7 +1,9 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging.Abstractions;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -14,11 +16,13 @@ public class InventoryController : Controller
 {
     private readonly ApplicationDbContext _context;
     private readonly IInventoryService? _inventoryService;
+    private readonly ILogger<InventoryController> _logger;
 
-    public InventoryController(ApplicationDbContext context, IInventoryService? inventoryService = null)
+    public InventoryController(ApplicationDbContext context, IInventoryService? inventoryService = null, ILogger<InventoryController>? logger = null)
     {
         _context = context;
         _inventoryService = inventoryService;
+        _logger = logger ?? NullLogger<InventoryController>.Instance;
     }
 
     public async Task<IActionResult> Index()
@@ -84,6 +88,9 @@ public class InventoryController : Controller
     [Authorize(Roles = "Admin,Warehouse,Manager")]
     public async Task<IActionResult> CreateIssue(int customerId, int productId, int lotId, decimal qty, int locationId)
     {
+        var userId = HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrWhiteSpace(userId))
+            ModelState.AddModelError(string.Empty, "Không xác định được người dùng đang đăng nhập.");
         var customerIsActive = await _context.Customers
             .AsNoTracking()
             .AnyAsync(customer => customer.Id == customerId && customer.IsActive);
@@ -154,7 +161,7 @@ public class InventoryController : Controller
         {
             _context.GoodsIssues.Add(issue);
             await _context.SaveChangesAsync();
-            if (!await _inventoryService.CompleteGoodsIssueAsync(issue.Id, "system"))
+            if (!await _inventoryService.CompleteGoodsIssueWithoutNotificationAsync(issue.Id, userId!))
             {
                 await RollbackIssueAsync(issue, transaction);
                 return await IssueCompletionErrorAsync("Không thể hoàn tất phiếu xuất kho. Vui lòng thử lại.");
@@ -164,6 +171,8 @@ public class InventoryController : Controller
             {
                 await transaction.CommitAsync();
             }
+
+            await NotifyAfterCommitAsync();
 
             TempData["StatusMessage"] = $"Đã xuất kho {qty:N2} thành công.";
             return RedirectToAction(nameof(Issues));
@@ -194,6 +203,15 @@ public class InventoryController : Controller
         decimal unitPrice,
         int locationId)
     {
+        var userId = HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrWhiteSpace(userId))
+            ModelState.AddModelError(string.Empty, "Không xác định được người dùng đang đăng nhập.");
+        if (!await _context.Suppliers.AsNoTracking().AnyAsync(x => x.Id == supplierId && x.IsActive))
+            ModelState.AddModelError(nameof(supplierId), "Nhà cung cấp không hợp lệ hoặc đã ngừng hoạt động.");
+        if (!await _context.Products.AsNoTracking().AnyAsync(x => x.Id == productId && x.IsActive))
+            ModelState.AddModelError(nameof(productId), "Sản phẩm không hợp lệ hoặc đã ngừng hoạt động.");
+        if (!await _context.Locations.AsNoTracking().AnyAsync(x => x.Id == locationId && x.IsActive))
+            ModelState.AddModelError(nameof(locationId), "Vị trí không hợp lệ hoặc đã ngừng hoạt động.");
         if (string.IsNullOrWhiteSpace(lotNo))
         {
             ModelState.AddModelError(nameof(lotNo), "Số lô là bắt buộc.");
@@ -248,7 +266,7 @@ public class InventoryController : Controller
             _context.GoodsReceipts.Add(receipt);
             await _context.SaveChangesAsync();
 
-            var completed = await _inventoryService.CompleteGoodsReceiptAsync(receipt.Id, "system");
+            var completed = await _inventoryService.CompleteGoodsReceiptWithoutNotificationAsync(receipt.Id, userId!);
             if (!completed)
             {
                 await RollbackReceiptAsync(receipt, transaction);
@@ -259,6 +277,8 @@ public class InventoryController : Controller
             {
                 await transaction.CommitAsync();
             }
+
+            await NotifyAfterCommitAsync();
 
             TempData["StatusMessage"] = $"Đã nhập kho lô hàng {lotNo.Trim()} thành công.";
             return RedirectToAction(nameof(Receipts));
@@ -349,5 +369,17 @@ public class InventoryController : Controller
         ModelState.AddModelError(string.Empty, message);
         await LoadIssueSelectionsAsync();
         return View(nameof(CreateIssue));
+    }
+
+    private async Task NotifyAfterCommitAsync()
+    {
+        try
+        {
+            await _inventoryService!.NotifyStockChangedAsync();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Inventory operation committed but realtime notification failed.");
+        }
     }
 }

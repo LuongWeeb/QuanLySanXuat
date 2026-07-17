@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.Data.Sqlite;
@@ -12,6 +14,42 @@ namespace WmsMes.Tests;
 
 public class InventoryControllerTests
 {
+    [Fact]
+    public async Task CreateIssue_Post_WithoutNameIdentifier_DoesNotCallService()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseInMemoryDatabase($"IssueIdentity_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        var seeded = await SeedIssueStockAsync(context);
+        var service = new Mock<IInventoryService>();
+        var controller = new InventoryController(context, service.Object);
+
+        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 1, seeded.locationId);
+
+        Assert.IsType<ViewResult>(result);
+        service.Verify(x => x.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateReceipt_Post_WhenNotificationFails_RemainsSuccessfulAfterCompletion()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseInMemoryDatabase($"ReceiptNotify_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        context.Suppliers.Add(new Supplier { Id = 2, Code = "S", Name = "S" });
+        context.Products.Add(new Product { Id = 3, Code = "P", Name = "P" });
+        context.Locations.Add(new Location { Id = 4, Code = "L", Name = "L", Zone = new Zone { Code = "Z", Name = "Z" } });
+        await context.SaveChangesAsync();
+        var service = new Mock<IInventoryService>();
+        service.Setup(x => x.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user")).ReturnsAsync(true);
+        service.Setup(x => x.NotifyStockChangedAsync()).ThrowsAsync(new InvalidOperationException("hub down"));
+        var controller = Authenticated(new InventoryController(context, service.Object));
+        controller.TempData = Mock.Of<ITempDataDictionary>();
+
+        var result = await controller.CreateReceipt(2, 3, "LOT", 1, 1, 4);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.Single(context.GoodsReceipts);
+    }
+
     [Fact]
     public async Task Issues_ReturnsNewestFirstWithIssueLines()
     {
@@ -65,8 +103,8 @@ public class InventoryControllerTests
         await using var context = new ApplicationDbContext(options);
         var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
-        service.Setup(item => item.CompleteGoodsIssueAsync(It.IsAny<int>(), "system")).ReturnsAsync(true);
-        var controller = new InventoryController(context, service.Object) { TempData = Mock.Of<ITempDataDictionary>() };
+        service.Setup(item => item.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user")).ReturnsAsync(true);
+        var controller = Authenticated(new InventoryController(context, service.Object)); controller.TempData = Mock.Of<ITempDataDictionary>();
 
         var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 2.5m, seeded.locationId);
 
@@ -75,7 +113,8 @@ public class InventoryControllerTests
         Assert.Equal(seeded.customerId, issue.CustomerId);
         var line = Assert.Single(issue.Lines);
         Assert.Equal((seeded.productId, seeded.lotId, 2.5m, seeded.locationId), (line.ProductId, line.LotId, line.Qty, line.LocationId));
-        service.Verify(item => item.CompleteGoodsIssueAsync(issue.Id, "system"), Times.Once);
+        service.Verify(item => item.CompleteGoodsIssueWithoutNotificationAsync(issue.Id, "warehouse-user"), Times.Once);
+        service.Verify(item => item.NotifyStockChangedAsync(), Times.Once);
     }
 
     [Theory]
@@ -88,7 +127,7 @@ public class InventoryControllerTests
         await using var context = new ApplicationDbContext(options);
         var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
-        var controller = new InventoryController(context, service.Object);
+        var controller = Authenticated(new InventoryController(context, service.Object));
 
         var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, qty, seeded.locationId);
 
@@ -108,9 +147,9 @@ public class InventoryControllerTests
         await using var context = new ApplicationDbContext(options);
         var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
-        var setup = service.Setup(item => item.CompleteGoodsIssueAsync(It.IsAny<int>(), "system"));
+        var setup = service.Setup(item => item.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"));
         if (throws) setup.ThrowsAsync(new InvalidOperationException("failed")); else setup.ReturnsAsync(false);
-        var controller = new InventoryController(context, service.Object);
+        var controller = Authenticated(new InventoryController(context, service.Object));
 
         var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 2, seeded.locationId);
 
@@ -164,7 +203,7 @@ public class InventoryControllerTests
         context.Customers.Add(new Customer { Id = 6, Code = "C", Name = "C" });
         context.StockBalances.Add(new StockBalance { Product = product, Lot = lot, Location = location, QtyAvailable = 10 });
         await context.SaveChangesAsync();
-        var controller = new InventoryController(context, Mock.Of<IInventoryService>());
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IInventoryService>()));
 
         var result = await controller.CreateIssue(6, product.Id, lot.Id, 1, location.Id);
 
@@ -187,7 +226,7 @@ public class InventoryControllerTests
         context.Customers.Add(new Customer { Id = 6, Code = "C", Name = "C" });
         context.StockBalances.Add(new StockBalance { Product = other, Lot = lot, Location = location, QtyAvailable = 10 });
         await context.SaveChangesAsync();
-        var controller = new InventoryController(context, Mock.Of<IInventoryService>());
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IInventoryService>()));
 
         var result = await controller.CreateIssue(6, product.Id, lot.Id, 1, location.Id);
 
@@ -205,7 +244,7 @@ public class InventoryControllerTests
         await using var context = new ApplicationDbContext(options);
         await context.Database.EnsureCreatedAsync();
         var seeded = await SeedIssueStockAsync(context);
-        var controller = new InventoryController(context, new InventoryService(context)) { TempData = Mock.Of<ITempDataDictionary>() };
+        var controller = Authenticated(new InventoryController(context, new InventoryService(context))); controller.TempData = Mock.Of<ITempDataDictionary>();
 
         var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 3, seeded.locationId);
 
@@ -226,8 +265,8 @@ public class InventoryControllerTests
         await context.Database.EnsureCreatedAsync();
         var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
-        service.Setup(x => x.CompleteGoodsIssueAsync(It.IsAny<int>(), "system")).ReturnsAsync(false);
-        var controller = new InventoryController(context, service.Object);
+        service.Setup(x => x.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user")).ReturnsAsync(false);
+        var controller = Authenticated(new InventoryController(context, service.Object));
 
         var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 3, seeded.locationId);
 
@@ -366,13 +405,15 @@ public class InventoryControllerTests
             .UseInMemoryDatabase($"Inv_Create_Post_{Guid.NewGuid()}")
             .Options;
         await using var context = new ApplicationDbContext(options);
+        context.Suppliers.Add(new Supplier { Id = 2, Code = "SUP", Name = "Supplier" });
+        context.Products.Add(new Product { Id = 3, Code = "P", Name = "Product" });
+        context.Locations.Add(new Location { Id = 4, Code = "LOC", Name = "Location", Zone = new Zone { Code = "Z", Name = "Zone" } });
+        await context.SaveChangesAsync();
         var inventoryService = new Mock<IInventoryService>();
-        inventoryService.Setup(service => service.CompleteGoodsReceiptAsync(It.IsAny<int>(), "system"))
+        inventoryService.Setup(service => service.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"))
             .ReturnsAsync(true);
-        var controller = new InventoryController(context, inventoryService.Object)
-        {
-            TempData = Mock.Of<ITempDataDictionary>()
-        };
+        var controller = Authenticated(new InventoryController(context, inventoryService.Object));
+        controller.TempData = Mock.Of<ITempDataDictionary>();
 
         var result = await controller.CreateReceipt(2, 3, "LOT-9", 12.5m, 4.25m, 4);
 
@@ -386,7 +427,8 @@ public class InventoryControllerTests
         Assert.Equal(12.5m, line.Qty);
         Assert.Equal(4.25m, line.UnitPrice);
         Assert.Equal(4, line.LocationId);
-        inventoryService.Verify(service => service.CompleteGoodsReceiptAsync(receipt.Id, "system"), Times.Once);
+        inventoryService.Verify(service => service.CompleteGoodsReceiptWithoutNotificationAsync(receipt.Id, "warehouse-user"), Times.Once);
+        inventoryService.Verify(service => service.NotifyStockChangedAsync(), Times.Once);
     }
 
     [Fact]
@@ -397,12 +439,10 @@ public class InventoryControllerTests
             .Options;
         await using var context = new ApplicationDbContext(options);
         var inventoryService = new Mock<IInventoryService>();
-        inventoryService.Setup(service => service.CompleteGoodsReceiptAsync(It.IsAny<int>(), "system"))
+        inventoryService.Setup(service => service.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"))
             .ReturnsAsync(false);
-        var controller = new InventoryController(context, inventoryService.Object)
-        {
-            TempData = Mock.Of<ITempDataDictionary>()
-        };
+        var controller = Authenticated(new InventoryController(context, inventoryService.Object));
+        controller.TempData = Mock.Of<ITempDataDictionary>();
 
         var result = await controller.CreateReceipt(2, 3, "LOT-FALSE", 12.5m, 4.25m, 4);
 
@@ -420,12 +460,10 @@ public class InventoryControllerTests
             .Options;
         await using var context = new ApplicationDbContext(options);
         var inventoryService = new Mock<IInventoryService>();
-        inventoryService.Setup(service => service.CompleteGoodsReceiptAsync(It.IsAny<int>(), "system"))
+        inventoryService.Setup(service => service.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"))
             .ThrowsAsync(new InvalidOperationException("completion failed"));
-        var controller = new InventoryController(context, inventoryService.Object)
-        {
-            TempData = Mock.Of<ITempDataDictionary>()
-        };
+        var controller = Authenticated(new InventoryController(context, inventoryService.Object));
+        controller.TempData = Mock.Of<ITempDataDictionary>();
 
         var result = await controller.CreateReceipt(2, 3, "LOT-ERROR", 12.5m, 4.25m, 4);
 
@@ -433,5 +471,17 @@ public class InventoryControllerTests
         Assert.False(controller.ModelState.IsValid);
         Assert.Empty(await context.GoodsReceipts.ToListAsync());
         Assert.Empty(await context.GoodsReceiptLines.ToListAsync());
+    }
+    private static T Authenticated<T>(T controller) where T : Controller
+    {
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.NameIdentifier, "warehouse-user") }, "Test"))
+            }
+        };
+        return controller;
     }
 }

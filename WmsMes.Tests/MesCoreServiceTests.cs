@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -8,6 +9,42 @@ namespace WmsMes.Tests;
 
 public class MesCoreServiceTests
 {
+    [Fact]
+    public async Task ApproveWorkOrderAsync_ConcurrentRelationalApprovals_ReserveStockOnlyOnce()
+    {
+        var database = $"file:wo-{Guid.NewGuid():N}?mode=memory&cache=shared";
+        await using var keepAlive = new SqliteConnection($"Data Source={database}");
+        await keepAlive.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite($"Data Source={database}").Options;
+        await using (var seed = new ApplicationDbContext(options))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            await SeedCommonDataAsync(seed);
+            await SeedBomRoutingAndWorkOrderAsync(seed);
+            seed.WorkOrders.Add(new WorkOrder { Id = 101, Code = "WO-002", ProductId = 1, Qty = 10, DueDate = DateTime.Today, Status = WorkOrderStatus.Draft });
+            seed.Lots.Add(new Lot { Id = 11, ProductId = 2, LotNo = "MAT-CONCURRENT", Qty = 13 });
+            seed.StockBalances.Add(new StockBalance { ProductId = 2, LotId = 11, LocationId = 77, QtyAvailable = 13 });
+            await seed.SaveChangesAsync();
+        }
+
+        async Task<bool> Approve(int id)
+        {
+            await using var context = new ApplicationDbContext(options);
+            try { return await new WorkOrderService(context).ApproveWorkOrderAsync(id, "planner"); }
+            catch (SqliteException) { return false; }
+            catch (InvalidOperationException) { return false; }
+        }
+
+        var results = await Task.WhenAll(Approve(100), Approve(101));
+
+        Assert.Single(results.Where(result => result));
+        await using var verify = new ApplicationDbContext(options);
+        Assert.Equal(13, (await verify.MaterialReservations.Select(x => x.QtyReserved).ToListAsync()).Sum());
+        var balance = await verify.StockBalances.SingleAsync(x => x.LotId == 11);
+        Assert.Equal(0, balance.QtyAvailable);
+        Assert.Equal(13, balance.QtyReserved);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -178,6 +215,8 @@ public class MesCoreServiceTests
         var outputLot = await context.Lots.SingleAsync(l => l.WorkOrderId == 100);
         Assert.StartsWith("FG-01-" + DateTime.Today.ToString("yyyyMMdd"), outputLot.LotNo);
         Assert.Equal(8m, outputLot.Qty);
+        Assert.Equal(77, (await context.StockBalances.SingleAsync(sb => sb.LotId == outputLot.Id)).LocationId);
+        Assert.Equal(77, (await context.StockTransactions.SingleAsync(tx => tx.LotId == outputLot.Id)).LocationId);
 
         Assert.Equal(0m, (await context.StockBalances.SingleAsync(sb => sb.LotId == 10)).QtyReserved);
         Assert.Contains(await context.StockTransactions.ToListAsync(), tx => tx.Type == TransactionType.Backflush && tx.Qty == -12m);
@@ -192,7 +231,7 @@ public class MesCoreServiceTests
             new Product { Id = 2, Code = "MAT-01", Name = "Material", BaseUomId = 1 });
         context.Warehouses.Add(new Warehouse { Id = 1, Code = "WH", Name = "Main Warehouse" });
         context.Zones.Add(new Zone { Id = 1, WarehouseId = 1, Code = "FG", Name = "Finished Goods" });
-        context.Locations.Add(new Location { Id = 1, ZoneId = 1, Code = "FG-01", Name = "Default Finished Goods" });
+        context.Locations.Add(new Location { Id = 77, ZoneId = 1, Code = "LOC-FG-01", Name = "Default Finished Goods" });
         context.Lots.Add(new Lot { Id = 10, ProductId = 2, LotNo = "MAT-BASE", Qty = 100m });
         context.WorkCenters.Add(new WorkCenter { Id = 1, Code = "WC-01", Name = "Line 1" });
         await context.SaveChangesAsync();

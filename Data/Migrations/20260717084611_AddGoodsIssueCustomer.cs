@@ -10,12 +10,6 @@ namespace WmsMes.Web.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(
-                """
-                IF EXISTS (SELECT 1 FROM [GoodsIssues])
-                    THROW 51000, 'AddGoodsIssueCustomer cannot infer customer ownership for legacy GoodsIssues. Export and archive or delete legacy GoodsIssues, or migrate them with an explicit business-approved customer mapping before retrying this migration.', 1;
-                """);
-
             migrationBuilder.AddColumn<int>(
                 name: "CustomerId",
                 table: "GoodsIssues",
@@ -24,8 +18,19 @@ namespace WmsMes.Web.Data.Migrations
 
             migrationBuilder.Sql(
                 """
+                -- Legacy rows predate customer ownership. A reserved inactive customer
+                -- preserves them without falsely assigning a real customer. The stable
+                -- unique code makes this backfill collision-safe and idempotent.
                 IF EXISTS (SELECT 1 FROM [GoodsIssues] WHERE [CustomerId] IS NULL)
-                    THROW 51001, 'AddGoodsIssueCustomer found unmapped legacy GoodsIssues. Supply an explicit customer mapping before making CustomerId required.', 1;
+                   AND NOT EXISTS (SELECT 1 FROM [Customers] WHERE [Code] = N'LEGACY-UNASSIGNED')
+                BEGIN
+                    INSERT INTO [Customers] ([Code], [Name], [Address], [Phone], [Email], [IsActive])
+                    VALUES (N'LEGACY-UNASSIGNED', N'Legacy / Unassigned Customer', N'', N'', N'', 0);
+                END;
+
+                UPDATE [GoodsIssues]
+                SET [CustomerId] = (SELECT [Id] FROM [Customers] WHERE [Code] = N'LEGACY-UNASSIGNED')
+                WHERE [CustomerId] IS NULL;
                 """);
 
             migrationBuilder.AlterColumn<int>(

@@ -8,7 +8,7 @@ namespace WmsMes.Tests;
 public class GoodsIssueCustomerMigrationTests
 {
     [Fact]
-    public void Up_UsesNullableStageActionableLegacyGuardAndNoZeroDefault()
+    public void Up_BackfillsLegacyIssuesWithCollisionSafeReservedCustomerBeforeRequiredForeignKey()
     {
         var migration = new AddGoodsIssueCustomer();
         var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
@@ -21,9 +21,11 @@ public class GoodsIssueCustomerMigrationTests
         Assert.Null(add.DefaultValue);
 
         var guardSql = string.Join("\n", builder.Operations.OfType<SqlOperation>().Select(operation => operation.Sql));
-        Assert.Contains("THROW", guardSql, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("legacy GoodsIssues", guardSql, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("archive or delete", guardSql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("LEGACY-UNASSIGNED", guardSql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("NOT EXISTS", guardSql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("UPDATE [GoodsIssues]", guardSql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WHERE [CustomerId] IS NULL", guardSql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("THROW", guardSql, StringComparison.OrdinalIgnoreCase);
 
         var alter = Assert.Single(builder.Operations.OfType<AlterColumnOperation>());
         Assert.False(alter.IsNullable);
