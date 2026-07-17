@@ -53,6 +53,100 @@ public class InventoryController : Controller
         return View(receipts);
     }
 
+    [Authorize(Roles = "Admin,Warehouse,Manager")]
+    public async Task<IActionResult> Issues()
+    {
+        var issues = await _context.GoodsIssues
+            .Include(issue => issue.Lines)
+                .ThenInclude(line => line.Product)
+            .Include(issue => issue.Lines)
+                .ThenInclude(line => line.Lot)
+            .Include(issue => issue.Lines)
+                .ThenInclude(line => line.Location)
+            .OrderByDescending(issue => issue.IssueDate)
+            .AsNoTracking()
+            .ToListAsync();
+
+        return View(issues);
+    }
+
+    [HttpGet]
+    [Authorize(Roles = "Admin,Warehouse,Manager")]
+    public async Task<IActionResult> CreateIssue()
+    {
+        await LoadIssueSelectionsAsync();
+        return View();
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Roles = "Admin,Warehouse,Manager")]
+    public async Task<IActionResult> CreateIssue(int productId, int lotId, decimal qty, int locationId)
+    {
+        if (qty <= 0)
+        {
+            ModelState.AddModelError(nameof(qty), "Số lượng phải lớn hơn 0.");
+        }
+
+        var balance = await _context.StockBalances
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.ProductId == productId && item.LotId == lotId && item.LocationId == locationId);
+        if (balance is null || balance.QtyAvailable < qty)
+        {
+            ModelState.AddModelError(nameof(qty), "Số lượng xuất vượt quá tồn kho khả dụng của lô tại vị trí đã chọn.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            await LoadIssueSelectionsAsync();
+            return View();
+        }
+
+        if (_inventoryService is null)
+        {
+            throw new InvalidOperationException("IInventoryService is required to complete a goods issue.");
+        }
+
+        var issue = new GoodsIssue
+        {
+            IssueNo = $"GI-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
+            IssueDate = DateTime.UtcNow,
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsIssueLine { ProductId = productId, LotId = lotId, Qty = qty, LocationId = locationId }
+            }
+        };
+
+        await using var transaction = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+
+        try
+        {
+            _context.GoodsIssues.Add(issue);
+            await _context.SaveChangesAsync();
+            if (!await _inventoryService.CompleteGoodsIssueAsync(issue.Id, "system"))
+            {
+                await RollbackIssueAsync(issue, transaction);
+                return await IssueCompletionErrorAsync("Không thể hoàn tất phiếu xuất kho. Vui lòng thử lại.");
+            }
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync();
+            }
+
+            TempData["StatusMessage"] = $"Đã xuất kho {qty:N2} thành công.";
+            return RedirectToAction(nameof(Issues));
+        }
+        catch (Exception)
+        {
+            await RollbackIssueAsync(issue, transaction);
+            return await IssueCompletionErrorAsync("Có lỗi khi hoàn tất phiếu xuất kho. Vui lòng thử lại.");
+        }
+    }
+
     [HttpGet]
     [Authorize(Roles = "Admin,Warehouse,Manager")]
     public async Task<IActionResult> CreateReceipt()
@@ -167,6 +261,22 @@ public class InventoryController : Controller
             .ToListAsync();
     }
 
+    private async Task LoadIssueSelectionsAsync()
+    {
+        ViewBag.AvailableBalances = await _context.StockBalances
+            .Include(balance => balance.Product)
+            .Include(balance => balance.Lot)
+            .Include(balance => balance.Location)
+            .Where(balance => balance.QtyAvailable > 0 && balance.Product!.IsActive && balance.Location!.IsActive)
+            .OrderBy(balance => balance.Product!.Code)
+            .ThenBy(balance => balance.Lot!.ExpiryDate ?? DateTime.MaxValue)
+            .ThenBy(balance => balance.Lot!.ManufactureDate ?? DateTime.MaxValue)
+            .ThenBy(balance => balance.LotId)
+            .ThenBy(balance => balance.Location!.Code)
+            .AsNoTracking()
+            .ToListAsync();
+    }
+
     private async Task RollbackReceiptAsync(GoodsReceipt receipt, IDbContextTransaction? transaction)
     {
         if (transaction is not null)
@@ -180,10 +290,30 @@ public class InventoryController : Controller
         await _context.SaveChangesAsync();
     }
 
+    private async Task RollbackIssueAsync(GoodsIssue issue, IDbContextTransaction? transaction)
+    {
+        if (transaction is not null)
+        {
+            await transaction.RollbackAsync();
+            _context.ChangeTracker.Clear();
+            return;
+        }
+
+        _context.GoodsIssues.Remove(issue);
+        await _context.SaveChangesAsync();
+    }
+
     private async Task<IActionResult> ReceiptCompletionErrorAsync(string message)
     {
         ModelState.AddModelError(string.Empty, message);
         await LoadReceiptSelectionsAsync();
         return View();
+    }
+
+    private async Task<IActionResult> IssueCompletionErrorAsync(string message)
+    {
+        ModelState.AddModelError(string.Empty, message);
+        await LoadIssueSelectionsAsync();
+        return View(nameof(CreateIssue));
     }
 }
