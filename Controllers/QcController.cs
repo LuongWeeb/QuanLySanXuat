@@ -21,7 +21,7 @@ public class QcController : Controller
 
     public async Task<IActionResult> Index()
     {
-        var lots = await _context.StockBalances.AsNoTracking().Where(x => x.QtyOnHold > 0)
+        var lots = await _context.StockBalances.AsNoTracking().Where(x => x.QtyOnHold > 0 && x.Location!.Code != QcService.QuarantineLocationCode)
             .Select(x => x.Lot!).Distinct().Include(x => x.Product).OrderBy(x => x.LotNo).ToListAsync();
         return View(lots);
     }
@@ -86,7 +86,7 @@ public class QcController : Controller
     private async Task<(QcInspectionInputModel Model, Lot Lot, QCChecklist Checklist)?> LoadAsync(int lotId)
     {
         var lot = await _context.Lots.AsNoTracking().Include(x => x.Product).SingleOrDefaultAsync(x => x.Id == lotId && x.WorkOrderId != null);
-        if (lot is null || !await _context.StockBalances.AnyAsync(x => x.LotId == lotId && x.QtyOnHold > 0)) return null;
+        if (lot is null || !await _context.StockBalances.AnyAsync(x => x.LotId == lotId && x.QtyOnHold > 0 && x.Location!.Code != QcService.QuarantineLocationCode)) return null;
         var checklist = await _context.QCChecklists.AsNoTracking().Include(x => x.Items).Where(x => x.ProductId == lot.ProductId && x.IsActive).OrderByDescending(x => x.Id).FirstOrDefaultAsync();
         if (checklist is null || checklist.Items.Count == 0) return null;
         var model = new QcInspectionInputModel { LotId=lot.Id, ChecklistId=checklist.Id, LotNo=lot.LotNo, ProductDisplay=$"{lot.Product?.Code} - {lot.Product?.Name}", ChecklistName=checklist.Name,

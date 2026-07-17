@@ -256,7 +256,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("BOMs");
+                    b.ToTable("BOMs", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.BOMItem", b =>
@@ -285,7 +285,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("ComponentProductId");
 
-                    b.ToTable("BOMItems");
+                    b.ToTable("BOMItems", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.Customer", b =>
@@ -329,7 +329,7 @@ namespace WmsMes.Web.Data.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("Customers");
+                    b.ToTable("Customers", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.GoodsIssue", b =>
@@ -361,7 +361,7 @@ namespace WmsMes.Web.Data.Migrations
                     b.HasIndex("IssueNo")
                         .IsUnique();
 
-                    b.ToTable("GoodsIssues");
+                    b.ToTable("GoodsIssues", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.GoodsIssueLine", b =>
@@ -397,7 +397,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("GoodsIssueLines");
+                    b.ToTable("GoodsIssueLines", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.GoodsReceipt", b =>
@@ -429,7 +429,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("SupplierId");
 
-                    b.ToTable("GoodsReceipts");
+                    b.ToTable("GoodsReceipts", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.GoodsReceiptLine", b =>
@@ -474,7 +474,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("GoodsReceiptLines");
+                    b.ToTable("GoodsReceiptLines", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.Location", b =>
@@ -508,7 +508,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("ZoneId");
 
-                    b.ToTable("Locations");
+                    b.ToTable("Locations", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.Lot", b =>
@@ -551,7 +551,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("Lots");
+                    b.ToTable("Lots", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.LotGenealogy", b =>
@@ -577,7 +577,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("OutputLotId");
 
-                    b.ToTable("LotGenealogies");
+                    b.ToTable("LotGenealogies", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.MaterialReservation", b =>
@@ -613,7 +613,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("MaterialReservations");
+                    b.ToTable("MaterialReservations", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.Product", b =>
@@ -665,7 +665,7 @@ namespace WmsMes.Web.Data.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("Products");
+                    b.ToTable("Products", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.QCChecklist", b =>
@@ -694,7 +694,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("QCChecklists");
+                    b.ToTable("QCChecklists", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.QCChecklistItem", b =>
@@ -731,7 +731,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("QCChecklistId");
 
-                    b.ToTable("QCChecklistItems");
+                    b.ToTable("QCChecklistItems", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.QCInspection", b =>
@@ -771,12 +771,11 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("LotId")
-                        .IsUnique();
+                    b.HasIndex("LotId");
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("QCInspections");
+                    b.ToTable("QCInspections", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.QCInspectionLine", b =>
@@ -807,7 +806,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("QCInspectionId");
 
-                    b.ToTable("QCInspectionLines");
+                    b.ToTable("QCInspectionLines", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.Routing", b =>
@@ -838,7 +837,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("Routings");
+                    b.ToTable("Routings", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.RoutingStep", b =>
@@ -875,7 +874,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("WorkCenterId");
 
-                    b.ToTable("RoutingSteps");
+                    b.ToTable("RoutingSteps", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.StockBalance", b =>
@@ -913,7 +912,7 @@ namespace WmsMes.Web.Data.Migrations
                     b.HasIndex("ProductId", "LotId", "LocationId")
                         .IsUnique();
 
-                    b.ToTable("StockBalances");
+                    b.ToTable("StockBalances", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.StockTransaction", b =>
@@ -960,7 +959,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("StockTransactions");
+                    b.ToTable("StockTransactions", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.StockTransfer", b =>
@@ -987,7 +986,7 @@ namespace WmsMes.Web.Data.Migrations
                     b.HasIndex("TransferNo")
                         .IsUnique();
 
-                    b.ToTable("StockTransfers");
+                    b.ToTable("StockTransfers", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.StockTransferLine", b =>
@@ -1028,7 +1027,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("ToLocationId");
 
-                    b.ToTable("StockTransferLines");
+                    b.ToTable("StockTransferLines", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.Stocktake", b =>
@@ -1060,7 +1059,7 @@ namespace WmsMes.Web.Data.Migrations
                     b.HasIndex("StocktakeNo")
                         .IsUnique();
 
-                    b.ToTable("Stocktakes");
+                    b.ToTable("Stocktakes", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.StocktakeLine", b =>
@@ -1097,7 +1096,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("StocktakeId");
 
-                    b.ToTable("StocktakeLines");
+                    b.ToTable("StocktakeLines", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.Supplier", b =>
@@ -1141,7 +1140,7 @@ namespace WmsMes.Web.Data.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("Suppliers");
+                    b.ToTable("Suppliers", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.UnitOfMeasure", b =>
@@ -1170,7 +1169,7 @@ namespace WmsMes.Web.Data.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("UnitOfMeasures");
+                    b.ToTable("UnitOfMeasures", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.Warehouse", b =>
@@ -1199,7 +1198,7 @@ namespace WmsMes.Web.Data.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("Warehouses");
+                    b.ToTable("Warehouses", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.WorkCenter", b =>
@@ -1228,7 +1227,7 @@ namespace WmsMes.Web.Data.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("WorkCenters");
+                    b.ToTable("WorkCenters", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.WorkOrder", b =>
@@ -1273,7 +1272,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("WorkOrders");
+                    b.ToTable("WorkOrders", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.WorkOrderStep", b =>
@@ -1322,7 +1321,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("WorkOrderSteps");
+                    b.ToTable("WorkOrderSteps", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.Zone", b =>
@@ -1356,7 +1355,7 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("Zones");
+                    b.ToTable("Zones", (string)null);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>

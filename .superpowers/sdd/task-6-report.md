@@ -47,3 +47,23 @@
 - Build: succeeded, 0 warnings, 0 errors.
 - EF migration script generation succeeded and contains `CREATE UNIQUE INDEX IX_QCInspections_LotId`.
 - Live `database update` was not run because the configured SQL Server LocalDB instance is unavailable in this environment.
+
+## Concurrency and quarantine redesign
+
+- Removed the unsafe unique `QCInspection.LotId` migration and model constraint so a lot can retain inspection history after being placed On Hold again.
+- Relational submissions now atomically claim positive On Hold rows outside `QC-QUARANTINE` with a conditional database update inside the existing transaction. A competing request that changes no rows returns false and cannot insert an inspection.
+- Rejected quantity from multiple source locations is consolidated into the single existing-or-new `(Product, Lot, QC-QUARANTINE)` balance. Source balances retain their location and are zeroed, avoiding collisions with the existing unique stock-balance key.
+- Quarantine stock is excluded from the pending-QC index, eligibility checks, and service claims.
+
+### TDD evidence for redesign
+
+1. RED: historical inspection was blocked by the unique lot index; multiple REJECT sources collided at quarantine; concurrent SQLite submissions both succeeded.
+2. GREEN: relational SQLite concurrency permits exactly one successful claim and one inspection; historical inspection succeeds after new non-quarantine hold stock is added; two sources plus a pre-existing quarantine balance consolidate correctly.
+
+### Final redesign verification
+
+- Focused QC controller/service tests: 24 passed, 0 failed.
+- Full suite: 86 passed, 0 failed.
+- Build: succeeded, 0 warnings, 0 errors.
+- Current migration SQL generation succeeded; no new migration is required because the unsafe unshipped migration was removed.
+- `dotnet ef database update --no-build --project WmsMes.Web.csproj` failed because SQL Server LocalDB could not create/connect to the automatic instance; no database-update success is claimed.

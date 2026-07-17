@@ -84,40 +84,68 @@ public class QcAndReportingTests
         var submitted = await service.SubmitQCInspectionAsync(inspection, "qc-user");
 
         Assert.True(submitted);
-        var balance = await context.StockBalances.SingleAsync(sb => sb.LotId == 20);
-        Assert.Equal(0m, balance.QtyAvailable);
-        Assert.Equal(8m, balance.QtyOnHold);
-        Assert.Equal(2, balance.LocationId);
+        var balances = await context.StockBalances.Where(sb => sb.LotId == 20).ToListAsync();
+        Assert.Equal(0m, balances.Sum(x => x.QtyAvailable));
+        Assert.Equal(8m, balances.Single(x => x.LocationId == 2).QtyOnHold);
+        Assert.Equal(0m, balances.Single(x => x.LocationId == 1).QtyOnHold);
         Assert.Equal(QCResult.REJECT, (await context.QCInspections.SingleAsync()).Result);
         Assert.Contains(await context.StockTransfers.Include(t => t.Lines).ToListAsync(),
             transfer => transfer.Lines.Any(line => line.LotId == 20 && line.ToLocationId == 2 && line.Qty == 8m));
     }
 
     [Fact]
-    public async Task SubmitQCInspectionAsync_SecondSubmissionForLotIsRejectedWithoutDuplicate()
+    public async Task SubmitQCInspectionAsync_AllowsHistoricalInspectionAfterLotIsPlacedOnHoldAgain()
     {
         await using var context = CreateContext(); await SeedQcDataAsync(context); var service = new QcService(context, new CostingService(context));
         var first = new QCInspection { WorkOrderId=100,LotId=20,Result=QCResult.PASS,Lines={new QCInspectionLine{ParameterName="Do am",ValueInspected="12"}}};
         var second = new QCInspection { WorkOrderId=100,LotId=20,Result=QCResult.REJECT,Lines={new QCInspectionLine{ParameterName="Do am",ValueInspected="20"}}};
         Assert.True(await service.SubmitQCInspectionAsync(first,"qc-1"));
-        Assert.False(await service.SubmitQCInspectionAsync(second,"qc-2"));
-        Assert.Single(await context.QCInspections.ToListAsync());
+        var balance=await context.StockBalances.SingleAsync(x=>x.LotId==20); balance.QtyOnHold=3; await context.SaveChangesAsync();
+        Assert.True(await service.SubmitQCInspectionAsync(second,"qc-2"));
+        Assert.Equal(2,await context.QCInspections.CountAsync());
     }
 
     [Fact]
-    public void QcInspectionModel_HasUniqueLotConstraintForConcurrentSubmissions()
+    public void QcInspectionModel_DoesNotForbidHistoricalInspectionsForLot()
     {
         using var context=CreateContext(); var entity=context.Model.FindEntityType(typeof(QCInspection))!;
-        Assert.Contains(entity.GetIndexes(),x=>x.IsUnique && x.Properties.Select(p=>p.Name).SequenceEqual(new[]{nameof(QCInspection.LotId)}));
+        Assert.DoesNotContain(entity.GetIndexes(),x=>x.IsUnique && x.Properties.Select(p=>p.Name).SequenceEqual(new[]{nameof(QCInspection.LotId)}));
     }
 
     [Fact]
     public async Task SubmitQCInspectionAsync_ReleasesEveryOnHoldBalanceForLot()
     {
-        await using var context=CreateContext(); await SeedQcDataAsync(context); context.StockBalances.Add(new StockBalance{ProductId=1,LotId=20,LocationId=2,QtyOnHold=2}); await context.SaveChangesAsync();
+        await using var context=CreateContext(); await SeedQcDataAsync(context); context.Locations.Add(new Location{Id=3,ZoneId=1,Code="FG-02",Name="Second"}); context.StockBalances.Add(new StockBalance{ProductId=1,LotId=20,LocationId=3,QtyOnHold=2}); await context.SaveChangesAsync();
         var service=new QcService(context,new CostingService(context)); var inspection=new QCInspection{WorkOrderId=100,LotId=20,Result=QCResult.PASS,Lines={new QCInspectionLine{ParameterName="Do am",ValueInspected="12"}}};
         Assert.True(await service.SubmitQCInspectionAsync(inspection,"qc"));
         var balances=await context.StockBalances.Where(x=>x.LotId==20).ToListAsync(); Assert.All(balances,x=>Assert.Equal(0,x.QtyOnHold)); Assert.Equal(10,balances.Sum(x=>x.QtyAvailable));
+    }
+
+    [Fact]
+    public async Task SubmitQCInspectionAsync_RejectConsolidatesMultipleSourcesIntoExistingQuarantineBalance()
+    {
+        await using var context=CreateContext(); await SeedQcDataAsync(context);
+        context.Locations.Add(new Location{Id=3,ZoneId=1,Code="FG-02",Name="Second"});
+        context.StockBalances.AddRange(new StockBalance{ProductId=1,LotId=20,LocationId=3,QtyOnHold=2},new StockBalance{ProductId=1,LotId=20,LocationId=2,QtyOnHold=1,QtyAvailable=4}); await context.SaveChangesAsync();
+        var service=new QcService(context,new CostingService(context)); var inspection=new QCInspection{WorkOrderId=100,LotId=20,Result=QCResult.REJECT,Lines={new QCInspectionLine{ParameterName="Do am",ValueInspected="20"}}};
+        Assert.True(await service.SubmitQCInspectionAsync(inspection,"qc"));
+        var balances=await context.StockBalances.Where(x=>x.LotId==20).OrderBy(x=>x.LocationId).ToListAsync();
+        Assert.Equal(3,balances.Count); Assert.Equal(11,balances.Single(x=>x.LocationId==2).QtyOnHold); Assert.Equal(4,balances.Single(x=>x.LocationId==2).QtyAvailable); Assert.All(balances.Where(x=>x.LocationId!=2),x=>Assert.Equal(0,x.QtyOnHold));
+    }
+
+    [Fact]
+    public async Task SubmitQCInspectionAsync_ConcurrentRelationalClaimsCreateOnlyOneInspection()
+    {
+        var file=Path.Combine(Path.GetTempPath(), $"qc-{Guid.NewGuid()}.db");
+        try
+        {
+            var options=new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite($"Data Source={file};Default Timeout=10;Pooling=False").Options;
+            await using(var seed=new ApplicationDbContext(options)){await seed.Database.EnsureCreatedAsync();await SeedQcDataAsync(seed);}
+            async Task<bool> Submit(string user){await using var db=new ApplicationDbContext(options);return await new QcService(db,new CostingService(db)).SubmitQCInspectionAsync(new QCInspection{WorkOrderId=100,LotId=20,Result=QCResult.REJECT,Lines={new QCInspectionLine{ParameterName="Do am",ValueInspected="20"}}},user);}
+            var results=await Task.WhenAll(Submit("qc-1"),Submit("qc-2"));
+            Assert.Single(results.Where(x=>x)); await using var verify=new ApplicationDbContext(options); Assert.Single(await verify.QCInspections.ToListAsync()); Assert.All(await verify.StockBalances.Where(x=>x.LotId==20 && x.Location!.Code!=QcService.QuarantineLocationCode).ToListAsync(),x=>Assert.Equal(0,x.QtyOnHold));
+        }
+        finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if(File.Exists(file)) File.Delete(file); }
     }
 
     [Fact]

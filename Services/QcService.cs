@@ -44,13 +44,9 @@ public class QcService : IQcService
                 return false;
             }
 
-            if (await _context.QCInspections.AnyAsync(i => i.LotId == inspection.LotId))
-            {
-                return false;
-            }
-
             var balances = await _context.StockBalances
-                .Where(sb => sb.LotId == inspection.LotId && sb.QtyOnHold > 0)
+                .Where(sb => sb.LotId == inspection.LotId && sb.QtyOnHold > 0 && sb.Location!.Code != QuarantineLocationCode)
+                .AsNoTracking()
                 .ToListAsync();
             if (balances.Count == 0)
             {
@@ -66,24 +62,20 @@ public class QcService : IQcService
                 inspection.Result = QCResult.REJECT;
             }
 
+            if (!await ClaimHeldStockAsync(inspection, balances))
+            {
+                return false;
+            }
+
             await _context.QCInspections.AddAsync(inspection);
-            await _context.SaveChangesAsync();
 
             if (inspection.Result == QCResult.PASS)
             {
-                foreach (var balance in balances)
-                {
-                    balance.QtyAvailable += balance.QtyOnHold;
-                    balance.QtyOnHold = 0m;
-                }
                 lot.UnitPrice = await _costingService.CalculateProductionCostAsync(inspection.WorkOrderId);
             }
             else if (inspection.Result == QCResult.REJECT)
             {
-                foreach (var balance in balances)
-                {
-                    await MoveHoldToQuarantineAsync(balance, userId);
-                }
+                await ConsolidateHoldInQuarantineAsync(balances, userId);
             }
 
             await _context.SaveChangesAsync();
@@ -134,7 +126,31 @@ public class QcService : IQcService
         }
     }
 
-    private async Task MoveHoldToQuarantineAsync(StockBalance balance, string userId)
+    private async Task<bool> ClaimHeldStockAsync(QCInspection inspection, IReadOnlyCollection<StockBalance> balances)
+    {
+        if (_context.Database.IsRelational())
+        {
+            var query = _context.StockBalances.Where(sb => sb.LotId == inspection.LotId && sb.QtyOnHold > 0 && sb.Location!.Code != QuarantineLocationCode);
+            var affected = inspection.Result == QCResult.PASS
+                ? await query.ExecuteUpdateAsync(setters => setters
+                    .SetProperty(sb => sb.QtyAvailable, sb => sb.QtyAvailable + sb.QtyOnHold)
+                    .SetProperty(sb => sb.QtyOnHold, 0m))
+                : await query.ExecuteUpdateAsync(setters => setters.SetProperty(sb => sb.QtyOnHold, 0m));
+            return affected == balances.Count;
+        }
+
+        var ids = balances.Select(x => x.Id).ToList();
+        var tracked = await _context.StockBalances.Where(x => ids.Contains(x.Id) && x.QtyOnHold > 0).ToListAsync();
+        if (tracked.Count != balances.Count) return false;
+        foreach (var balance in tracked)
+        {
+            if (inspection.Result == QCResult.PASS) balance.QtyAvailable += balance.QtyOnHold;
+            balance.QtyOnHold = 0m;
+        }
+        return true;
+    }
+
+    private async Task ConsolidateHoldInQuarantineAsync(IReadOnlyCollection<StockBalance> sources, string userId)
     {
         var quarantine = await _context.Locations
             .FirstOrDefaultAsync(l => l.Code == QuarantineLocationCode);
@@ -143,38 +159,31 @@ public class QcService : IQcService
             throw new InvalidOperationException($"Location {QuarantineLocationCode} was not found.");
         }
 
-        var transfer = new StockTransfer
+        var first = sources.First();
+        var target = await _context.StockBalances.FirstOrDefaultAsync(x =>
+            x.ProductId == first.ProductId && x.LotId == first.LotId && x.LocationId == quarantine.Id);
+        if (target is null)
         {
-            TransferNo = $"QC-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
-            TransferDate = DateTime.UtcNow,
-            Status = DocumentStatus.Completed,
-            Lines =
+            target = new StockBalance { ProductId = first.ProductId, LotId = first.LotId, LocationId = quarantine.Id };
+            await _context.StockBalances.AddAsync(target);
+        }
+        target.QtyOnHold += sources.Sum(x => x.QtyOnHold);
+
+        foreach (var source in sources.Where(x => x.LocationId != quarantine.Id))
+        {
+            var transfer = new StockTransfer
             {
-                new StockTransferLine
+                TransferNo = $"QC-{Guid.NewGuid():N}",
+                TransferDate = DateTime.UtcNow,
+                Status = DocumentStatus.Completed,
+                Lines =
                 {
-                    ProductId = balance.ProductId,
-                    LotId = balance.LotId,
-                    FromLocationId = balance.LocationId,
-                    ToLocationId = quarantine.Id,
-                    Qty = balance.QtyOnHold
+                    new StockTransferLine { ProductId=source.ProductId,LotId=source.LotId,FromLocationId=source.LocationId,ToLocationId=quarantine.Id,Qty=source.QtyOnHold }
                 }
-            }
-        };
-        await _context.StockTransfers.AddAsync(transfer);
-
-        await _context.StockTransactions.AddAsync(new StockTransaction
-        {
-            Type = TransactionType.Transfer,
-            ProductId = balance.ProductId,
-            LotId = balance.LotId,
-            LocationId = quarantine.Id,
-            Qty = 0m,
-            TransactionDate = DateTime.UtcNow,
-            UserId = userId,
-            ReferenceNo = transfer.TransferNo
-        });
-
-        balance.LocationId = quarantine.Id;
+            };
+            await _context.StockTransfers.AddAsync(transfer);
+            await _context.StockTransactions.AddAsync(new StockTransaction { Type=TransactionType.Transfer,ProductId=source.ProductId,LotId=source.LotId,LocationId=quarantine.Id,Qty=0m,TransactionDate=DateTime.UtcNow,UserId=userId,ReferenceNo=transfer.TransferNo });
+        }
     }
 
     private static bool IsAffirmative(string value)
