@@ -1,8 +1,97 @@
-﻿@{
-    ViewData["Title"] = "Home Page";
+@model WmsMes.Web.ViewModels.DashboardViewModel
+@{
+    ViewData["Title"] = "Bảng điều khiển";
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
-</div>
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Tổng quan vận hành</p>
+        <h2>Bảng điều khiển thời gian thực</h2>
+        <p class="text-muted mb-0">Số liệu được đồng bộ tự động khi sản xuất hoặc tồn kho thay đổi.</p>
+    </div>
+    <div class="connection-pill is-waiting" id="dashboardConnectionState" aria-live="polite">
+        <span class="connection-dot"></span>
+        <span id="dashboardConnectionLabel">Đang kết nối</span>
+    </div>
+</section>
+
+<section class="metric-grid" aria-label="Chỉ số vận hành">
+    <article class="metric-card">
+        <span>Lệnh đang chạy</span>
+        <strong id="activeWorkOrders">@Model.ActiveWorkOrders.ToString("N0")</strong>
+        <small class="text-muted">Trạng thái In progress</small>
+    </article>
+    <article class="metric-card">
+        <span>Lô chờ QC</span>
+        <strong id="pendingQcLots">@Model.PendingQcLots.ToString("N0")</strong>
+        <small class="text-muted">Lô có hàng tạm giữ, không gồm khu cách ly</small>
+    </article>
+    <article class="metric-card">
+        <span>Khối lượng tồn kho</span>
+        <strong id="inventoryVolume">@Model.InventoryVolume.ToString("N2")</strong>
+        <small class="text-muted">Khả dụng + giữ chỗ + tạm giữ</small>
+    </article>
+</section>
+
+<section class="data-panel mt-4">
+    <h3 class="h5">Trạng thái realtime</h3>
+    <p class="mb-0 text-muted">Dashboard lắng nghe cập nhật từ hệ thống sản xuất và kho. Khi có tín hiệu, số liệu mới được lấy lại từ máy chủ mà không tải lại trang.</p>
+</section>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <script>
+        (() => {
+            const metricsUrl = '@Url.Action("Metrics", "Home")';
+            const label = document.getElementById("dashboardConnectionLabel");
+            const state = document.getElementById("dashboardConnectionState");
+            const number = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 });
+            let refreshTimer;
+
+            const setState = (text, modifier) => {
+                label.textContent = text;
+                state.className = `connection-pill ${modifier}`;
+            };
+
+            const refreshMetrics = async () => {
+                try {
+                    const response = await fetch(metricsUrl, { headers: { "Accept": "application/json" } });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const metrics = await response.json();
+                    document.getElementById("activeWorkOrders").textContent = number.format(metrics.activeWorkOrders);
+                    document.getElementById("pendingQcLots").textContent = number.format(metrics.pendingQcLots);
+                    document.getElementById("inventoryVolume").textContent = number.format(metrics.inventoryVolume);
+                    setState("Realtime", "is-live");
+                } catch {
+                    setState("Không thể cập nhật", "is-offline");
+                }
+            };
+
+            const scheduleRefresh = () => {
+                window.clearTimeout(refreshTimer);
+                refreshTimer = window.setTimeout(refreshMetrics, 150);
+            };
+
+            const createConnection = (url, eventName) => {
+                const connection = new signalR.HubConnectionBuilder()
+                    .withUrl(url)
+                    .withAutomaticReconnect()
+                    .build();
+                connection.on(eventName, scheduleRefresh);
+                connection.onreconnecting(() => setState("Đang nối lại", "is-waiting"));
+                connection.onreconnected(() => { setState("Realtime", "is-live"); scheduleRefresh(); });
+                connection.onclose(() => setState("Mất kết nối", "is-offline"));
+                return connection;
+            };
+
+            const connections = [
+                createConnection("/productionHub", "ReceiveProgressUpdate"),
+                createConnection("/inventoryHub", "ReceiveStockUpdate")
+            ];
+
+            Promise.all(connections.map(connection => connection.start()))
+                .then(() => setState("Realtime", "is-live"))
+                .catch(() => setState("Không kết nối", "is-offline"));
+        })();
+    </script>
+}

@@ -1,13 +1,38 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
+using Moq;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Services;
+using WmsMes.Web.Hubs;
 
 namespace WmsMes.Tests;
 
 public class QcAndReportingTests
 {
+    [Fact]
+    public async Task SubmitQCInspectionAsync_NotifiesInventoryDashboard_WhenInspectionPasses()
+    {
+        await using var context = CreateContext();
+        await SeedQcDataAsync(context);
+        var client = new Mock<IClientProxy>();
+        var clients = new Mock<IHubClients>();
+        clients.SetupGet(x => x.All).Returns(client.Object);
+        var inventoryHub = new Mock<IHubContext<InventoryHub>>();
+        inventoryHub.SetupGet(x => x.Clients).Returns(clients.Object);
+        var service = new QcService(context, new CostingService(context), null, inventoryHub.Object);
+        var inspection = new QCInspection
+        {
+            WorkOrderId = 100, LotId = 20, Result = QCResult.PASS,
+            Lines = { new QCInspectionLine { ParameterName = "Do am", ValueInspected = "12" } }
+        };
+
+        Assert.True(await service.SubmitQCInspectionAsync(inspection, "qc-user"));
+
+        client.Verify(x => x.SendCoreAsync("ReceiveStockUpdate", It.Is<object?[]>(a => a.Length == 0), default), Times.Once);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

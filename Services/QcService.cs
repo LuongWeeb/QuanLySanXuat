@@ -15,20 +15,23 @@ public class QcService : IQcService
     private readonly ApplicationDbContext _context;
     private readonly ICostingService _costingService;
     private readonly IHubContext<QualityHub>? _qualityHub;
+    private readonly IHubContext<InventoryHub>? _inventoryHub;
 
     public QcService(ApplicationDbContext context, ICostingService costingService)
-        : this(context, costingService, null)
+        : this(context, costingService, null, null)
     {
     }
 
     public QcService(
         ApplicationDbContext context,
         ICostingService costingService,
-        IHubContext<QualityHub>? qualityHub)
+        IHubContext<QualityHub>? qualityHub,
+        IHubContext<InventoryHub>? inventoryHub = null)
     {
         _context = context;
         _costingService = costingService;
         _qualityHub = qualityHub;
+        _inventoryHub = inventoryHub;
     }
 
     public async Task<bool> SubmitQCInspectionAsync(QCInspection inspection, string userId)
@@ -84,6 +87,10 @@ public class QcService : IQcService
             if (inspection.Result == QCResult.REJECT && _qualityHub is not null)
             {
                 await _qualityHub.Clients.All.SendAsync("ReceiveQcAlert", lot.LotNo, inspection.Result.ToString());
+            }
+            if (_inventoryHub is not null)
+            {
+                await _inventoryHub.Clients.All.SendAsync("ReceiveStockUpdate");
             }
 
             return true;
