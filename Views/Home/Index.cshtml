@@ -36,6 +36,7 @@
 <section class="data-panel mt-4">
     <h3 class="h5">Trạng thái realtime</h3>
     <p class="mb-0 text-muted">Dashboard lắng nghe cập nhật từ hệ thống sản xuất và kho. Khi có tín hiệu, số liệu mới được lấy lại từ máy chủ mà không tải lại trang.</p>
+    <p class="mb-0 mt-2 text-muted" id="refreshState" aria-live="polite">Số liệu hiện tại</p>
 </section>
 
 @section Scripts {
@@ -46,24 +47,46 @@
             const label = document.getElementById("dashboardConnectionLabel");
             const state = document.getElementById("dashboardConnectionState");
             const number = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 });
+            const refreshState = document.getElementById("refreshState");
+            const connectivity = new Map();
             let refreshTimer;
+            let refreshGeneration = 0;
+            let activeRequest;
 
             const setState = (text, modifier) => {
                 label.textContent = text;
                 state.className = `connection-pill ${modifier}`;
             };
 
+            const renderConnectivity = () => {
+                const values = [...connectivity.values()];
+                const connected = values.filter(value => value === "connected").length;
+                if (connected === values.length) setState("Realtime", "is-live");
+                else if (connected > 0) setState(`${connected}/${values.length} kênh realtime`, "is-waiting");
+                else setState("Mất kết nối", "is-offline");
+            };
+
             const refreshMetrics = async () => {
+                const generation = ++refreshGeneration;
+                activeRequest?.abort();
+                activeRequest = new AbortController();
+                refreshState.textContent = "Đang cập nhật số liệu";
                 try {
-                    const response = await fetch(metricsUrl, { headers: { "Accept": "application/json" } });
+                    const response = await fetch(metricsUrl, {
+                        headers: { "Accept": "application/json" },
+                        signal: activeRequest.signal
+                    });
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     const metrics = await response.json();
+                    if (generation !== refreshGeneration) return;
                     document.getElementById("activeWorkOrders").textContent = number.format(metrics.activeWorkOrders);
                     document.getElementById("pendingQcLots").textContent = number.format(metrics.pendingQcLots);
                     document.getElementById("inventoryVolume").textContent = number.format(metrics.inventoryVolume);
-                    setState("Realtime", "is-live");
-                } catch {
-                    setState("Không thể cập nhật", "is-offline");
+                    refreshState.textContent = "Số liệu vừa được cập nhật";
+                } catch (error) {
+                    if (error.name !== "AbortError" && generation === refreshGeneration) {
+                        refreshState.textContent = "Không thể cập nhật số liệu";
+                    }
                 }
             };
 
@@ -72,26 +95,45 @@
                 refreshTimer = window.setTimeout(refreshMetrics, 150);
             };
 
-            const createConnection = (url, eventName) => {
+            const createConnection = (name, url, eventName) => {
                 const connection = new signalR.HubConnectionBuilder()
                     .withUrl(url)
                     .withAutomaticReconnect()
                     .build();
                 connection.on(eventName, scheduleRefresh);
-                connection.onreconnecting(() => setState("Đang nối lại", "is-waiting"));
-                connection.onreconnected(() => { setState("Realtime", "is-live"); scheduleRefresh(); });
-                connection.onclose(() => setState("Mất kết nối", "is-offline"));
-                return connection;
+                connection.onreconnecting(() => { connectivity.set(name, "connecting"); renderConnectivity(); });
+                connection.onreconnected(() => { connectivity.set(name, "connected"); renderConnectivity(); scheduleRefresh(); });
+                return { name, connection, retryAttempt: 0, retryTimer: null };
             };
 
             const connections = [
-                createConnection("/productionHub", "ReceiveProgressUpdate"),
-                createConnection("/inventoryHub", "ReceiveStockUpdate")
+                createConnection("production", "/productionHub", "ReceiveProgressUpdate"),
+                createConnection("inventory", "/inventoryHub", "ReceiveStockUpdate")
             ];
 
-            Promise.all(connections.map(connection => connection.start()))
-                .then(() => setState("Realtime", "is-live"))
-                .catch(() => setState("Không kết nối", "is-offline"));
+            const startWithRetry = async (hub) => {
+                window.clearTimeout(hub.retryTimer);
+                connectivity.set(hub.name, "connecting");
+                renderConnectivity();
+                try {
+                    await hub.connection.start();
+                    hub.retryAttempt = 0;
+                    connectivity.set(hub.name, "connected");
+                    renderConnectivity();
+                } catch {
+                    connectivity.set(hub.name, "offline");
+                    renderConnectivity();
+                    const delay = Math.min(30000, 1000 * (2 ** hub.retryAttempt));
+                    hub.retryAttempt = Math.min(hub.retryAttempt + 1, 5);
+                    hub.retryTimer = window.setTimeout(() => startWithRetry(hub), delay);
+                }
+            };
+
+            connections.forEach(hub => {
+                connectivity.set(hub.name, "connecting");
+                hub.connection.onclose(() => startWithRetry(hub));
+                startWithRetry(hub);
+            });
         })();
     </script>
 }

@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using WmsMes.Web.Controllers;
@@ -6,6 +8,7 @@ using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.ViewModels;
+using WmsMes.Web.Hubs;
 
 namespace WmsMes.Tests;
 
@@ -51,6 +54,42 @@ public class HomeControllerTests
         Assert.Contains("@Url.Action(\"Metrics\", \"Home\")", view);
         Assert.Contains("withAutomaticReconnect", view);
         Assert.DoesNotContain("location.reload", view);
+    }
+
+    [Fact]
+    public void DashboardView_RetriesHubsIndependentlyAndRejectsStaleMetricResponses()
+    {
+        var view = File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Home", "Index.cshtml"));
+
+        Assert.Contains("startWithRetry", view);
+        Assert.Contains("retryAttempt", view);
+        Assert.DoesNotContain("Promise.all(connections", view);
+        Assert.Contains("AbortController", view);
+        Assert.Contains("refreshGeneration", view);
+        Assert.Contains("connectivity", view);
+        Assert.Contains("refreshState", view);
+    }
+
+    [Fact]
+    public void RealtimeHubs_RequireAuthenticatedConnections()
+    {
+        Assert.NotNull(typeof(InventoryHub).GetCustomAttributes(typeof(AuthorizeAttribute), true).SingleOrDefault());
+        Assert.NotNull(typeof(ProductionHub).GetCustomAttributes(typeof(AuthorizeAttribute), true).SingleOrDefault());
+        var program = File.ReadAllText(Path.Combine(ProjectRoot(), "Program.cs"));
+        Assert.Contains("MapHub<InventoryHub>(\"/inventoryHub\")", program);
+        Assert.Contains("MapHub<ProductionHub>(\"/productionHub\")", program);
+    }
+
+    [Fact]
+    public void Metrics_DisablesResponseCaching()
+    {
+        var attribute = typeof(HomeController).GetMethod(nameof(HomeController.Metrics))!
+            .GetCustomAttributes(typeof(ResponseCacheAttribute), true)
+            .Cast<ResponseCacheAttribute>()
+            .Single();
+
+        Assert.True(attribute.NoStore);
+        Assert.Equal(ResponseCacheLocation.None, attribute.Location);
     }
 
     private static ApplicationDbContext CreateContext() => new(

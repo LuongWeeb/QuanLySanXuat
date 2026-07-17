@@ -25,3 +25,17 @@ The same focused command passed 3/3 tests after the minimal controller, view mod
 ## Verification
 
 See the final task handoff for fresh full-test and build results.
+
+## Review fixes
+
+- Production and inventory connections now start and retry independently. Initial failures retry with exponential delay capped at 30 seconds; one unavailable hub no longer suppresses the other hub's state.
+- Connectivity and metrics-refresh states are rendered separately.
+- Each metrics refresh aborts its predecessor and uses a monotonically increasing generation, preventing aborted or older responses from updating the cards.
+- `QcService` catches and logs post-commit hub failures independently, preserving the committed PASS/REJECT result and allowing the other notification channel to proceed.
+- `InventoryHub` and `ProductionHub` now require authenticated connections; tests verify authorization metadata and mapped route contracts.
+- `/Home/Metrics` explicitly disables response caching.
+- No local SignalR browser client was found under `wwwroot`. The existing cdnjs 8.0.0 reference remains; no SRI value was added because an integrity hash was not locally verifiable.
+
+### Review TDD evidence
+
+The focused review test run first failed with `CS1729` because the requested logger-aware `QcService` constructor did not exist. After implementation, the focused controller/notification set passed 8/8 tests, including PASS and REJECT notification-failure persistence cases.

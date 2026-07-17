@@ -28,6 +28,7 @@ public class HomeController : Controller
     }
 
     [HttpGet]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     public async Task<IActionResult> Metrics()
     {
         return Ok(await GetMetricsAsync());

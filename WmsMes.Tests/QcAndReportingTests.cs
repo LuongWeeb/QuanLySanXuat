@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 using Moq;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
@@ -11,6 +12,35 @@ namespace WmsMes.Tests;
 
 public class QcAndReportingTests
 {
+    [Theory]
+    [InlineData(QCResult.PASS)]
+    [InlineData(QCResult.REJECT)]
+    public async Task SubmitQCInspectionAsync_WhenPostCommitNotificationFails_ReturnsSuccessAndLogs(QCResult result)
+    {
+        await using var context = CreateContext();
+        await SeedQcDataAsync(context);
+        var client = new Mock<IClientProxy>();
+        client.Setup(x => x.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("hub unavailable"));
+        var clients = new Mock<IHubClients>();
+        clients.SetupGet(x => x.All).Returns(client.Object);
+        var inventoryHub = new Mock<IHubContext<InventoryHub>>();
+        inventoryHub.SetupGet(x => x.Clients).Returns(clients.Object);
+        var logger = new Mock<ILogger<QcService>>();
+        var service = new QcService(context, new CostingService(context), null, inventoryHub.Object, logger.Object);
+        var inspection = new QCInspection
+        {
+            WorkOrderId = 100, LotId = 20, Result = result,
+            Lines = { new QCInspectionLine { ParameterName = "Do am", ValueInspected = result == QCResult.PASS ? "12" : "20" } }
+        };
+
+        Assert.True(await service.SubmitQCInspectionAsync(inspection, "qc-user"));
+        context.ChangeTracker.Clear();
+        Assert.Equal(result, (await context.QCInspections.SingleAsync()).Result);
+        logger.Verify(x => x.Log(LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(),
+            It.IsAny<Exception>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+    }
+
     [Fact]
     public async Task SubmitQCInspectionAsync_NotifiesInventoryDashboard_WhenInspectionPasses()
     {

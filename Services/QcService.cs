@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging.Abstractions;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -16,6 +17,7 @@ public class QcService : IQcService
     private readonly ICostingService _costingService;
     private readonly IHubContext<QualityHub>? _qualityHub;
     private readonly IHubContext<InventoryHub>? _inventoryHub;
+    private readonly ILogger<QcService> _logger;
 
     public QcService(ApplicationDbContext context, ICostingService costingService)
         : this(context, costingService, null, null)
@@ -26,12 +28,14 @@ public class QcService : IQcService
         ApplicationDbContext context,
         ICostingService costingService,
         IHubContext<QualityHub>? qualityHub,
-        IHubContext<InventoryHub>? inventoryHub = null)
+        IHubContext<InventoryHub>? inventoryHub = null,
+        ILogger<QcService>? logger = null)
     {
         _context = context;
         _costingService = costingService;
         _qualityHub = qualityHub;
         _inventoryHub = inventoryHub;
+        _logger = logger ?? NullLogger<QcService>.Instance;
     }
 
     public async Task<bool> SubmitQCInspectionAsync(QCInspection inspection, string userId)
@@ -84,14 +88,7 @@ public class QcService : IQcService
             await _context.SaveChangesAsync();
             await CommitIfRelationalAsync(transaction);
 
-            if (inspection.Result == QCResult.REJECT && _qualityHub is not null)
-            {
-                await _qualityHub.Clients.All.SendAsync("ReceiveQcAlert", lot.LotNo, inspection.Result.ToString());
-            }
-            if (_inventoryHub is not null)
-            {
-                await _inventoryHub.Clients.All.SendAsync("ReceiveStockUpdate");
-            }
+            await NotifyAfterCommitAsync(inspection, lot.LotNo);
 
             return true;
         }
@@ -155,6 +152,33 @@ public class QcService : IQcService
             balance.QtyOnHold = 0m;
         }
         return true;
+    }
+
+    private async Task NotifyAfterCommitAsync(QCInspection inspection, string lotNo)
+    {
+        if (inspection.Result == QCResult.REJECT && _qualityHub is not null)
+        {
+            try
+            {
+                await _qualityHub.Clients.All.SendAsync("ReceiveQcAlert", lotNo, inspection.Result.ToString());
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "QC inspection {InspectionId} committed but quality notification failed.", inspection.Id);
+            }
+        }
+
+        if (_inventoryHub is not null)
+        {
+            try
+            {
+                await _inventoryHub.Clients.All.SendAsync("ReceiveStockUpdate");
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "QC inspection {InspectionId} committed but inventory notification failed.", inspection.Id);
+            }
+        }
     }
 
     private async Task ConsolidateHoldInQuarantineAsync(IReadOnlyCollection<StockBalance> sources, string userId)
