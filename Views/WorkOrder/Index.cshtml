@@ -1,0 +1,45 @@
+@model IEnumerable<WmsMes.Web.Domain.Entities.WorkOrder>
+@using WmsMes.Web.Domain.Enums
+@{
+    ViewData["Title"] = "Lệnh sản xuất";
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">MES</p>
+        <h2>Quản lý Lệnh sản xuất</h2>
+    </div>
+    <a class="btn btn-primary" asp-action="Create">Tạo lệnh nháp</a>
+</section>
+
+@if (TempData["StatusMessage"] is string statusMessage)
+{
+    <div class="alert alert-info mt-3" role="status">@statusMessage</div>
+}
+
+<section class="data-panel mt-3">
+    <div class="table-responsive">
+        <table class="table data-table align-middle">
+            <thead>
+                <tr><th>Mã lệnh</th><th>Thành phẩm</th><th class="text-end">Số lượng</th><th>Hạn hoàn thành</th><th>Trạng thái</th><th></th></tr>
+            </thead>
+            <tbody>
+            @foreach (var order in Model)
+            {
+                <tr>
+                    <td><code>@order.Code</code></td>
+                    <td>@order.Product?.Code - @order.Product?.Name</td>
+                    <td class="text-end fw-semibold">@order.Qty.ToString("N2")</td>
+                    <td>@order.DueDate.ToString("yyyy-MM-dd")</td>
+                    <td><span class="status-pill">@order.Status</span></td>
+                    <td class="text-end"><a class="btn btn-sm btn-outline-primary" asp-action="Details" asp-route-id="@order.Id">Chi tiết</a></td>
+                </tr>
+            }
+            @if (!Model.Any())
+            {
+                <tr><td colspan="6" class="text-center text-muted py-4">Chưa có lệnh sản xuất.</td></tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</section>

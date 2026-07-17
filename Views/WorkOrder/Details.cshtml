@@ -1,0 +1,73 @@
+@model WmsMes.Web.Domain.Entities.WorkOrder
+@using WmsMes.Web.Domain.Entities
+@using WmsMes.Web.Domain.Enums
+@{
+    ViewData["Title"] = $"Lệnh {Model.Code}";
+    var reservations = ViewData["Reservations"] as IEnumerable<MaterialReservation> ?? Enumerable.Empty<MaterialReservation>();
+}
+
+<section class="toolbar-row">
+    <div><p class="eyebrow">Work Order</p><h2>@Model.Code</h2></div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a>
+        @if (Model.Status is WorkOrderStatus.Draft or WorkOrderStatus.Pending)
+        {
+            <form asp-action="Approve" asp-route-id="@Model.Id" method="post">
+                <button class="btn btn-primary" type="submit">Phê duyệt</button>
+            </form>
+        }
+        @if (Model.Status == WorkOrderStatus.InProgress)
+        {
+            <form asp-action="Complete" asp-route-id="@Model.Id" method="post">
+                <button class="btn btn-success" type="submit">Xác nhận hoàn thành</button>
+            </form>
+        }
+    </div>
+</section>
+
+@if (TempData["StatusMessage"] is string statusMessage)
+{
+    <div class="alert alert-info mt-3" role="status">@statusMessage</div>
+}
+
+<section class="ops-panel mt-3">
+    <dl class="row mb-0">
+        <dt class="col-sm-3">Thành phẩm</dt><dd class="col-sm-9">@Model.Product?.Code - @Model.Product?.Name</dd>
+        <dt class="col-sm-3">Số lượng</dt><dd class="col-sm-9">@Model.Qty.ToString("N2")</dd>
+        <dt class="col-sm-3">Hạn hoàn thành</dt><dd class="col-sm-9">@Model.DueDate.ToString("yyyy-MM-dd")</dd>
+        <dt class="col-sm-3">Trạng thái</dt><dd class="col-sm-9"><span class="status-pill">@Model.Status</span></dd>
+        <dt class="col-sm-3">Phiên bản BOM / Routing</dt><dd class="col-sm-9">@(string.IsNullOrEmpty(Model.BomVersion) ? "—" : Model.BomVersion) / @(string.IsNullOrEmpty(Model.RoutingVersion) ? "—" : Model.RoutingVersion)</dd>
+    </dl>
+</section>
+
+<section class="data-panel mt-3">
+    <div class="p-3"><h3 class="h5 mb-0">Công đoạn sản xuất</h3></div>
+    <div class="table-responsive">
+        <table class="table data-table align-middle mb-0">
+            <thead><tr><th>#</th><th>Công đoạn</th><th>Trạm</th><th>Trạng thái</th><th class="text-end">Đạt / Loại / Làm lại</th></tr></thead>
+            <tbody>
+            @foreach (var step in Model.Steps.OrderBy(x => x.StepNumber))
+            {
+                <tr><td>@step.StepNumber</td><td>@step.StepName</td><td>@step.WorkCenter?.Code - @step.WorkCenter?.Name</td><td><span class="status-pill">@step.Status</span></td><td class="text-end">@step.QtyOK.ToString("N2") / @step.QtyReject.ToString("N2") / @step.QtyRework.ToString("N2")</td></tr>
+            }
+            @if (!Model.Steps.Any()) { <tr><td colspan="5" class="text-center text-muted py-3">Công đoạn sẽ được nạp khi phê duyệt.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="data-panel mt-3">
+    <div class="p-3"><h3 class="h5 mb-0">Vật tư đã giữ chỗ</h3></div>
+    <div class="table-responsive">
+        <table class="table data-table align-middle mb-0">
+            <thead><tr><th>Vật tư</th><th>Lô</th><th>Vị trí</th><th class="text-end">Số lượng giữ chỗ</th></tr></thead>
+            <tbody>
+            @foreach (var item in reservations)
+            {
+                <tr><td>@item.Product?.Code - @item.Product?.Name</td><td><code>@item.Lot?.LotNo</code></td><td><code>@item.Location?.Code</code></td><td class="text-end fw-semibold">@item.QtyReserved.ToString("N2")</td></tr>
+            }
+            @if (!reservations.Any()) { <tr><td colspan="4" class="text-center text-muted py-3">Chưa có vật tư giữ chỗ.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</section>
