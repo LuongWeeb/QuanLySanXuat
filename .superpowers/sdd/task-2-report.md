@@ -68,3 +68,63 @@ Result: `Passed! - Failed: 0, Passed: 122, Skipped: 0, Total: 122`.
 ## Concerns
 
 - The brief only requested DbContext changes and did not list a migration, so no EF migration was generated. A deployable SQL schema update will need a separately authorized migration.
+
+---
+
+## Review-fix follow-up
+
+### Changes
+
+- `CreateCycleCountOrderAsync` now excludes balances at `QcService.QuarantineLocationCode`, even when they belong to the requested warehouse.
+- `RecordCountResultsAsync` now rejects any result whose item ID is not part of the specified order before mutating counts. It marks the order `InProgress` while any item is uncounted and `Completed` only after every item has a `CountedQty`.
+- `ApproveAndAdjustStockAsync` now returns `false` unless the order status is `Completed`, preventing empty and partial approvals from changing stock.
+- Added CycleCountTests coverage for quarantine exclusion, foreign item-ID rejection, partial approval rejection with unchanged stock/no transactions, and the Completed-to-approved lifecycle.
+
+### TDD evidence
+
+#### RED
+
+Command:
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~CycleCountTests --no-restore
+```
+
+Result before the fix: `Failed: 4, Passed: 0, Total: 4`.
+
+- The same-warehouse quarantine balance was incorrectly snapshotted.
+- An out-of-order result ID was incorrectly accepted.
+- A fully counted order remained `InProgress` instead of becoming `Completed`.
+- A partial order was incorrectly approved.
+
+#### GREEN (focused)
+
+Command:
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~CycleCountTests --no-restore
+```
+
+Result: `Passed! - Failed: 0, Passed: 4, Skipped: 0, Total: 4`.
+
+### Full suite verification
+
+Command:
+
+```powershell
+dotnet test WmsMes.sln --no-restore
+```
+
+Result: `Passed! - Failed: 0, Passed: 124, Skipped: 0, Total: 124`.
+
+### Files changed
+
+- `Services/CycleCountService.cs`
+- `WmsMes.Tests/CycleCountTests.cs`
+- `.superpowers/sdd/task-2-report.md`
+
+### Self-review
+
+- Approval now requires the single lifecycle state produced only by a complete set of count results.
+- Foreign item IDs return `false` without changing the persisted order, matching the existing boolean service contract.
+- `git diff --check` completed without whitespace errors.

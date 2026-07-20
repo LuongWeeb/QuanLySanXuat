@@ -24,6 +24,7 @@ public class CycleCountTests
             Location = otherLocation,
             QtyAvailable = 17
         });
+        await AddAdditionalBalanceAsync(context, warehouse, "QC", 9, QcService.QuarantineLocationCode);
         await context.SaveChangesAsync();
 
         var order = await new CycleCountService(context, new InventoryService(context))
@@ -41,7 +42,48 @@ public class CycleCountTests
     }
 
     [Fact]
-    public async Task ApproveAndAdjustStockAsync_AdjustsBalanceAndCreatesAdjustmentTransactionForVariance()
+    public async Task RecordCountResultsAsync_RejectsResultsForItemsOutsideTheOrder()
+    {
+        await using var context = CreateContext();
+        var (warehouse, _) = await AddWarehouseBalanceAsync(context, qtyAvailable: 10);
+        var cycleCountService = new CycleCountService(context, new InventoryService(context));
+        var order = await cycleCountService.CreateCycleCountOrderAsync(warehouse.Id, "counter-1");
+
+        var recorded = await cycleCountService.RecordCountResultsAsync(order.Id,
+        [
+            new CountResultDto { CycleCountItemId = order.Items.Single().Id + 100, CountedQty = 7 }
+        ]);
+
+        Assert.False(recorded);
+        Assert.Equal("Draft", (await context.CycleCountOrders.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task ApproveAndAdjustStockAsync_ReturnsFalseForPartialCountResults()
+    {
+        await using var context = CreateContext();
+        var (warehouse, firstBalance) = await AddWarehouseBalanceAsync(context, qtyAvailable: 10);
+        var secondBalance = await AddAdditionalBalanceAsync(context, warehouse, "SECOND", 8);
+        var cycleCountService = new CycleCountService(context, new InventoryService(context));
+        var order = await cycleCountService.CreateCycleCountOrderAsync(warehouse.Id, "counter-1");
+        var firstItem = order.Items.Single(item => item.ProductId == firstBalance.ProductId);
+
+        await cycleCountService.RecordCountResultsAsync(order.Id,
+        [
+            new CountResultDto { CycleCountItemId = firstItem.Id, CountedQty = 7 }
+        ]);
+
+        var approved = await cycleCountService.ApproveAndAdjustStockAsync(order.Id, "approver-1");
+
+        Assert.False(approved);
+        Assert.Equal("InProgress", (await context.CycleCountOrders.SingleAsync()).Status);
+        Assert.Equal(10, await context.StockBalances.Where(stock => stock.Id == firstBalance.Id).Select(stock => stock.QtyAvailable).SingleAsync());
+        Assert.Equal(8, await context.StockBalances.Where(stock => stock.Id == secondBalance.Id).Select(stock => stock.QtyAvailable).SingleAsync());
+        Assert.Empty(await context.StockTransactions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task RecordCountResultsAsync_CompletesAllItemsBeforeApprovalAdjustsStock()
     {
         await using var context = CreateContext();
         var (warehouse, balance) = await AddWarehouseBalanceAsync(context, qtyAvailable: 10);
@@ -54,6 +96,7 @@ public class CycleCountTests
         [
             new CountResultDto { CycleCountItemId = item.Id, CountedQty = 7 }
         ]);
+        Assert.Equal("Completed", (await context.CycleCountOrders.SingleAsync()).Status);
 
         var approved = await cycleCountService.ApproveAndAdjustStockAsync(order.Id, "approver-1");
 
@@ -98,5 +141,29 @@ public class CycleCountTests
         await context.SaveChangesAsync();
 
         return (warehouse, balance);
+    }
+
+    private static async Task<StockBalance> AddAdditionalBalanceAsync(
+        ApplicationDbContext context,
+        Warehouse warehouse,
+        string suffix,
+        decimal qtyAvailable,
+        string? locationCode = null)
+    {
+        var balance = new StockBalance
+        {
+            Product = new Product { Code = $"P-{suffix}", Name = $"Product {suffix}" },
+            Lot = new Lot { LotNo = $"LOT-{suffix}" },
+            Location = new Location
+            {
+                Code = locationCode ?? $"LOC-{suffix}",
+                Name = $"Location {suffix}",
+                Zone = new Zone { Code = $"Z-{suffix}", Name = $"Zone {suffix}", WarehouseId = warehouse.Id }
+            },
+            QtyAvailable = qtyAvailable
+        };
+        context.StockBalances.Add(balance);
+        await context.SaveChangesAsync();
+        return balance;
     }
 }

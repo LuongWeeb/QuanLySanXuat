@@ -20,7 +20,8 @@ public class CycleCountService : ICycleCountService
     public async Task<CycleCountOrder> CreateCycleCountOrderAsync(int warehouseId, string createdBy)
     {
         var balances = await _context.StockBalances
-            .Where(balance => balance.Location!.Zone!.WarehouseId == warehouseId)
+            .Where(balance => balance.Location!.Zone!.WarehouseId == warehouseId &&
+                              balance.Location.Code != QcService.QuarantineLocationCode)
             .ToListAsync();
 
         var order = new CycleCountOrder
@@ -53,16 +54,18 @@ public class CycleCountService : ICycleCountService
             return false;
         }
 
-        var resultByItemId = results.ToDictionary(result => result.CycleCountItemId);
-        foreach (var item in order.Items)
+        var itemsById = order.Items.ToDictionary(item => item.Id);
+        if (results.Any(result => !itemsById.ContainsKey(result.CycleCountItemId)))
         {
-            if (resultByItemId.TryGetValue(item.Id, out var result))
-            {
-                item.CountedQty = result.CountedQty;
-            }
+            return false;
         }
 
-        order.Status = "InProgress";
+        foreach (var result in results)
+        {
+            itemsById[result.CycleCountItemId].CountedQty = result.CountedQty;
+        }
+
+        order.Status = order.Items.All(item => item.CountedQty.HasValue) ? "Completed" : "InProgress";
         await _context.SaveChangesAsync();
         return true;
     }
@@ -76,7 +79,7 @@ public class CycleCountService : ICycleCountService
                 .Include(cycleCountOrder => cycleCountOrder.Items)
                 .FirstOrDefaultAsync(cycleCountOrder => cycleCountOrder.Id == orderId);
 
-            if (order is null || order.Status is "Approved" or "Cancelled")
+            if (order is null || order.Status != "Completed")
             {
                 return false;
             }
