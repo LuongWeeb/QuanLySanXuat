@@ -1,0 +1,13 @@
+using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.DTOs;
+
+namespace WmsMes.Web.Services;
+
+public interface ICycleCountService
+{
+    Task<CycleCountOrder> CreateCycleCountOrderAsync(int warehouseId, string createdBy);
+
+    Task<bool> RecordCountResultsAsync(int orderId, List<CountResultDto> results);
+
+    Task<bool> ApproveAndAdjustStockAsync(int orderId, string approvedBy);
+}

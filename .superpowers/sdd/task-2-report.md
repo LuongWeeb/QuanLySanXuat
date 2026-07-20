@@ -1,56 +1,70 @@
-# Task 2 report — Dashboard OEE, Chart.js và realtime refresh
+# Task 2 — Cycle Counting Engine report
 
-## Phạm vi thực hiện
+## Status
 
-- `Views/Home/Index.cshtml`: KPI OEE, cảnh báo low stock, ba biểu đồ Chart.js và đồng bộ dữ liệu từ `/Home/Metrics`.
-- `WmsMes.Tests/HomeControllerTests.cs`: source/render contract tests cho markup, CDN/serialization, và chart refresh.
+Implemented the cycle-counting domain model, persistence mappings, service workflow, inventory-adjustment API, DI registration, and two integration-style unit tests. No controller or UI was added.
 
-## Step 1 — KPI OEE và cảnh báo low stock
+## Changes
 
-- RED: thêm `DashboardView_RendersOeeAndLowStockMetricCards`, sau đó chạy
-  `dotnet test WmsMes.sln --filter "FullyQualifiedName~DashboardView_RendersOeeAndLowStockMetricCards" --no-restore`.
-  Kết quả RED đúng kỳ vọng: thiếu `aria-label="Chỉ số OEE Sản xuất"` trong `Index.cshtml`.
-- GREEN: thêm năm metric cards với `overallOee`, ba OEE component, và `lowStockAlertCount`.
-- Focused GREEN: 1/1 pass.
-- Full verification: `dotnet test WmsMes.sln --no-restore` — 104 passed, 0 failed.
+- Added `CycleCountOrder` and `CycleCountItem`, including the required `VarianceQty` calculation.
+- Added `CycleCountOrders`/`CycleCountItems` `DbSet`s and restrictive FK mappings for warehouse, product, location, and lot; order-to-item deletion cascades.
+- Added `ICycleCountService` and `CycleCountService`:
+  - `CreateCycleCountOrderAsync` snapshots each `StockBalance` whose location's zone belongs to the target warehouse.
+  - `RecordCountResultsAsync` records supplied item quantities and moves the order to `InProgress`.
+  - `ApproveAndAdjustStockAsync` adjusts only non-zero counted variances, marks the order `Approved`, records approver/completion time, and emits one post-commit stock-change notification.
+- Added `CountResultDto` (`CycleCountItemId`, `CountedQty`) as the input contract required by `RecordCountResultsAsync`.
+- Extended inventory with `Task<bool> AdjustStockAsync(int productId, int lotId, int locationId, decimal adjustmentQty, string userId, string referenceNo)`.
+  - This is the smallest type-safe tuple needed to locate a balance and preserve the existing `StockTransaction` audit pattern.
+  - It rejects a missing balance or an adjustment that would make available stock negative; otherwise it updates `QtyAvailable`, writes an `Adjust` transaction, saves, and notifies when not in an ambient transaction.
 
-## Step 2 — vùng chứa biểu đồ
+## Files
 
-- RED: thêm `DashboardView_RendersAccessibleProductionInventoryAndQualityCharts`, sau đó chạy
-  `dotnet test WmsMes.sln --filter "FullyQualifiedName~DashboardView_RendersAccessibleProductionInventoryAndQualityCharts" --no-restore`.
-  Kết quả RED đúng kỳ vọng: thiếu `id="productionChart"`.
-- GREEN: thêm Bootstrap responsive grid với production, inventory-zone và quality cards; canvas có `role="img"`, `aria-label`, fallback text.
-- Focused GREEN: 1/1 pass.
-- Full verification: `dotnet test WmsMes.sln --no-restore` — 105 passed, 0 failed.
+- Added: `Domain/Entities/CycleCountOrder.cs`, `Domain/Entities/CycleCountItem.cs`, `DTOs/CountResultDto.cs`
+- Added: `Services/ICycleCountService.cs`, `Services/CycleCountService.cs`
+- Modified: `Data/ApplicationDbContext.cs`, `Program.cs`, `Services/IInventoryService.cs`, `Services/InventoryService.cs`
+- Added tests: `WmsMes.Tests/CycleCountTests.cs`
 
-## Step 3 — Chart.js và SignalR refresh
+## TDD evidence
 
-- RED: thêm `DashboardView_InitializesAndRefreshesAllChartsWithSafelySerializedMetrics`, sau đó chạy
-  `dotnet test WmsMes.sln --filter "FullyQualifiedName~DashboardView_InitializesAndRefreshesAllChartsWithSafelySerializedMetrics" --no-restore`.
-  Kết quả RED đúng kỳ vọng: thiếu CDN Chart.js.
-- GREEN: thêm CDN `https://cdn.jsdelivr.net/npm/chart.js`; serialize Razor data bằng `System.Text.Json.JsonSerializer` (default encoder) rồi render JSON an toàn qua `Html.Raw`; khởi tạo một line/bar chart và hai doughnut charts.
-- `refreshMetrics` giữ cơ chế fetch/AbortController/generation guard cũ, đồng thời cập nhật KPI hiện có, OEE, low stock, labels/datasets cho ba chart và gọi `update()` trên từng instance. Hai hubs, reconnect/retry/debounce giữ nguyên.
-- Focused GREEN: 1/1 pass.
-- Full verification: `dotnet test WmsMes.sln --no-restore` — 106 passed, 0 failed.
+### RED
 
-## Step 4 — build và kiểm chứng cuối
+Command:
 
-- `dotnet build WmsMes.sln` — Build succeeded, 0 warnings, 0 errors.
-- `dotnet test WmsMes.sln --no-restore` — 106 passed, 0 failed.
-- `git diff --check` — sạch (không có whitespace errors).
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~CycleCountTests --no-restore
+```
+
+Expected missing-feature compilation failures occurred before production code: `CycleCountService`, `CountResultDto`, and `ApplicationDbContext.CycleCountOrders` were not found (CS0246/CS1061). Exit code was 1.
+
+### GREEN (focused)
+
+Command:
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~CycleCountTests --no-restore
+```
+
+Result: `Passed! - Failed: 0, Passed: 2, Skipped: 0, Total: 2`.
+
+The tests verify system-quantity snapshotting (including exclusion of another warehouse) and approval-driven adjustment to `QtyAvailable` plus an audited `StockTransaction` with `Type=Adjust`, variance, user, and cycle-count reference.
+
+## Full suite verification
+
+Command:
+
+```powershell
+dotnet test WmsMes.sln --no-restore
+```
+
+Result: `Passed! - Failed: 0, Passed: 122, Skipped: 0, Total: 122`.
+
+## Self-review
+
+- Re-read Task 2 brief and the approved contract decision: used the sole approval API name `ApproveAndAdjustStockAsync`; no alias was added.
+- Verified `AdjustStockAsync` follows the existing inventory transaction/audit/notification conventions and respects ambient relational transactions so a cycle-count approval commits atomically.
+- Verified the feature remains service/domain-only; no unrequested controller or UI changes.
+- Ran `git diff --check`: no whitespace errors.
 
 ## Concerns
 
-- Không có blocker hoặc known functional issue. CDN Chart.js phụ thuộc kết nối mạng của client như yêu cầu.
-- Code review độc lập: không có finding critical, important hoặc minor; reviewer cũng chạy `dotnet test WmsMes.Tests/WmsMes.Tests.csproj --no-restore` với 106/106 pass.
-
-## Follow-up — graceful degradation khi Chart.js CDN không tải được
-
-- Root cause: `new Chart(...)` được gọi ở đầu IIFE. Khi CDN Chart.js không tải được, `Chart` undefined ném lỗi đồng bộ và ngăn phần thiết lập hai SignalR hub chạy.
-- RED: thêm `DashboardView_ContinuesRealtimeSetupWhenChartJsIsUnavailable` và điều chỉnh source contract của chart constructor, sau đó chạy
-  `dotnet test WmsMes.sln --filter "FullyQualifiedName~DashboardView_ContinuesRealtimeSetupWhenChartJsIsUnavailable" --no-restore`.
-  Kết quả RED đúng kỳ vọng: thiếu `const initializeCharts = () => {`.
-- GREEN: khai báo chart instances có thể null, tách `initializeCharts`, guard `typeof window.Chart !== "function"`, và guard `updateCharts` khi không có đủ instances. Do `initializeCharts()` chỉ return cục bộ, luồng IIFE tiếp tục đến hai SignalR connections; refresh KPI/fetch giữ nguyên.
-- Focused GREEN: cùng lệnh trên — 1/1 passed.
-- Step 3 full regression: `dotnet test WmsMes.sln --no-restore` — 107 passed, 0 failed.
-- Step 4 re-verification: `dotnet build WmsMes.sln` — Build succeeded, 0 warnings, 0 errors; sau đó `dotnet test WmsMes.sln --no-restore` — 107 passed, 0 failed.
+- The brief only requested DbContext changes and did not list a migration, so no EF migration was generated. A deployable SQL schema update will need a separately authorized migration.

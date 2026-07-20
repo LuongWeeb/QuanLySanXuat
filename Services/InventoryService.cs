@@ -431,6 +431,58 @@ public class InventoryService : IInventoryService
         }
     }
 
+    public async Task<bool> AdjustStockAsync(int productId, int lotId, int locationId, decimal adjustmentQty, string userId, string referenceNo)
+    {
+        if (adjustmentQty == 0)
+        {
+            return true;
+        }
+
+        var hasAmbientTransaction = _context.Database.CurrentTransaction is not null;
+        await using var transaction = await BeginTransactionIfRelationalAsync();
+        try
+        {
+            var balance = await _context.StockBalances
+                .FirstOrDefaultAsync(stockBalance =>
+                    stockBalance.ProductId == productId &&
+                    stockBalance.LotId == lotId &&
+                    stockBalance.LocationId == locationId);
+
+            if (balance is null || balance.QtyAvailable + adjustmentQty < 0)
+            {
+                return false;
+            }
+
+            balance.QtyAvailable += adjustmentQty;
+            await _context.StockTransactions.AddAsync(new StockTransaction
+            {
+                Type = TransactionType.Adjust,
+                ProductId = productId,
+                LotId = lotId,
+                LocationId = locationId,
+                Qty = adjustmentQty,
+                TransactionDate = DateTime.UtcNow,
+                UserId = userId,
+                ReferenceNo = referenceNo
+            });
+
+            await _context.SaveChangesAsync();
+            await CommitIfRelationalAsync(transaction);
+        }
+        catch
+        {
+            await RollbackIfRelationalAsync(transaction);
+            throw;
+        }
+
+        if (!hasAmbientTransaction)
+        {
+            await NotifyStockChangedSafelyAsync();
+        }
+
+        return true;
+    }
+
     private async Task<IDbContextTransaction?> BeginTransactionIfRelationalAsync()
     {
         return _context.Database.IsRelational() && _context.Database.CurrentTransaction is null

@@ -47,6 +47,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<StocktakeLine> StocktakeLines { get; set; }
 
+    public DbSet<CycleCountOrder> CycleCountOrders { get; set; }
+
+    public DbSet<CycleCountItem> CycleCountItems { get; set; }
+
     public DbSet<BOM> BOMs { get; set; }
 
     public DbSet<BOMItem> BOMItems { get; set; }
@@ -265,6 +269,36 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasOne(line => line.Lot)
             .WithMany()
             .HasForeignKey(line => line.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<CycleCountOrder>()
+            .HasOne(order => order.Warehouse)
+            .WithMany()
+            .HasForeignKey(order => order.WarehouseId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<CycleCountOrder>()
+            .HasMany(order => order.Items)
+            .WithOne(item => item.CycleCountOrder)
+            .HasForeignKey(item => item.CycleCountOrderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<CycleCountItem>()
+            .HasOne(item => item.Product)
+            .WithMany()
+            .HasForeignKey(item => item.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<CycleCountItem>()
+            .HasOne(item => item.Location)
+            .WithMany()
+            .HasForeignKey(item => item.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<CycleCountItem>()
+            .HasOne(item => item.Lot)
+            .WithMany()
+            .HasForeignKey(item => item.LotId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<WorkCenter>()

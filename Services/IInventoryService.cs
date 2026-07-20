@@ -22,4 +22,6 @@ public interface IInventoryService
     Task<bool> StartStocktakeAsync(int stocktakeId);
 
     Task<bool> ApproveStocktakeAsync(int stocktakeId, string userId);
+
+    Task<bool> AdjustStockAsync(int productId, int lotId, int locationId, decimal adjustmentQty, string userId, string referenceNo);
 }
