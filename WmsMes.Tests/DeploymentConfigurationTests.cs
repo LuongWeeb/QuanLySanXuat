@@ -80,10 +80,10 @@ public class DeploymentConfigurationTests
         Assert.Contains("https://www.questpdf.com/license/", example);
         Assert.Contains("exactly one terminal CRLF or LF", example, StringComparison.OrdinalIgnoreCase);
         var gitignore = Read(".gitignore");
-        Assert.Matches(new Regex(@"(?m)^\.env$"), gitignore);
-        Assert.DoesNotMatch(new Regex(@"(?m)^\.env\.example$"), gitignore);
+        Assert.Matches(new Regex(@"(?m)^\.env\r?$"), gitignore);
+        Assert.DoesNotMatch(new Regex(@"(?m)^\.env\.example\r?$"), gitignore);
         var dockerignore = Read(".dockerignore");
-        Assert.Matches(new Regex(@"(?m)^\.env$"), dockerignore);
+        Assert.Matches(new Regex(@"(?m)^\.env\r?$"), dockerignore);
     }
 
     [Fact]
