@@ -142,25 +142,6 @@ app.MapHub<InventoryHub>("/inventoryHub");
 app.MapHub<ProductionHub>("/productionHub");
 app.MapHub<QualityHub>("/qualityHub");
 
-using (var scope = app.Services.CreateScope())
-{
-    var services = scope.ServiceProvider;
-    try
-    {
-        var roleManager = services.GetRequiredService<RoleManager<ApplicationRole>>();
-        var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
-        var dbContext = services.GetRequiredService<ApplicationDbContext>();
-        await DbSeeder.SeedRolesAndUsersAsync(roleManager, userManager);
-        await DbSeeder.SeedQcInfrastructureAsync(dbContext);
-        await DbSeeder.SeedUnitOfMeasuresAsync(dbContext);
-        await DbSeeder.SeedWarehouseStructureAsync(dbContext);
-        await DbSeeder.SeedComprehensiveSampleDataAsync(dbContext, userManager);
-    }
-    catch (Exception ex)
-    {
-        var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while seeding the database.");
-    }
-}
+await StartupDatabaseInitializer.InitializeAsync(app.Services, app.Logger);
 
 app.Run();
