@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  wmsmes-db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: wmsmes-db
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=YourSecurePassword123!
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqldata:/var/opt/mssql/data
+
+  wmsmes-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wmsmes-web
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Server=wmsmes-db;Database=WmsMesDb;User Id=sa;Password=YourSecurePassword123!;TrustServerCertificate=True;MultipleActiveResultSets=true
+    ports:
+      - "5000:8080"
+    depends_on:
+      - wmsmes-db
+
+volumes:
+  sqldata:
