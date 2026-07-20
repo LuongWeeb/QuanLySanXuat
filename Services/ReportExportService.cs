@@ -1,5 +1,6 @@
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
+using QRCoder;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -167,8 +168,17 @@ public class ReportExportService : IReportExportService
                         }
                     });
 
-                    column.Item().Text("MÃ VẠCH LỆNH SẢN XUẤT").SemiBold().FontColor(HeaderColor);
-                    column.Item().Element(container => ComposeCode39Barcode(container, workOrder.Code));
+                    using var qrCodeData = QRCodeGenerator.GenerateQrCode(
+                        workOrder.Code,
+                        QRCodeGenerator.ECCLevel.Q,
+                        forceUtf8: true,
+                        utf8BOM: false,
+                        eciMode: QRCodeGenerator.EciMode.Utf8,
+                        requestedVersion: -1);
+                    using var qrCode = new PngByteQRCode(qrCodeData);
+                    var qrCodeImage = qrCode.GetGraphic(pixelsPerModule: 10);
+                    column.Item().Text("MÃ QR LỆNH SẢN XUẤT").SemiBold().FontColor(HeaderColor);
+                    column.Item().AlignCenter().Width(120).Height(120).Image(qrCodeImage);
                     column.Item().AlignCenter().Text(workOrder.Code).LetterSpacing(1.5f);
                 });
 
@@ -203,39 +213,4 @@ public class ReportExportService : IReportExportService
     private static IContainer TableBodyCell(IContainer container) =>
         container.BorderBottom(0.5f).BorderColor(Colors.Grey.Lighten1).Padding(6);
 
-    private static void ComposeCode39Barcode(IContainer container, string code)
-    {
-        var encoded = $"*{new string(code.ToUpperInvariant().Select(character =>
-            Code39Patterns.ContainsKey(character) ? character : '-').ToArray())}*";
-
-        container.Height(64).Row(row =>
-        {
-            foreach (var character in encoded)
-            {
-                var pattern = Code39Patterns[character];
-                for (var index = 0; index < pattern.Length; index++)
-                {
-                    var width = pattern[index] == 'w' ? 3 : 1;
-                    row.RelativeItem(width).Background(index % 2 == 0 ? Colors.Black : Colors.White);
-                }
-
-                row.RelativeItem(1).Background(Colors.White);
-            }
-        });
-    }
-
-    private static readonly IReadOnlyDictionary<char, string> Code39Patterns = new Dictionary<char, string>
-    {
-        ['0'] = "nnwwnwnnn", ['1'] = "wnnwnnnnw", ['2'] = "nnwwnnnnw", ['3'] = "wnwwnnnnn",
-        ['4'] = "nnnwwnnnw", ['5'] = "wnnwwnnnn", ['6'] = "nnwwwnnnn", ['7'] = "nnnwnnwnw",
-        ['8'] = "wnnwnnwnn", ['9'] = "nnwwnnwnn", ['A'] = "wnnnnwnnw", ['B'] = "nnwnnwnnw",
-        ['C'] = "wnwnnwnnn", ['D'] = "nnnnwwnnw", ['E'] = "wnnnwwnnn", ['F'] = "nnwnwwnnn",
-        ['G'] = "nnnnnwwnw", ['H'] = "wnnnnwwnn", ['I'] = "nnwnnwwnn", ['J'] = "nnnnwwwnn",
-        ['K'] = "wnnnnnnww", ['L'] = "nnwnnnnww", ['M'] = "wnwnnnnwn", ['N'] = "nnnnwnnww",
-        ['O'] = "wnnnwnnwn", ['P'] = "nnwnwnnwn", ['Q'] = "nnnnnnwww", ['R'] = "wnnnnnwwn",
-        ['S'] = "nnwnnnwwn", ['T'] = "nnnnwnwwn", ['U'] = "wwnnnnnnw", ['V'] = "nwwnnnnnw",
-        ['W'] = "wwwnnnnnn", ['X'] = "nwnnwnnnw", ['Y'] = "wwnnwnnnn", ['Z'] = "nwwnwnnnn",
-        ['-'] = "nwnnnnwnw", ['.'] = "wwnnnnwnn", [' '] = "nwwnnnwnn", ['$'] = "nwnwnwnnn",
-        ['/'] = "nwnwnnnwn", ['+'] = "nwnnnwnwn", ['%'] = "nnnwnwnwn", ['*'] = "nwnnwnwnn"
-    };
 }

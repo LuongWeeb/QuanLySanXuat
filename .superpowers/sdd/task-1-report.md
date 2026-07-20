@@ -86,11 +86,81 @@ Result: exit code `0`; no whitespace errors. Git emitted only the repository's e
 - Confirmed warehouse filtering uses the actual entity relationship and remains optional.
 - Confirmed all export queries use `AsNoTracking` and eagerly load the navigation data required after query completion.
 - Confirmed controller responses propagate the filter/ID, return the requested MIME types, and use dated download filenames.
-- Confirmed the PDF includes work-order metadata, production operations ordered by step number, and a genuine Code 39 barcode rather than barcode-like text.
-- Confirmed the new package versions exactly match the brief.
+- Confirmed the PDF includes work-order metadata, production operations ordered by step number, and a UTF-8 QR code generated from the unmodified work-order code.
+- Confirmed the ClosedXML and QuestPDF versions exactly match the brief; QRCoder `1.8.0` was added to encode the full work-order code without Code 39 character loss.
 - Confirmed no Docker, compose, or `.dockerignore` file was touched.
 - Confirmed existing controller tests remain source-compatible and the full test suite is green.
 
 ## Concerns
 
 - `QuestPDF.Settings.License` is configured as `LicenseType.Community`, which is required for document generation with this package. The deploying organization must confirm that it meets QuestPDF Community license eligibility before production deployment; otherwise the configured license type must be changed appropriately.
+
+## Code Review Fix Addendum
+
+### Important Finding Addressed
+
+The original Code 39 renderer replaced unsupported characters with `-`. Consequently, valid work-order codes such as `WO_001` produced bars for `WO-001` even though the visible label still showed the original value. The renderer was replaced with a PNG QR code produced by QRCoder `1.8.0`. The service now:
+
+- Passes `workOrder.Code` unchanged to the QR generator.
+- Forces UTF-8 encoding with UTF-8 ECI, supporting the controller's full string input rather than a limited Code 39 alphabet.
+- Embeds the generated QR image in the QuestPDF document and continues to display the exact work-order code underneath it.
+
+### Review-Fix TDD Evidence
+
+#### RED: underscore regression
+
+Command:
+
+```powershell
+dotnet test WmsMes.sln --filter "FullyQualifiedName~ReportExportTests.ExportWorkOrderToPdf_ReturnsPdfDocument"
+```
+
+Result: exit code `1`; `1` failed, `0` passed. The `WO_001` regression generated a PDF, but `Assert.Contains("/Subtype /Image", ...)` failed because the existing lossy Code 39 renderer emitted vector bars rather than an exact-payload QR image.
+
+#### First GREEN attempt diagnostic
+
+Command:
+
+```powershell
+dotnet test WmsMes.sln --filter "FullyQualifiedName~ReportExportTests.ExportWorkOrderToPdf_ReturnsPdfDocument"
+```
+
+Result: exit code `1` with `CS1744`. The restored QRCoder `1.8.0` API names the short-overload module-size parameter `size`, not `pixelsPerModule`. Package XML documentation was inspected and the call was corrected without changing the design.
+
+#### GREEN: underscore regression
+
+Command:
+
+```powershell
+dotnet test WmsMes.sln --filter "FullyQualifiedName~ReportExportTests.ExportWorkOrderToPdf_ReturnsPdfDocument"
+```
+
+Result: exit code `0`; `1` passed, `0` failed, `0` skipped.
+
+The regression was then strengthened at the exported-PDF boundary: it extracts the embedded QR image stream for `WO_001` and `WO-001` and asserts that they differ, proving the two values formerly collapsed by Code 39 now produce distinct encoded graphics.
+
+### Strengthened Excel/PDF Coverage
+
+- The Excel test now reopens the generated XLSX with ClosedXML.
+- It verifies all seven requested Vietnamese headers and exported product/lot/location/quantity/UOM/expiry values.
+- It seeds another warehouse and proves `warehouseId` excludes that warehouse's stock row.
+- It verifies bold white headers, `#1E293B` background, `#,##0.00` number format, and `dd/MM/yyyy` date format.
+- The PDF test uses an underscore-containing code, verifies that an image is embedded, and verifies underscore/hyphen values produce different QR image streams.
+
+Focused command after final test strengthening:
+
+```powershell
+dotnet test WmsMes.sln --filter "FullyQualifiedName~ReportExportTests"
+```
+
+Result: exit code `0`; `4` passed, `0` failed, `0` skipped. Duration: `639 ms`.
+
+### Final Review-Fix Verification
+
+Command:
+
+```powershell
+dotnet test WmsMes.sln
+```
+
+Result: exit code `0`; `135` passed, `0` failed, `0` skipped. Duration: `3 s`.
