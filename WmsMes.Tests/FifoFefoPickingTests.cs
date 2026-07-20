@@ -18,7 +18,7 @@ public class FifoFefoPickingTests
         var expected = new List<PickingRecommendationDto> { new() { LotNo = "LOT-001", RecommendedQty = 5 } };
         var service = new Mock<IInventoryService>();
         service.Setup(item => item.GetPickingRecommendationsAsync(1, 5, PickingStrategy.FEFO)).ReturnsAsync(expected);
-        var controller = new InventoryController(context, service.Object);
+        var controller = new InventoryController(context, Mock.Of<IReportExportService>(), service.Object);
 
         var result = await controller.GetPickingRecommendations(1, 5, PickingStrategy.FEFO);
 

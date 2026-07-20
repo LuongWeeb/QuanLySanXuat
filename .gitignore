@@ -44,3 +44,6 @@ publish/
 # ASP.NET Core
 appsettings.Development.json
 appsettings.Production.json
+
+# Local container secrets (copy from the tracked .env.example)
+.env

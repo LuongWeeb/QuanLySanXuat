@@ -1,4 +1,5 @@
 using ClosedXML.Excel;
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using QRCoder;
 using QuestPDF.Fluent;
@@ -16,7 +17,6 @@ public class ReportExportService : IReportExportService
     public ReportExportService(ApplicationDbContext context)
     {
         _context = context;
-        QuestPDF.Settings.License = LicenseType.Community;
     }
 
     public async Task<byte[]> ExportStockBalanceToExcelAsync(int? warehouseId = null)
@@ -136,7 +136,10 @@ public class ReportExportService : IReportExportService
 
                         AddLabelValue(table, "Mã lệnh", workOrder.Code);
                         AddLabelValue(table, "Sản phẩm", $"{workOrder.Product?.Code} - {workOrder.Product?.Name}");
-                        AddLabelValue(table, "Số lượng mục tiêu", workOrder.Qty.ToString("#,##0.00"));
+                        AddLabelValue(
+                            table,
+                            "Số lượng mục tiêu",
+                            workOrder.Qty.ToString("#,##0.00", CultureInfo.GetCultureInfo("vi-VN")));
                         AddLabelValue(table, "Hạn hoàn thành", workOrder.DueDate.ToString("dd/MM/yyyy"));
                     });
 

@@ -256,7 +256,11 @@ public class WorkOrderControllerTests
 
     private static WorkOrderController Controller(ApplicationDbContext context, IWorkOrderService? service = null, string? userId = null, ILogger<WorkOrderController>? logger = null)
     {
-        var controller = new WorkOrderController(context, service ?? Mock.Of<IWorkOrderService>(), logger ?? Mock.Of<ILogger<WorkOrderController>>())
+        var controller = new WorkOrderController(
+            context,
+            service ?? Mock.Of<IWorkOrderService>(),
+            logger ?? Mock.Of<ILogger<WorkOrderController>>(),
+            Mock.Of<IReportExportService>())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };

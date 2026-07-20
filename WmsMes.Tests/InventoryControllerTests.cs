@@ -21,7 +21,7 @@ public class InventoryControllerTests
         await using var context = new ApplicationDbContext(options);
         var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
-        var controller = new InventoryController(context, service.Object);
+        var controller = new InventoryController(context, Mock.Of<IReportExportService>(), service.Object);
 
         var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 1, seeded.locationId);
 
@@ -41,7 +41,7 @@ public class InventoryControllerTests
         var service = new Mock<IInventoryService>();
         service.Setup(x => x.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user")).ReturnsAsync(true);
         service.Setup(x => x.NotifyStockChangedAsync()).ThrowsAsync(new InvalidOperationException("hub down"));
-        var controller = Authenticated(new InventoryController(context, service.Object));
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
         controller.TempData = Mock.Of<ITempDataDictionary>();
 
         var result = await controller.CreateReceipt(2, 3, "LOT", 1, 1, 4);
@@ -61,7 +61,7 @@ public class InventoryControllerTests
             new GoodsIssue { IssueNo = "GI-OLD", IssueDate = new DateTime(2026, 1, 1), Customer = new Customer { Code = "C-OLD", Name = "Old Customer" }, Lines = { new GoodsIssueLine { Product = new Product { Code = "P-OLD", Name = "Old" }, Lot = new Lot { LotNo = "L-OLD", ProductId = 1 }, Location = new Location { Code = "A", Name = "A", Zone = new Zone { Code = "Z", Name = "Z" } }, Qty = 1 } } },
             new GoodsIssue { IssueNo = "GI-NEW", IssueDate = new DateTime(2026, 2, 1), Customer = new Customer { Code = "C-NEW", Name = "New Customer" }, Lines = { new GoodsIssueLine { Product = new Product { Code = "P-NEW", Name = "New" }, Lot = new Lot { LotNo = "L-NEW", ProductId = 2 }, Location = new Location { Code = "B", Name = "B", Zone = new Zone { Code = "Z2", Name = "Z2" } }, Qty = 2 } } });
         await context.SaveChangesAsync();
-        var controller = new InventoryController(context);
+        var controller = new InventoryController(context, Mock.Of<IReportExportService>());
 
         var result = await controller.Issues();
 
@@ -85,7 +85,7 @@ public class InventoryControllerTests
             new StockBalance { Product = product, Lot = sooner, Location = location, QtyAvailable = 5 },
             new StockBalance { Product = product, Lot = new Lot { LotNo = "EMPTY", Product = product }, Location = location, QtyAvailable = 0 });
         await context.SaveChangesAsync();
-        var controller = new InventoryController(context);
+        var controller = new InventoryController(context, Mock.Of<IReportExportService>());
 
         var result = await controller.CreateIssue();
 
@@ -104,7 +104,7 @@ public class InventoryControllerTests
         var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
         service.Setup(item => item.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user")).ReturnsAsync(true);
-        var controller = Authenticated(new InventoryController(context, service.Object)); controller.TempData = Mock.Of<ITempDataDictionary>();
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object)); controller.TempData = Mock.Of<ITempDataDictionary>();
 
         var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 2.5m, seeded.locationId);
 
@@ -127,7 +127,7 @@ public class InventoryControllerTests
         await using var context = new ApplicationDbContext(options);
         var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
-        var controller = Authenticated(new InventoryController(context, service.Object));
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
 
         var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, qty, seeded.locationId);
 
@@ -149,7 +149,7 @@ public class InventoryControllerTests
         var service = new Mock<IInventoryService>();
         var setup = service.Setup(item => item.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"));
         if (throws) setup.ThrowsAsync(new InvalidOperationException("failed")); else setup.ReturnsAsync(false);
-        var controller = Authenticated(new InventoryController(context, service.Object));
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
 
         var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 2, seeded.locationId);
 
@@ -177,7 +177,7 @@ public class InventoryControllerTests
             new StockBalance { Product = fifo, Lot = new Lot { Id = 20, LotNo = "FIFO-20", Product = fifo, ExpiryDate = new DateTime(2025, 1, 1) }, Location = location, QtyAvailable = 1 },
             new StockBalance { Product = fifo, Lot = new Lot { Id = 10, LotNo = "FIFO-10", Product = fifo, ExpiryDate = new DateTime(2028, 1, 1) }, Location = location, QtyAvailable = 1 });
         await context.SaveChangesAsync();
-        var controller = new InventoryController(context);
+        var controller = new InventoryController(context, Mock.Of<IReportExportService>());
 
         await controller.CreateIssue();
 
@@ -203,7 +203,7 @@ public class InventoryControllerTests
         context.Customers.Add(new Customer { Id = 6, Code = "C", Name = "C" });
         context.StockBalances.Add(new StockBalance { Product = product, Lot = lot, Location = location, QtyAvailable = 10 });
         await context.SaveChangesAsync();
-        var controller = Authenticated(new InventoryController(context, Mock.Of<IInventoryService>()));
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), Mock.Of<IInventoryService>()));
 
         var result = await controller.CreateIssue(6, product.Id, lot.Id, 1, location.Id);
 
@@ -226,7 +226,7 @@ public class InventoryControllerTests
         context.Customers.Add(new Customer { Id = 6, Code = "C", Name = "C" });
         context.StockBalances.Add(new StockBalance { Product = other, Lot = lot, Location = location, QtyAvailable = 10 });
         await context.SaveChangesAsync();
-        var controller = Authenticated(new InventoryController(context, Mock.Of<IInventoryService>()));
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), Mock.Of<IInventoryService>()));
 
         var result = await controller.CreateIssue(6, product.Id, lot.Id, 1, location.Id);
 
@@ -244,7 +244,7 @@ public class InventoryControllerTests
         await using var context = new ApplicationDbContext(options);
         await context.Database.EnsureCreatedAsync();
         var seeded = await SeedIssueStockAsync(context);
-        var controller = Authenticated(new InventoryController(context, new InventoryService(context))); controller.TempData = Mock.Of<ITempDataDictionary>();
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), new InventoryService(context))); controller.TempData = Mock.Of<ITempDataDictionary>();
 
         var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 3, seeded.locationId);
 
@@ -266,7 +266,7 @@ public class InventoryControllerTests
         var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
         service.Setup(x => x.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user")).ReturnsAsync(false);
-        var controller = Authenticated(new InventoryController(context, service.Object));
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
 
         var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 3, seeded.locationId);
 
@@ -364,7 +364,7 @@ public class InventoryControllerTests
 
         await using (var context = new ApplicationDbContext(options))
         {
-            var controller = new InventoryController(context);
+            var controller = new InventoryController(context, Mock.Of<IReportExportService>());
 
             var result = await controller.Receipts();
 
@@ -388,7 +388,7 @@ public class InventoryControllerTests
         context.Suppliers.Add(new Supplier { Code = "SUP", Name = "Supplier" });
         context.Locations.Add(new Location { Code = "LOC", Name = "Location", Zone = new Zone { Code = "ZONE", Name = "Zone" } });
         await context.SaveChangesAsync();
-        var controller = new InventoryController(context);
+        var controller = new InventoryController(context, Mock.Of<IReportExportService>());
 
         var result = await controller.CreateReceipt();
 
@@ -412,7 +412,7 @@ public class InventoryControllerTests
         var inventoryService = new Mock<IInventoryService>();
         inventoryService.Setup(service => service.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"))
             .ReturnsAsync(true);
-        var controller = Authenticated(new InventoryController(context, inventoryService.Object));
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), inventoryService.Object));
         controller.TempData = Mock.Of<ITempDataDictionary>();
 
         var result = await controller.CreateReceipt(2, 3, "LOT-9", 12.5m, 4.25m, 4);
@@ -441,7 +441,7 @@ public class InventoryControllerTests
         var inventoryService = new Mock<IInventoryService>();
         inventoryService.Setup(service => service.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"))
             .ReturnsAsync(false);
-        var controller = Authenticated(new InventoryController(context, inventoryService.Object));
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), inventoryService.Object));
         controller.TempData = Mock.Of<ITempDataDictionary>();
 
         var result = await controller.CreateReceipt(2, 3, "LOT-FALSE", 12.5m, 4.25m, 4);
@@ -462,7 +462,7 @@ public class InventoryControllerTests
         var inventoryService = new Mock<IInventoryService>();
         inventoryService.Setup(service => service.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"))
             .ThrowsAsync(new InvalidOperationException("completion failed"));
-        var controller = Authenticated(new InventoryController(context, inventoryService.Object));
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), inventoryService.Object));
         controller.TempData = Mock.Of<ITempDataDictionary>();
 
         var result = await controller.CreateReceipt(2, 3, "LOT-ERROR", 12.5m, 4.25m, 4);

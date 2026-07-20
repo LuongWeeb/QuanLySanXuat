@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using WmsMes.Web.Domain.Entities;
@@ -8,6 +9,12 @@ public static class StartupDatabaseInitializer
 {
     private const int MigrationAttempts = 12;
     private static readonly TimeSpan MigrationRetryDelay = TimeSpan.FromSeconds(5);
+    private static readonly HashSet<int> TransientSqlErrorNumbers =
+    [
+        -2, 2, 20, 53, 64, 233, 258,
+        10053, 10054, 10060, 10928, 10929, 11001,
+        17197, 18401, 40197, 40501, 40613, 49918, 49919, 49920
+    ];
 
     public static async Task InitializeAsync(
         IServiceProvider serviceProvider,
@@ -18,21 +25,42 @@ public static class StartupDatabaseInitializer
         var services = scope.ServiceProvider;
         var dbContext = services.GetRequiredService<ApplicationDbContext>();
 
-        await MigrateWithRetryAsync(
+        await MigrateThenSeedAsync(
             dbContext.Database.MigrateAsync,
+            async _ =>
+            {
+                var roleManager = services.GetRequiredService<RoleManager<ApplicationRole>>();
+                var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
+
+                await DbSeeder.SeedRolesAndUsersAsync(roleManager, userManager);
+                await DbSeeder.SeedQcInfrastructureAsync(dbContext);
+                await DbSeeder.SeedUnitOfMeasuresAsync(dbContext);
+                await DbSeeder.SeedWarehouseStructureAsync(dbContext);
+                await DbSeeder.SeedComprehensiveSampleDataAsync(dbContext, userManager);
+            },
             MigrationAttempts,
             MigrationRetryDelay,
             logger,
             cancellationToken);
+    }
 
-        var roleManager = services.GetRequiredService<RoleManager<ApplicationRole>>();
-        var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
+    public static async Task MigrateThenSeedAsync(
+        Func<CancellationToken, Task> migrateAsync,
+        Func<CancellationToken, Task> seedAsync,
+        int maxAttempts,
+        TimeSpan delay,
+        ILogger? logger = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(seedAsync);
 
-        await DbSeeder.SeedRolesAndUsersAsync(roleManager, userManager);
-        await DbSeeder.SeedQcInfrastructureAsync(dbContext);
-        await DbSeeder.SeedUnitOfMeasuresAsync(dbContext);
-        await DbSeeder.SeedWarehouseStructureAsync(dbContext);
-        await DbSeeder.SeedComprehensiveSampleDataAsync(dbContext, userManager);
+        await MigrateWithRetryAsync(
+            migrateAsync,
+            maxAttempts,
+            delay,
+            logger,
+            cancellationToken);
+        await seedAsync(cancellationToken);
     }
 
     public static async Task MigrateWithRetryAsync(
@@ -52,7 +80,11 @@ public static class StartupDatabaseInitializer
                 await migrateAsync(cancellationToken);
                 return;
             }
-            catch (Exception ex) when (attempt < maxAttempts)
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (attempt < maxAttempts && IsTransientSqlFailure(ex))
             {
                 logger?.LogWarning(
                     ex,
@@ -64,5 +96,17 @@ public static class StartupDatabaseInitializer
                 await Task.Delay(delay, cancellationToken);
             }
         }
+    }
+
+    private static bool IsTransientSqlFailure(Exception exception)
+    {
+        if (exception is SqlException sqlException)
+        {
+            return sqlException.Errors
+                .Cast<SqlError>()
+                .Any(error => TransientSqlErrorNumbers.Contains(error.Number));
+        }
+
+        return exception.InnerException is not null && IsTransientSqlFailure(exception.InnerException);
     }
 }

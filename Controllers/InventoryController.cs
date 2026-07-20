@@ -17,18 +17,18 @@ public class InventoryController : Controller
 {
     private readonly ApplicationDbContext _context;
     private readonly IInventoryService? _inventoryService;
-    private readonly IReportExportService? _reportExportService;
+    private readonly IReportExportService _reportExportService;
     private readonly ILogger<InventoryController> _logger;
 
     public InventoryController(
         ApplicationDbContext context,
+        IReportExportService reportExportService,
         IInventoryService? inventoryService = null,
-        ILogger<InventoryController>? logger = null,
-        IReportExportService? reportExportService = null)
+        ILogger<InventoryController>? logger = null)
     {
         _context = context;
         _inventoryService = inventoryService;
-        _reportExportService = reportExportService;
+        _reportExportService = reportExportService ?? throw new ArgumentNullException(nameof(reportExportService));
         _logger = logger ?? NullLogger<InventoryController>.Instance;
     }
 
@@ -48,14 +48,9 @@ public class InventoryController : Controller
         return View(balances);
     }
 
-    [HttpGet("export-excel")]
+    [HttpGet("[controller]/[action]")]
     public async Task<IActionResult> ExportExcel(int? warehouseId)
     {
-        if (_reportExportService is null)
-        {
-            throw new InvalidOperationException("IReportExportService is required to export stock balances.");
-        }
-
         var bytes = await _reportExportService.ExportStockBalanceToExcelAsync(warehouseId);
         return File(
             bytes,

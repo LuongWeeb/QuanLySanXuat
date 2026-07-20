@@ -16,4 +16,5 @@ RUN dotnet publish "WmsMes.Web.csproj" -c Release -o /app/publish /p:UseAppHost=
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+USER $APP_UID
 ENTRYPOINT ["dotnet", "WmsMes.Web.dll"]

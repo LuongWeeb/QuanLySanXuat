@@ -16,18 +16,18 @@ public class WorkOrderController : Controller
     private readonly ApplicationDbContext _context;
     private readonly IWorkOrderService _workOrderService;
     private readonly ILogger<WorkOrderController> _logger;
-    private readonly IReportExportService? _reportExportService;
+    private readonly IReportExportService _reportExportService;
 
     public WorkOrderController(
         ApplicationDbContext context,
         IWorkOrderService workOrderService,
         ILogger<WorkOrderController> logger,
-        IReportExportService? reportExportService = null)
+        IReportExportService reportExportService)
     {
         _context = context;
         _workOrderService = workOrderService;
         _logger = logger;
-        _reportExportService = reportExportService;
+        _reportExportService = reportExportService ?? throw new ArgumentNullException(nameof(reportExportService));
     }
 
     public async Task<IActionResult> Index()
@@ -56,16 +56,18 @@ public class WorkOrderController : Controller
         return View(order);
     }
 
-    [HttpGet("export-pdf/{id:int}")]
+    [HttpGet("[controller]/[action]/{id:int}")]
     public async Task<IActionResult> ExportPdf(int id)
     {
-        if (_reportExportService is null)
+        try
         {
-            throw new InvalidOperationException("IReportExportService is required to export work orders.");
+            var bytes = await _reportExportService.ExportWorkOrderToPdfAsync(id);
+            return File(bytes, "application/pdf", $"LenhSanXuat_{id}_{DateTime.Now:yyyyMMdd}.pdf");
         }
-
-        var bytes = await _reportExportService.ExportWorkOrderToPdfAsync(id);
-        return File(bytes, "application/pdf", $"LenhSanXuat_{id}_{DateTime.Now:yyyyMMdd}.pdf");
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
     }
 
     [HttpGet]

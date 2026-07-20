@@ -1,36 +1,74 @@
-version: '3.8'
-
 services:
   wmsmes-db:
     image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: wmsmes-db
     environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=YourSecurePassword123!
-    ports:
-      - "1433:1433"
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}"
     volumes:
       - sqldata:/var/opt/mssql/data
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" || exit 1"]
+      test:
+        - CMD-SHELL
+        - >-
+          SQLCMDPASSWORD="$${MSSQL_SA_PASSWORD}"
+          /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -Q "SELECT 1" || exit 1
       interval: 10s
       timeout: 5s
       retries: 12
       start_period: 20s
 
+  wmsmes-provision:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      wmsmes-db:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}"
+      MSSQL_MIGRATION_PASSWORD: "${MSSQL_MIGRATION_PASSWORD:?Set MSSQL_MIGRATION_PASSWORD in .env}"
+      MSSQL_APP_PASSWORD: "${MSSQL_APP_PASSWORD:?Set MSSQL_APP_PASSWORD in .env}"
+    volumes:
+      - ./docker/sql/provision.sql:/opt/wmsmes/provision.sql:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        SQLCMDPASSWORD="$${MSSQL_SA_PASSWORD}"
+        /opt/mssql-tools18/bin/sqlcmd
+        -S wmsmes-db -U sa -C -b
+        -i /opt/wmsmes/provision.sql
+    restart: "no"
+
+  wmsmes-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wmsmes-web:local
+    command: ["--initialize-database"]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: >-
+        Server=wmsmes-db;Database=WmsMesDb;User Id=wmsmes_migrator;Password=${MSSQL_MIGRATION_PASSWORD:?Set MSSQL_MIGRATION_PASSWORD in .env};TrustServerCertificate=True;MultipleActiveResultSets=true
+      Jwt__SecretKey: "${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}"
+    depends_on:
+      wmsmes-provision:
+        condition: service_completed_successfully
+    restart: "no"
+
   wmsmes-web:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: wmsmes-web
+    image: wmsmes-web:local
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__DefaultConnection=Server=wmsmes-db;Database=WmsMesDb;User Id=sa;Password=YourSecurePassword123!;TrustServerCertificate=True;MultipleActiveResultSets=true
+      ASPNETCORE_ENVIRONMENT: Production
+      DatabaseInitialization__Enabled: "false"
+      ConnectionStrings__DefaultConnection: >-
+        Server=wmsmes-db;Database=WmsMesDb;User Id=wmsmes_app;Password=${MSSQL_APP_PASSWORD:?Set MSSQL_APP_PASSWORD in .env};TrustServerCertificate=True;MultipleActiveResultSets=true
+      Jwt__SecretKey: "${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}"
     ports:
       - "5000:8080"
     depends_on:
-      wmsmes-db:
-        condition: service_healthy
+      wmsmes-migrate:
+        condition: service_completed_successfully
 
 volumes:
   sqldata:

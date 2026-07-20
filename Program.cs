@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using QuestPDF.Infrastructure;
 using System.Text;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
@@ -10,6 +11,10 @@ using WmsMes.Web.Repositories;
 using WmsMes.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+var initializeDatabaseOnly = args.Any(argument =>
+    string.Equals(argument, "--initialize-database", StringComparison.OrdinalIgnoreCase));
+
+QuestPDF.Settings.License = LicenseType.Community;
 
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
@@ -142,6 +147,16 @@ app.MapHub<InventoryHub>("/inventoryHub");
 app.MapHub<ProductionHub>("/productionHub");
 app.MapHub<QualityHub>("/qualityHub");
 
-await StartupDatabaseInitializer.InitializeAsync(app.Services, app.Logger);
+if (initializeDatabaseOnly || builder.Configuration.GetValue("DatabaseInitialization:Enabled", true))
+{
+    await StartupDatabaseInitializer.InitializeAsync(app.Services, app.Logger);
+}
+
+if (initializeDatabaseOnly)
+{
+    return;
+}
 
 app.Run();
+
+public partial class Program;

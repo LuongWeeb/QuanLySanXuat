@@ -1,12 +1,21 @@
 using ClosedXML.Excel;
+using System.Globalization;
+using System.Reflection;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
+using SkiaSharp;
+using UglyToad.PdfPig;
+using UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor;
 using WmsMes.Web.Controllers;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Services;
+using ZXing;
+using ZXing.Common;
 
 namespace WmsMes.Tests;
 
@@ -90,46 +99,80 @@ public class ReportExportTests
     }
 
     [Fact]
-    public async Task ExportWorkOrderToPdf_ReturnsPdfDocument()
+    public async Task ExportWorkOrderToPdf_PreservesVietnameseCodeQuantityAndRequestedOperationOrder()
     {
         await using var context = new ApplicationDbContext(Options($"Report_Pdf_{Guid.NewGuid()}"));
         var product = new Product { Code = "FG-001", Name = "Thành phẩm" };
         var order = new WorkOrder
         {
-            Code = "WO_001",
+            Code = "LỆNH-SX-ĐẶC-BIỆT-001",
             Product = product,
             Qty = 250,
             DueDate = new DateTime(2026, 8, 1),
             BomVersion = "B1",
             RoutingVersion = "R1"
         };
-        order.Steps.Add(new WorkOrderStep
+        WorkOrderStep[] requestedSteps =
+        [
+            new WorkOrderStep
+            {
+                StepNumber = 30,
+                StepName = "OP-30 FINAL PACKING",
+                Status = WorkOrderStepStatus.Completed,
+                WorkCenter = new WorkCenter { Code = "PACK", Name = "Đóng gói" }
+            },
+            new WorkOrderStep
+            {
+                StepNumber = 10,
+                StepName = "OP-10 MATERIAL PREPARATION",
+                Status = WorkOrderStepStatus.InProgress,
+                WorkCenter = new WorkCenter { Code = "PREP", Name = "Chuẩn bị" }
+            },
+            new WorkOrderStep
+            {
+                StepNumber = 20,
+                StepName = "OP-20 PRIMARY MIXING",
+                Status = WorkOrderStepStatus.Pending,
+                WorkCenter = new WorkCenter { Code = "MIX", Name = "Máy trộn" }
+            }
+        ];
+        foreach (var step in requestedSteps)
         {
-            StepNumber = 1,
-            StepName = "Phối trộn",
-            WorkCenter = new WorkCenter { Code = "MIX", Name = "Máy trộn" }
-        });
-        var hyphenOrder = new WorkOrder
-        {
-            Code = "WO-001",
-            Product = product,
-            Qty = 250,
-            DueDate = new DateTime(2026, 8, 1),
-            BomVersion = "B1",
-            RoutingVersion = "R1"
-        };
-        context.WorkOrders.AddRange(order, hyphenOrder);
+            order.Steps.Add(step);
+        }
+        context.WorkOrders.Add(order);
         await context.SaveChangesAsync();
 
-        var bytes = await new ReportExportService(context).ExportWorkOrderToPdfAsync(order.Id);
-        var hyphenBytes = await new ReportExportService(context).ExportWorkOrderToPdfAsync(hyphenOrder.Id);
+        var originalCulture = CultureInfo.CurrentCulture;
+        byte[] bytes;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+            bytes = await new ReportExportService(context).ExportWorkOrderToPdfAsync(order.Id);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+        }
 
         Assert.True(bytes.Length > 1000);
         Assert.Equal("%PDF-", System.Text.Encoding.ASCII.GetString(bytes, 0, 5));
-        Assert.Contains("/Subtype /Image", System.Text.Encoding.Latin1.GetString(bytes));
-        Assert.NotEqual(
-            Convert.ToHexString(FirstPdfImageStream(hyphenBytes)),
-            Convert.ToHexString(FirstPdfImageStream(bytes)));
+
+        using var document = PdfDocument.Open(bytes);
+        var page = document.GetPage(1);
+        var text = Regex.Replace(ContentOrderTextExtractor.GetText(page), @"\s+", " ");
+        Assert.Contains("250,00", text);
+        var preparationIndex = text.IndexOf("OP-10 MATERIAL PREPARATION", StringComparison.Ordinal);
+        var mixingIndex = text.IndexOf("OP-20 PRIMARY MIXING", StringComparison.Ordinal);
+        var packingIndex = text.IndexOf("OP-30 FINAL PACKING", StringComparison.Ordinal);
+        Assert.True(preparationIndex >= 0, $"Missing exact first operation in PDF text: {text}");
+        Assert.True(mixingIndex > preparationIndex, $"Second operation is not after the first: {text}");
+        Assert.True(packingIndex > mixingIndex, $"Third operation is not after the second: {text}");
+
+        var decodedQr = page.GetImages()
+            .Select(TryDecodeQr)
+            .FirstOrDefault(value => value is not null);
+        Assert.Equal(order.Code, decodedQr);
     }
 
     [Fact]
@@ -139,7 +182,7 @@ public class ReportExportTests
         var expected = new byte[] { 1, 2, 3 };
         var reports = new Mock<IReportExportService>();
         reports.Setup(x => x.ExportStockBalanceToExcelAsync(17)).ReturnsAsync(expected);
-        var controller = new InventoryController(context, reportExportService: reports.Object);
+        var controller = new InventoryController(context, reports.Object);
 
         var result = await controller.ExportExcel(17);
 
@@ -174,24 +217,74 @@ public class ReportExportTests
         reports.VerifyAll();
     }
 
-    private static byte[] FirstPdfImageStream(byte[] pdf)
+    [Fact]
+    public async Task WorkOrderExportPdf_WhenReportDoesNotExist_ReturnsNotFound()
     {
-        var imageMarker = System.Text.Encoding.ASCII.GetBytes("/Subtype /Image");
-        var imageIndex = pdf.AsSpan().IndexOf(imageMarker);
-        Assert.True(imageIndex >= 0, "The PDF must contain an embedded image.");
+        await using var context = new ApplicationDbContext(Options($"Report_WorkOrderMissing_{Guid.NewGuid()}"));
+        var reports = new Mock<IReportExportService>();
+        reports.Setup(x => x.ExportWorkOrderToPdfAsync(404))
+            .ThrowsAsync(new KeyNotFoundException("missing"));
+        var controller = new WorkOrderController(
+            context,
+            Mock.Of<IWorkOrderService>(),
+            Mock.Of<ILogger<WorkOrderController>>(),
+            reports.Object);
 
-        var streamMarker = System.Text.Encoding.ASCII.GetBytes("stream");
-        var relativeStreamIndex = pdf.AsSpan(imageIndex).IndexOf(streamMarker);
-        Assert.True(relativeStreamIndex >= 0, "The embedded image must contain a PDF stream.");
-        var streamStart = imageIndex + relativeStreamIndex + streamMarker.Length;
-        while (streamStart < pdf.Length && (pdf[streamStart] == (byte)'\r' || pdf[streamStart] == (byte)'\n'))
+        var result = await controller.ExportPdf(404);
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Theory]
+    [InlineData(typeof(InventoryController))]
+    [InlineData(typeof(WorkOrderController))]
+    public void ReportExportService_IsARequiredNonNullableControllerDependency(Type controllerType)
+    {
+        var constructor = Assert.Single(controllerType.GetConstructors());
+        var parameter = Assert.Single(constructor.GetParameters().Where(item => item.ParameterType == typeof(IReportExportService)));
+
+        Assert.False(parameter.HasDefaultValue);
+        Assert.Equal(NullabilityState.NotNull, new NullabilityInfoContext().Create(parameter).ReadState);
+    }
+
+    private static string? TryDecodeQr(UglyToad.PdfPig.Content.IPdfImage image)
+    {
+        var imageBytes = image.TryGetPng(out var pngBytes)
+            ? pngBytes
+            : image.RawBytes.ToArray();
+        using var bitmap = SKBitmap.Decode(imageBytes);
+        if (bitmap is null)
         {
-            streamStart++;
+            return null;
         }
 
-        var endMarker = System.Text.Encoding.ASCII.GetBytes("endstream");
-        var relativeEndIndex = pdf.AsSpan(streamStart).IndexOf(endMarker);
-        Assert.True(relativeEndIndex >= 0, "The embedded image stream must be terminated.");
-        return pdf.AsSpan(streamStart, relativeEndIndex).ToArray();
+        var rgb = new byte[bitmap.Width * bitmap.Height * 3];
+        var offset = 0;
+        for (var y = 0; y < bitmap.Height; y++)
+        {
+            for (var x = 0; x < bitmap.Width; x++)
+            {
+                var pixel = bitmap.GetPixel(x, y);
+                rgb[offset++] = pixel.Red;
+                rgb[offset++] = pixel.Green;
+                rgb[offset++] = pixel.Blue;
+            }
+        }
+
+        var source = new RGBLuminanceSource(
+            rgb,
+            bitmap.Width,
+            bitmap.Height,
+            RGBLuminanceSource.BitmapFormat.RGB24);
+        var reader = new BarcodeReaderGeneric
+        {
+            Options = new DecodingOptions
+            {
+                CharacterSet = "UTF-8",
+                PossibleFormats = [BarcodeFormat.QR_CODE],
+                TryHarder = true
+            }
+        };
+        return reader.Decode(source)?.Text;
     }
 }
