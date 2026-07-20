@@ -217,8 +217,8 @@ Sửa `Program.cs` để cấu hình Identity cùng với Cookie và JWT:
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.IdentityModel.Tokens;
-using System.Text;
+using Microsoft.Extensions.Options;
+using WmsMes.Web.Authentication;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 
@@ -240,6 +240,12 @@ builder.Services.AddIdentity<ApplicationUser, ApplicationRole>(options => {
 .AddEntityFrameworkStores<ApplicationDbContext>()
 .AddDefaultTokenProviders();
 
+builder.Services.AddOptions<JwtOptions>()
+    .Bind(builder.Configuration.GetRequiredSection(JwtOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidator>();
+builder.Services.AddSingleton<IConfigureOptions<JwtBearerOptions>, ConfigureJwtBearerOptions>();
+
 // Configure Authentication (Cookie & JWT)
 builder.Services.AddAuthentication(options =>
 {
@@ -250,19 +256,7 @@ builder.Services.AddAuthentication(options =>
     options.LoginPath = "/Auth/Login";
     options.AccessDeniedPath = "/Auth/AccessDenied";
 })
-.AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
-{
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = "WmsMesServer",
-        ValidAudience = "WmsMesClient",
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("<external-signing-key-at-least-32-bytes>"))
-    };
-});
+.AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, _ => { });
 
 var app = builder.Build();
 

@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using WmsMes.Web.Authentication;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
@@ -79,6 +80,46 @@ public class JwtAuthenticationTests
         Assert.Contains(
             "Admin",
             protectedBody.RootElement.GetProperty("roles").EnumerateArray().Select(role => role.GetString()));
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void SigningKeyFile_NormalizesOneTerminalLineEndingBeforeOptionsBinding(string lineEnding)
+    {
+        const string signingKey = " test-only JWT key's;intentional spaces remain ";
+        var signingKeyFile = Path.GetTempFileName();
+        File.WriteAllText(signingKeyFile, signingKey + lineEnding);
+        try
+        {
+            using var factory = new JwtSecretFileWebApplicationFactory(signingKeyFile);
+            using var client = factory.CreateClient();
+
+            var options = factory.Services.GetRequiredService<IOptions<JwtOptions>>().Value;
+
+            Assert.Equal(signingKey, options.SigningKey);
+        }
+        finally
+        {
+            File.Delete(signingKeyFile);
+        }
+    }
+}
+
+public sealed class JwtSecretFileWebApplicationFactory : WebApplicationFactory<Program>
+{
+    private readonly string _signingKeyFile;
+
+    public JwtSecretFileWebApplicationFactory(string signingKeyFile)
+    {
+        _signingKeyFile = signingKeyFile;
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Production");
+        builder.UseSetting("DatabaseInitialization:Enabled", "false");
+        builder.UseSetting("Jwt:SigningKeyFile", _signingKeyFile);
     }
 }
 

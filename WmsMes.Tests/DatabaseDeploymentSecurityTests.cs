@@ -6,14 +6,82 @@ namespace WmsMes.Tests;
 
 public class DatabaseDeploymentSecurityTests
 {
-    [Fact]
-    public void FileBackedPassword_RoundTripsApostropheAndSemicolonThroughSqlConnectionStringBuilder()
+    [Theory]
+    [InlineData("DatabaseProvisioning:SaPasswordFile", "\n")]
+    [InlineData("DatabaseProvisioning:SaPasswordFile", "\r\n")]
+    [InlineData("DatabaseProvisioning:MigratorPasswordFile", "\n")]
+    [InlineData("DatabaseProvisioning:MigratorPasswordFile", "\r\n")]
+    [InlineData("DatabaseProvisioning:ApplicationPasswordFile", "\n")]
+    [InlineData("DatabaseProvisioning:ApplicationPasswordFile", "\r\n")]
+    [InlineData("Jwt:SigningKeyFile", "\n")]
+    [InlineData("Jwt:SigningKeyFile", "\r\n")]
+    public void EverySecretType_RemovesOneTerminalLineEndingAndPreservesOtherCharacters(
+        string settingName,
+        string lineEnding)
     {
-        const string password = "Arbitrary'p;assphrase!";
-        var passwordFile = Path.GetTempFileName();
+        const string secret = " leading secret's;spaces stay ";
+        var secretFile = WriteTemporarySecret(secret + lineEnding);
         try
         {
-            File.WriteAllText(passwordFile, password);
+            Assert.Equal(secret, SecretFile.ReadRequired(secretFile, settingName));
+        }
+        finally
+        {
+            File.Delete(secretFile);
+        }
+    }
+
+    [Theory]
+    [InlineData("secret\n\n", "secret\n")]
+    [InlineData("secret\r\n\r\n", "secret\r\n")]
+    [InlineData("secret\r\n\n", "secret\r\n")]
+    [InlineData("secret\r", "secret\r")]
+    public void SecretFile_RemovesExactlyOneTerminatorAndPreservesAdditionalCharacters(
+        string stored,
+        string expected)
+    {
+        var secretFile = WriteTemporarySecret(stored);
+        try
+        {
+            Assert.Equal(expected, SecretFile.ReadRequired(secretFile, "Test:SecretFile"));
+        }
+        finally
+        {
+            File.Delete(secretFile);
+        }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void SecretFile_RejectsValuesThatAreEmptyAfterNormalization(string stored)
+    {
+        var secretFile = WriteTemporarySecret(stored);
+        try
+        {
+            var exception = Assert.Throws<InvalidOperationException>(() =>
+                SecretFile.ReadRequired(secretFile, "Test:SecretFile"));
+
+            Assert.Contains("Test:SecretFile", exception.Message);
+            Assert.Contains("must not be empty", exception.Message);
+        }
+        finally
+        {
+            File.Delete(secretFile);
+        }
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void FileBackedPassword_NormalizesLineEndingAndRoundTripsSpecialCharacters(
+        string lineEnding)
+    {
+        const string password = " Arbitrary'p;assphrase! ";
+        var passwordFile = WriteTemporarySecret(password + lineEnding);
+        try
+        {
             var configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
@@ -71,5 +139,12 @@ public class DatabaseDeploymentSecurityTests
             ["--initialize-database"],
             defaultConfiguration));
         Assert.True(DatabaseInitializationPolicy.ShouldInitialize([], enabledConfiguration));
+    }
+
+    private static string WriteTemporarySecret(string value)
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, value);
+        return path;
     }
 }

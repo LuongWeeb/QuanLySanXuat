@@ -52,6 +52,10 @@ public class DeploymentConfigurationTests
         var sqlEntrypoint = Read(Path.Combine("docker", "sql", "entrypoint.sh"));
         Assert.Contains("/run/secrets/mssql_sa_password", sqlEntrypoint);
         Assert.DoesNotContain("$1", sqlEntrypoint, StringComparison.Ordinal);
+        Assert.Contains("MSSQL_SA_PASSWORD%x", sqlEntrypoint);
+        Assert.Contains("%$'\\r\\n'", sqlEntrypoint);
+        Assert.Contains("%$'\\n'", sqlEntrypoint);
+        Assert.Contains("must not be empty", sqlEntrypoint);
     }
 
     [Fact]
@@ -74,6 +78,7 @@ public class DeploymentConfigurationTests
 
         Assert.Contains("QuestPDF Community", example, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("https://www.questpdf.com/license/", example);
+        Assert.Contains("exactly one terminal CRLF or LF", example, StringComparison.OrdinalIgnoreCase);
         var gitignore = Read(".gitignore");
         Assert.Matches(new Regex(@"(?m)^\.env$"), gitignore);
         Assert.DoesNotMatch(new Regex(@"(?m)^\.env\.example$"), gitignore);
@@ -113,6 +118,21 @@ public class DeploymentConfigurationTests
         Assert.Contains("DatabaseInitialization:Enabled", policy);
         Assert.Contains("DatabaseInitializationPolicy.ShouldInitialize", program);
         Assert.Contains("DatabaseInitialization__Enabled: \"false\"", compose);
+    }
+
+    [Fact]
+    public void FoundationPlan_UsesRequiredTypedJwtOptionsWithoutAValidPlaceholderKey()
+    {
+        var plan = Read(Path.Combine(
+            "docs",
+            "superpowers",
+            "plans",
+            "2026-07-14-foundation-implementation-plan.md"));
+
+        Assert.Contains("GetRequiredSection(JwtOptions.SectionName)", plan);
+        Assert.Contains("ValidateOnStart", plan);
+        Assert.Contains("JwtOptionsValidator", plan);
+        Assert.DoesNotContain("<external-signing-key-at-least-32-bytes>", plan);
     }
 
     private static string Read(string relativePath) =>

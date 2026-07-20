@@ -13,7 +13,23 @@ public static class SecretFile
 
         try
         {
-            return File.ReadAllText(path);
+            var value = File.ReadAllText(path);
+            if (value.EndsWith("\r\n", StringComparison.Ordinal))
+            {
+                value = value[..^2];
+            }
+            else if (value.EndsWith('\n'))
+            {
+                value = value[..^1];
+            }
+
+            if (value.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    $"The secret file configured by {settingName} must not be empty after normalization.");
+            }
+
+            return value;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
