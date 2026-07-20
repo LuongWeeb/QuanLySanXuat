@@ -14,6 +14,37 @@ namespace WmsMes.Tests;
 public class InventoryServiceTests
 {
     [Fact]
+    public async Task AdjustStockAsync_WithStaleRelationalContexts_AllowsOnlyOneConditionalAdjustment()
+    {
+        var database = $"file:adjust-{Guid.NewGuid():N}?mode=memory&cache=shared";
+        await using var keepAlive = new SqliteConnection($"Data Source={database}");
+        await keepAlive.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite($"Data Source={database}").Options;
+        await using (var seed = new ApplicationDbContext(options))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            await SeedRequiredMasterDataAsync(seed);
+            seed.Lots.Add(new Lot { Id = 1, ProductId = 1, LotNo = "LOT-ADJUST", Qty = 10 });
+            seed.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 10 });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var firstContext = new ApplicationDbContext(options);
+        await using var staleContext = new ApplicationDbContext(options);
+        await firstContext.StockBalances.SingleAsync();
+        await staleContext.StockBalances.SingleAsync();
+
+        var first = await new InventoryService(firstContext).AdjustStockAsync(1, 1, 1, -7, "user-1", "CC-1");
+        var stale = await new InventoryService(staleContext).AdjustStockAsync(1, 1, 1, -7, "user-2", "CC-2");
+
+        Assert.True(first);
+        Assert.False(stale);
+        await using var verify = new ApplicationDbContext(options);
+        Assert.Equal(3, (await verify.StockBalances.SingleAsync()).QtyAvailable);
+        Assert.Single(await verify.StockTransactions.ToListAsync());
+    }
+
+    [Fact]
     public async Task CompleteGoodsReceiptAsync_WhenPostCommitHubFails_ReturnsSuccessWithDurableInventory()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

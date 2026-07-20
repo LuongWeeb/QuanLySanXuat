@@ -442,18 +442,49 @@ public class InventoryService : IInventoryService
         await using var transaction = await BeginTransactionIfRelationalAsync();
         try
         {
-            var balance = await _context.StockBalances
-                .FirstOrDefaultAsync(stockBalance =>
-                    stockBalance.ProductId == productId &&
-                    stockBalance.LotId == lotId &&
-                    stockBalance.LocationId == locationId);
-
-            if (balance is null || balance.QtyAvailable + adjustmentQty < 0)
+            if (_context.Database.IsRelational())
             {
-                return false;
+                var updated = await _context.StockBalances
+                    .Where(stockBalance =>
+                        stockBalance.ProductId == productId &&
+                        stockBalance.LotId == lotId &&
+                        stockBalance.LocationId == locationId &&
+                        stockBalance.QtyAvailable + adjustmentQty >= 0)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(stockBalance => stockBalance.QtyAvailable,
+                            stockBalance => stockBalance.QtyAvailable + adjustmentQty));
+
+                if (updated != 1)
+                {
+                    return false;
+                }
+
+                var trackedBalance = _context.ChangeTracker.Entries<StockBalance>()
+                    .FirstOrDefault(entry =>
+                        entry.Entity.ProductId == productId &&
+                        entry.Entity.LotId == lotId &&
+                        entry.Entity.LocationId == locationId);
+                if (trackedBalance is not null)
+                {
+                    trackedBalance.State = EntityState.Detached;
+                }
+            }
+            else
+            {
+                var balance = await _context.StockBalances
+                    .FirstOrDefaultAsync(stockBalance =>
+                        stockBalance.ProductId == productId &&
+                        stockBalance.LotId == lotId &&
+                        stockBalance.LocationId == locationId);
+
+                if (balance is null || balance.QtyAvailable + adjustmentQty < 0)
+                {
+                    return false;
+                }
+
+                balance.QtyAvailable += adjustmentQty;
             }
 
-            balance.QtyAvailable += adjustmentQty;
             await _context.StockTransactions.AddAsync(new StockTransaction
             {
                 Type = TransactionType.Adjust,

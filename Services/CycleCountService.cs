@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging.Abstractions;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.DTOs;
@@ -10,11 +11,16 @@ public class CycleCountService : ICycleCountService
 {
     private readonly ApplicationDbContext _context;
     private readonly IInventoryService _inventoryService;
+    private readonly ILogger<CycleCountService> _logger;
 
-    public CycleCountService(ApplicationDbContext context, IInventoryService inventoryService)
+    public CycleCountService(
+        ApplicationDbContext context,
+        IInventoryService inventoryService,
+        ILogger<CycleCountService>? logger = null)
     {
         _context = context;
         _inventoryService = inventoryService;
+        _logger = logger ?? NullLogger<CycleCountService>.Instance;
     }
 
     public async Task<CycleCountOrder> CreateCycleCountOrderAsync(int warehouseId, string createdBy)
@@ -55,7 +61,8 @@ public class CycleCountService : ICycleCountService
         }
 
         var itemsById = order.Items.ToDictionary(item => item.Id);
-        if (results.Any(result => !itemsById.ContainsKey(result.CycleCountItemId)))
+        if (results.Any(result => result.CountedQty < 0 || !itemsById.ContainsKey(result.CycleCountItemId)) ||
+            results.Select(result => result.CycleCountItemId).Distinct().Count() != results.Count)
         {
             return false;
         }
@@ -72,16 +79,43 @@ public class CycleCountService : ICycleCountService
 
     public async Task<bool> ApproveAndAdjustStockAsync(int orderId, string approvedBy)
     {
+        var hasAmbientTransaction = _context.Database.CurrentTransaction is not null;
         await using var transaction = await BeginTransactionIfRelationalAsync();
         try
         {
-            var order = await _context.CycleCountOrders
-                .Include(cycleCountOrder => cycleCountOrder.Items)
-                .FirstOrDefaultAsync(cycleCountOrder => cycleCountOrder.Id == orderId);
-
-            if (order is null || order.Status != "Completed")
+            CycleCountOrder order;
+            if (_context.Database.IsRelational())
             {
-                return false;
+                var completedAt = DateTime.UtcNow;
+                var claimed = await _context.CycleCountOrders
+                    .Where(cycleCountOrder => cycleCountOrder.Id == orderId && cycleCountOrder.Status == "Completed")
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(cycleCountOrder => cycleCountOrder.Status, "Approved")
+                        .SetProperty(cycleCountOrder => cycleCountOrder.ApprovedBy, approvedBy)
+                        .SetProperty(cycleCountOrder => cycleCountOrder.CompletedAt, completedAt));
+
+                if (claimed != 1)
+                {
+                    return false;
+                }
+
+                order = await _context.CycleCountOrders
+                    .AsNoTracking()
+                    .Include(cycleCountOrder => cycleCountOrder.Items)
+                    .SingleAsync(cycleCountOrder => cycleCountOrder.Id == orderId);
+            }
+            else
+            {
+                var trackedOrder = await _context.CycleCountOrders
+                    .Include(cycleCountOrder => cycleCountOrder.Items)
+                    .FirstOrDefaultAsync(cycleCountOrder => cycleCountOrder.Id == orderId);
+
+                if (trackedOrder is null || trackedOrder.Status != "Completed")
+                {
+                    return false;
+                }
+
+                order = trackedOrder;
             }
 
             foreach (var item in order.Items.Where(item => item.CountedQty.HasValue && item.VarianceQty != 0))
@@ -100,10 +134,14 @@ public class CycleCountService : ICycleCountService
                 }
             }
 
-            order.Status = "Approved";
-            order.ApprovedBy = approvedBy;
-            order.CompletedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            if (!_context.Database.IsRelational())
+            {
+                order.Status = "Approved";
+                order.ApprovedBy = approvedBy;
+                order.CompletedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+            }
+
             await CommitIfRelationalAsync(transaction);
         }
         catch
@@ -112,7 +150,11 @@ public class CycleCountService : ICycleCountService
             throw;
         }
 
-        await _inventoryService.NotifyStockChangedAsync();
+        if (!hasAmbientTransaction)
+        {
+            await NotifyStockChangedSafelyAsync();
+        }
+
         return true;
     }
 
@@ -136,6 +178,18 @@ public class CycleCountService : ICycleCountService
         if (transaction is not null)
         {
             await transaction.RollbackAsync();
+        }
+    }
+
+    private async Task NotifyStockChangedSafelyAsync()
+    {
+        try
+        {
+            await _inventoryService.NotifyStockChangedAsync();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Cycle count approval committed but realtime notification failed.");
         }
     }
 }
