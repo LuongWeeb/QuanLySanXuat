@@ -163,10 +163,49 @@ public static class DbSeeder
 
         var locations = await context.Locations.ToDictionaryAsync(l => l.Code);
         var suppliers = await context.Suppliers.ToDictionaryAsync(s => s.Code);
+        var customers = await context.Customers.ToDictionaryAsync(c => c.Code);
+        var userId = (await context.Users.FirstOrDefaultAsync())?.Id ?? "system";
+
         await SeedReceiptAsync(context, "GR-20260715-01", suppliers["SUPP-HN-01"], locations["LOC-RAW-01"],
             (products["RM-FRAME-01"], "L-FRAME-001", 100m), (products["RM-WHEEL-01"], "L-WHEEL-001", 200m), (products["RM-CHAIN-01"], "L-CHAIN-001", 150m), (products["RM-SADDLE-01"], "L-SAD-001", 150m));
         await SeedReceiptAsync(context, "GR-20260715-02", suppliers["SUPP-NP-01"], locations["LOC-RAW-02"],
             (products["RM-ABS-01"], "L-ABS-001", 500m), (products["RM-STRAP-01"], "L-STRAP-001", 300m));
+
+        if (!await context.GoodsIssues.AnyAsync(i => i.IssueNo == "GI-20260716-01"))
+        {
+            var bikeLot = await context.Lots.FirstOrDefaultAsync(l => l.LotNo == "PROD-BIKE-01-20260717-01");
+            if (bikeLot != null)
+            {
+                var issue = new GoodsIssue
+                {
+                    IssueNo = "GI-20260716-01",
+                    CustomerId = customers["CUST-DECA-01"].Id,
+                    IssueDate = DateTime.UtcNow.AddHours(-12),
+                    Status = DocumentStatus.Completed,
+                    Lines = new List<GoodsIssueLine>
+                    {
+                        new GoodsIssueLine
+                        {
+                            ProductId = bike.Id,
+                            LotId = bikeLot.Id,
+                            LocationId = locations["LOC-FG-01"].Id,
+                            Qty = 2m
+                        }
+                    }
+                };
+                context.GoodsIssues.Add(issue);
+                await context.SaveChangesAsync();
+
+                var balance = await context.StockBalances.FirstOrDefaultAsync(b => b.ProductId == bike.Id && b.LotId == bikeLot.Id && b.LocationId == locations["LOC-FG-01"].Id);
+                if (balance != null && balance.QtyAvailable >= 2m)
+                {
+                    balance.QtyAvailable -= 2m;
+                }
+
+                context.StockTransactions.Add(NewTransaction(TransactionType.Issue, bike.Id, bikeLot.Id, locations["LOC-FG-01"].Id, -2m, issue.IssueNo, userId));
+                await context.SaveChangesAsync();
+            }
+        }
     }
 
     public static async Task SeedWorkOrdersAsync(ApplicationDbContext context)
@@ -207,6 +246,45 @@ public static class DbSeeder
             context.WorkOrders.Add(wo); await context.SaveChangesAsync();
             context.WorkOrderSteps.AddRange(NewStep(wo, 10, "Lắp ráp khung và bánh xe", centers["WC-ASM-01"], WorkOrderStepStatus.Pending, 0), NewStep(wo, 20, "Lắp xích, yên xe và cân chỉnh", centers["WC-FIN-01"], WorkOrderStepStatus.Pending, 0));
             await context.SaveChangesAsync();
+        }
+
+        if (!await context.WorkOrders.AnyAsync(w => w.Code == "WO-20260717-04"))
+        {
+            var wo = NewWorkOrder("WO-20260717-04", products["PROD-HELM-01"], 20, WorkOrderStatus.InProgress, 2);
+            context.WorkOrders.Add(wo); await context.SaveChangesAsync();
+            context.WorkOrderSteps.AddRange(
+                NewStep(wo, 10, "Ép nhựa vỏ mũ bảo hiểm", centers["WC-MOLD-01"], WorkOrderStepStatus.Completed, 20),
+                NewStep(wo, 20, "Lắp quai đeo và dán mút xốp", centers["WC-FIN-01"], WorkOrderStepStatus.Completed, 20)
+            );
+            var outputLot = new Lot { LotNo = "PROD-HELM-01-20260717-02", ProductId = wo.ProductId, Qty = 20, WorkOrderId = wo.Id, ManufactureDate = DateTime.UtcNow.AddHours(-2) };
+            context.Lots.Add(outputLot); await context.SaveChangesAsync();
+            context.StockBalances.Add(new StockBalance { ProductId = wo.ProductId, LotId = outputLot.Id, LocationId = locations["LOC-FG-01"].Id, QtyAvailable = 0m, QtyOnHold = 20m });
+            context.StockTransactions.Add(NewTransaction(TransactionType.Receipt, wo.ProductId, outputLot.Id, locations["LOC-FG-01"].Id, 20m, wo.Code, userId));
+            await context.SaveChangesAsync();
+        }
+
+        if (!await context.WorkOrders.AnyAsync(w => w.Code == "WO-20260717-05"))
+        {
+            var wo = NewWorkOrder("WO-20260717-05", products["PROD-BIKE-01"], 15, WorkOrderStatus.Pending, 4);
+            context.WorkOrders.Add(wo); await context.SaveChangesAsync();
+            context.WorkOrderSteps.AddRange(
+                NewStep(wo, 10, "Lắp ráp khung và bánh xe", centers["WC-ASM-01"], WorkOrderStepStatus.Pending, 0),
+                NewStep(wo, 20, "Lắp xích, yên xe và cân chỉnh", centers["WC-FIN-01"], WorkOrderStepStatus.Pending, 0)
+            );
+            await context.SaveChangesAsync();
+        }
+
+        if (!await context.WorkOrders.AnyAsync(w => w.Code == "WO-20260717-06"))
+        {
+            var wo = NewWorkOrder("WO-20260717-06", products["PROD-HELM-01"], 30, WorkOrderStatus.Approved, 3);
+            context.WorkOrders.Add(wo); await context.SaveChangesAsync();
+            context.WorkOrderSteps.AddRange(
+                NewStep(wo, 10, "Ép nhựa vỏ mũ bảo hiểm", centers["WC-MOLD-01"], WorkOrderStepStatus.Pending, 0),
+                NewStep(wo, 20, "Lắp quai đeo và dán mút xốp", centers["WC-FIN-01"], WorkOrderStepStatus.Pending, 0)
+            );
+            await context.SaveChangesAsync();
+            await ReserveAsync(context, wo, products["RM-ABS-01"], 15m, locations["LOC-RAW-02"]);
+            await ReserveAsync(context, wo, products["RM-STRAP-01"], 30m, locations["LOC-RAW-02"]);
         }
     }
 

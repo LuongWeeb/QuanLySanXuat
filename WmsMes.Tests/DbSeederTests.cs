@@ -35,20 +35,29 @@ public class DbSeederTests
         Assert.Equal(2, await context.Routings.CountAsync());
         Assert.Equal(2, await context.QCChecklists.CountAsync());
         Assert.Equal(2, await context.GoodsReceipts.CountAsync(r => r.ReceiptNo.StartsWith("GR-20260715-")));
-        Assert.Equal(3, await context.WorkOrders.CountAsync(w => w.Code.StartsWith("WO-20260717-")));
+        Assert.Single(await context.GoodsIssues.Where(i => i.IssueNo.StartsWith("GI-20260716-")).ToListAsync());
+        Assert.Equal(6, await context.WorkOrders.CountAsync(w => w.Code.StartsWith("WO-20260717-")));
 
         var completed = await context.WorkOrders.SingleAsync(w => w.Code == "WO-20260717-01");
         var inProgress = await context.WorkOrders.SingleAsync(w => w.Code == "WO-20260717-02");
+        var pendingQcOrder = await context.WorkOrders.SingleAsync(w => w.Code == "WO-20260717-04");
+        var pendingOrder = await context.WorkOrders.SingleAsync(w => w.Code == "WO-20260717-05");
+        var approvedOrder = await context.WorkOrders.SingleAsync(w => w.Code == "WO-20260717-06");
+
         Assert.Equal(WorkOrderStatus.Completed, completed.Status);
         Assert.Equal(WorkOrderStatus.InProgress, inProgress.Status);
+        Assert.Equal(WorkOrderStatus.Pending, pendingOrder.Status);
+        Assert.Equal(WorkOrderStatus.Approved, approvedOrder.Status);
+
         Assert.Equal(4, await context.LotGenealogies.CountAsync());
         Assert.Single(await context.QCInspections.Where(i => i.WorkOrderId == completed.Id).ToListAsync());
+        Assert.Single(await context.StockBalances.Where(b => b.QtyOnHold > 0).ToListAsync());
 
         var absBalance = await context.StockBalances
             .Include(b => b.Product)
             .SingleAsync(b => b.Product!.Code == "RM-ABS-01");
-        Assert.Equal(475m, absBalance.QtyAvailable);
-        Assert.Equal(25m, absBalance.QtyReserved);
+        Assert.Equal(460m, absBalance.QtyAvailable);
+        Assert.Equal(40m, absBalance.QtyReserved);
     }
 
     [Fact]
