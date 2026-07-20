@@ -51,6 +51,7 @@ public class DashboardMetricsTests
 
         var metrics = Assert.IsType<DashboardViewModel>(Assert.IsType<OkObjectResult>(result).Value);
         Assert.Equal(2, metrics.LowStockAlertCount);
+        Assert.Equal(1, metrics.ActiveWorkOrders);
         Assert.Equal(1, metrics.PassedQcCount);
         Assert.Equal(1, metrics.HoldQcCount);
         Assert.Equal(1, metrics.QuarantineQcCount);
