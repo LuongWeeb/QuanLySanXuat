@@ -62,31 +62,21 @@ public class HomeController : Controller
         var utcEndExclusive = ToUtc(endDateExclusive);
         var useSqliteCompatibility = _context.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite";
 
-        var oeeRows = _context.WorkOrders
+        var workOrderRows = _context.WorkOrders
             .AsNoTracking()
             .Select(workOrder => new
             {
                 workOrder.Status,
-                TargetQuantity = workOrder.Qty,
-                FinalAcceptedQuantity = workOrder.Steps
-                    .OrderByDescending(step => step.StepNumber)
-                    .Select(step => (decimal?)step.QtyOK)
-                    .FirstOrDefault() ?? 0m,
-                FinalRejectedQuantity = workOrder.Steps
-                    .OrderByDescending(step => step.StepNumber)
-                    .Select(step => (decimal?)step.QtyReject)
-                    .FirstOrDefault() ?? 0m
+                TargetQuantity = workOrder.Qty
             });
 
         int totalWorkOrderCount;
         int activeWorkOrders;
         int completedOrInProgressCount;
         decimal totalTargetQuantity;
-        decimal totalProducedQuantity;
-        decimal totalAcceptedQuantity;
         if (useSqliteCompatibility)
         {
-            var summary = await oeeRows
+            var summary = await workOrderRows
                 .GroupBy(_ => 1)
                 .Select(group => new
                 {
@@ -94,22 +84,17 @@ public class HomeController : Controller
                     ActiveCount = group.Count(order => order.Status == WorkOrderStatus.InProgress),
                     CompletedOrInProgressCount = group.Count(order =>
                         order.Status == WorkOrderStatus.Completed || order.Status == WorkOrderStatus.InProgress),
-                    TotalTargetQuantity = group.Sum(order => (double)order.TargetQuantity),
-                    TotalProducedQuantity = group.Sum(order =>
-                        (double)(order.FinalAcceptedQuantity + order.FinalRejectedQuantity)),
-                    TotalAcceptedQuantity = group.Sum(order => (double)order.FinalAcceptedQuantity)
+                    TotalTargetQuantity = group.Sum(order => (double)order.TargetQuantity)
                 })
                 .SingleOrDefaultAsync();
             totalWorkOrderCount = summary?.TotalCount ?? 0;
             activeWorkOrders = summary?.ActiveCount ?? 0;
             completedOrInProgressCount = summary?.CompletedOrInProgressCount ?? 0;
             totalTargetQuantity = (decimal)(summary?.TotalTargetQuantity ?? 0d);
-            totalProducedQuantity = (decimal)(summary?.TotalProducedQuantity ?? 0d);
-            totalAcceptedQuantity = (decimal)(summary?.TotalAcceptedQuantity ?? 0d);
         }
         else
         {
-            var summary = await oeeRows
+            var summary = await workOrderRows
                 .GroupBy(_ => 1)
                 .Select(group => new
                 {
@@ -117,39 +102,57 @@ public class HomeController : Controller
                     ActiveCount = group.Count(order => order.Status == WorkOrderStatus.InProgress),
                     CompletedOrInProgressCount = group.Count(order =>
                         order.Status == WorkOrderStatus.Completed || order.Status == WorkOrderStatus.InProgress),
-                    TotalTargetQuantity = group.Sum(order => order.TargetQuantity),
-                    TotalProducedQuantity = group.Sum(order =>
-                        order.FinalAcceptedQuantity + order.FinalRejectedQuantity),
-                    TotalAcceptedQuantity = group.Sum(order => order.FinalAcceptedQuantity)
+                    TotalTargetQuantity = group.Sum(order => order.TargetQuantity)
                 })
                 .SingleOrDefaultAsync();
             totalWorkOrderCount = summary?.TotalCount ?? 0;
             activeWorkOrders = summary?.ActiveCount ?? 0;
             completedOrInProgressCount = summary?.CompletedOrInProgressCount ?? 0;
             totalTargetQuantity = summary?.TotalTargetQuantity ?? 0m;
-            totalProducedQuantity = summary?.TotalProducedQuantity ?? 0m;
-            totalAcceptedQuantity = summary?.TotalAcceptedQuantity ?? 0m;
         }
+
+        var finalSteps = _context.WorkOrderSteps
+            .AsNoTracking()
+            .Where(step => !_context.WorkOrderSteps.Any(candidate =>
+                candidate.WorkOrderId == step.WorkOrderId && candidate.StepNumber > step.StepNumber));
+        decimal totalAcceptedQuantity;
+        decimal totalRejectedQuantity;
+        if (useSqliteCompatibility)
+        {
+            var summary = await finalSteps
+                .GroupBy(_ => 1)
+                .Select(group => new
+                {
+                    AcceptedQuantity = group.Sum(step => (double)step.QtyOK),
+                    RejectedQuantity = group.Sum(step => (double)step.QtyReject)
+                })
+                .SingleOrDefaultAsync();
+            totalAcceptedQuantity = (decimal)(summary?.AcceptedQuantity ?? 0d);
+            totalRejectedQuantity = (decimal)(summary?.RejectedQuantity ?? 0d);
+        }
+        else
+        {
+            var summary = await finalSteps
+                .GroupBy(_ => 1)
+                .Select(group => new
+                {
+                    AcceptedQuantity = group.Sum(step => step.QtyOK),
+                    RejectedQuantity = group.Sum(step => step.QtyReject)
+                })
+                .SingleOrDefaultAsync();
+            totalAcceptedQuantity = summary?.AcceptedQuantity ?? 0m;
+            totalRejectedQuantity = summary?.RejectedQuantity ?? 0m;
+        }
+        var totalProducedQuantity = totalAcceptedQuantity + totalRejectedQuantity;
 
         var plannedRows = await _context.WorkOrders
             .AsNoTracking()
             .Where(workOrder => workOrder.DueDate >= startDate && workOrder.DueDate < endDateExclusive)
             .Select(workOrder => new { workOrder.DueDate, TargetQuantity = workOrder.Qty })
             .ToListAsync();
-        var actualRows = await _context.WorkOrders
-            .AsNoTracking()
-            .Select(workOrder => new
-            {
-                FinalEndTimeUtc = workOrder.Steps
-                    .OrderByDescending(step => step.StepNumber)
-                    .Select(step => step.EndTime)
-                    .FirstOrDefault(),
-                FinalAcceptedQuantity = workOrder.Steps
-                    .OrderByDescending(step => step.StepNumber)
-                    .Select(step => (decimal?)step.QtyOK)
-                    .FirstOrDefault() ?? 0m
-            })
-            .Where(row => row.FinalEndTimeUtc >= utcStart && row.FinalEndTimeUtc < utcEndExclusive)
+        var actualRows = await finalSteps
+            .Where(step => step.EndTime >= utcStart && step.EndTime < utcEndExclusive)
+            .Select(step => new { FinalEndTimeUtc = step.EndTime, FinalAcceptedQuantity = step.QtyOK })
             .ToListAsync();
 
         var passedQcCount = await _context.QCInspections

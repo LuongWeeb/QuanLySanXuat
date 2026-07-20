@@ -159,3 +159,46 @@ dotnet test WmsMes.sln
 ```
 
 Results: build succeeded with 0 warnings and 0 errors; full suite passed — 112 passed, 0 failed, 0 skipped (both exit code 0).
+
+## Critical SQL Server aggregate-shape fix
+
+### Root cause and implementation
+
+The previous SQL Server OEE projection placed correlated `SELECT TOP(1)` expressions inside `SUM`, a SQL shape that SQL Server rejects. The controller now runs two independent aggregates:
+
+- Work-order status counts and target quantity aggregate directly from `WorkOrders`.
+- Produced/accepted/rejected quantities aggregate directly from final `WorkOrderSteps`, selected with `NOT EXISTS` for a higher `StepNumber` in the same work order.
+
+Work orders without steps still contribute to order counts and target quantity while contributing zero produced/rejected quantity. The same final-step query supplies the bounded actual-output rows. SQLite retains its numeric compatibility casts; non-SQLite providers retain decimal sums.
+
+### TDD RED/GREEN and SQL Server SQL generation
+
+Command:
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~Metrics_SqlServerFinalStepAggregate_AvoidsAggregateOverSubquery --no-restore
+```
+
+- RED: after the SQL Server `ToQueryString` reference verified the safe direct-column aggregate, the regression failed because `HomeController` did not query `_context.WorkOrderSteps` directly and still used the correlated work-order projection.
+- GREEN: 1 passed after splitting the aggregates. Generated SQL contains `NOT EXISTS`, direct `SUM([alias].[QtyOK])` and `SUM([alias].[QtyReject])`, and no `TOP (1)` or `SUM((SELECT...)` shape.
+
+Focused dashboard command:
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~DashboardMetricsTests --no-restore
+```
+
+Result: passed — 7 passed, 0 failed, 0 skipped (exit code 0), including the existing SQLite relational execution test.
+
+### Verification limitation
+
+No SQL Server instance was available for execution. The SQL Server provider regression uses `ToQueryString()` to validate the generated SQL shape without opening a connection; SQLite continues to execute the complete metrics flow against an in-memory relational database.
+
+### Fresh final verification
+
+```powershell
+dotnet build WmsMes.sln
+dotnet test WmsMes.sln
+```
+
+Results: build succeeded with 0 warnings and 0 errors; full suite passed — 113 passed, 0 failed, 0 skipped (both exit code 0).

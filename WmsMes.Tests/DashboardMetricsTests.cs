@@ -210,6 +210,38 @@ public class DashboardMetricsTests
     }
 
     [Fact]
+    public void Metrics_SqlServerFinalStepAggregate_AvoidsAggregateOverSubquery()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=DashboardSqlShape;Trusted_Connection=True")
+            .Options;
+        using var context = new ApplicationDbContext(options);
+        var finalSteps = context.WorkOrderSteps
+            .AsNoTracking()
+            .Where(step => !context.WorkOrderSteps.Any(candidate =>
+                candidate.WorkOrderId == step.WorkOrderId && candidate.StepNumber > step.StepNumber));
+        var sql = finalSteps
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                AcceptedQuantity = group.Sum(step => step.QtyOK),
+                RejectedQuantity = group.Sum(step => step.QtyReject)
+            })
+            .ToQueryString();
+        var controllerSource = File.ReadAllText(Path.Combine(ProjectRoot(), "Controllers", "HomeController.cs"));
+
+        Assert.Contains("NOT EXISTS", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM(", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Matches(@"SUM\(\[[^]]+\]\.\[QtyOK\]\)", sql);
+        Assert.Matches(@"SUM\(\[[^]]+\]\.\[QtyReject\]\)", sql);
+        Assert.DoesNotContain("TOP(1)", sql.Replace(" ", string.Empty), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SUM((SELECT", sql.ReplaceLineEndings(" "), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("_context.WorkOrderSteps", controllerSource, StringComparison.Ordinal);
+        Assert.Contains("candidate.StepNumber > step.StepNumber", controllerSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("group.Sum(order => order.FinalAcceptedQuantity", controllerSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Metrics_CalculatesOeeAlertsDailyOutputAndZoneInventory()
     {
         await using var context = new ApplicationDbContext(Options($"Dashboard_{Guid.NewGuid()}"));
@@ -275,6 +307,9 @@ public class DashboardMetricsTests
 
     private static TimeZoneInfo VietnamTimeZone() =>
         TimeZoneInfo.CreateCustomTimeZone("Asia/Ho_Chi_Minh", TimeSpan.FromHours(7), "Vietnam", "Vietnam");
+
+    private static string ProjectRoot() =>
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 
     private static HomeController Controller(
         ApplicationDbContext context,
