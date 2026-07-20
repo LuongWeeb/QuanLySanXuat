@@ -103,5 +103,59 @@ Result: passed — 111 passed, 0 failed, 0 skipped (exit code 0).
 
 ## Concerns
 
-- SQLite cannot translate `Sum(decimal)`. Inventory SQL aggregates cast the decimal expression to the provider-supported floating type, then convert the result back to decimal for the view model. The database columns remain `decimal(18,2)`, and the relational regression covers fractional aggregate results. SQL Server also translates this shape.
+- SQLite cannot translate `Sum(decimal)`, so only the explicitly detected SQLite compatibility branch casts aggregate inputs to `double`. SQL Server and all non-SQLite providers retain `Sum(decimal)`; the exact-decimal regression exercises that normal path.
 - An invalid configured timezone identifier fails during dependency resolution rather than silently using server-local time. This keeps the business-time contract explicit.
+
+## Final re-review fixes
+
+### SQL-only OEE and bounded chart rows
+
+Command:
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~Metrics_SqliteQueriesTranslateAndProjectOnlyDashboardFields --no-restore
+```
+
+- RED: 1 failed because the command projecting `DueDate` and final `EndTime` had no `>=` lower bound; the assertion reported that `>=` was absent.
+- GREEN: 1 passed after replacing the all-work-order materialization with an OEE `GROUP BY` aggregate, a planned projection bounded to the seven business dates, and an actual final-step projection bounded to the corresponding UTC start/end instants.
+- The relational fixture includes a 2020 historical work order plus the 2026 chart-window order. It verifies the current row appears in planned/actual output and that both time-series SQL commands contain lower and exclusive upper bounds. OEE still covers all orders, preserving the approved formula.
+
+### Provider-specific decimal precision
+
+Command:
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~Metrics_PreservesExactDecimalInventoryAggregatesOutsideSqlite --no-restore
+```
+
+- RED: 1 failed — expected exact `123456789012345.88m`, actual value after the unconditional floating aggregate was `123456789012346m`.
+- GREEN: 1 passed after limiting floating aggregates to `Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite"`; the normal/InMemory and production SQL Server paths now use decimal `Sum` for OEE, total inventory, and zone totals.
+- No package change was made; provider detection does not require adding SQLite to the web project.
+
+### Fixed clock in the primary dashboard regression
+
+Command:
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~Metrics_CalculatesOeeAlertsDailyOutputAndZoneInventory --no-restore
+```
+
+- RED: 1 failed after changing expectations to the fixed `15/01/2026` business date while the test still used the system clock; actual labels were for July.
+- GREEN: 1 passed after injecting `FixedTimeProvider` and the explicit UTC+7 test timezone. The test no longer reads `DateTime.Today`.
+
+### Focused regression after all re-review fixes
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~DashboardMetricsTests --no-restore
+```
+
+Result: passed — 6 passed, 0 failed, 0 skipped (exit code 0).
+
+### Fresh full verification after re-review fixes
+
+```powershell
+dotnet build WmsMes.sln
+dotnet test WmsMes.sln
+```
+
+Results: build succeeded with 0 warnings and 0 errors; full suite passed — 112 passed, 0 failed, 0 skipped (both exit code 0).

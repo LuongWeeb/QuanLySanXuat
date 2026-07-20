@@ -76,6 +76,8 @@ public class DashboardMetricsTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
+        var businessTimeZone = VietnamTimeZone();
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 7, 20, 18, 0, 0, TimeSpan.Zero));
         var commands = new List<string>();
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlite(connection)
@@ -97,22 +99,38 @@ public class DashboardMetricsTests
             }
         };
         var lot = new Lot { LotNo = "LOT-SQLITE", Product = product };
+        var workCenter = new WorkCenter { Code = "WC-SQLITE", Name = "SQLite work center" };
         var workOrder = WorkOrder(
             "WO-SQLITE",
             10m,
-            DateTime.UtcNow,
+            new DateTime(2026, 7, 21),
             WorkOrderStatus.Completed,
             new WorkOrderStep
             {
                 StepNumber = 10,
                 StepName = "Final",
-                WorkCenter = new WorkCenter { Code = "WC-SQLITE", Name = "SQLite work center" },
+                WorkCenter = workCenter,
                 QtyOK = 8m,
                 QtyReject = 2m,
-                EndTime = DateTime.UtcNow,
+                EndTime = new DateTime(2026, 7, 20, 17, 30, 0, DateTimeKind.Utc),
                 Status = WorkOrderStepStatus.Completed
             });
         workOrder.Product = product;
+        var historicalWorkOrder = WorkOrder(
+            "WO-SQLITE-HISTORICAL",
+            999m,
+            new DateTime(2020, 1, 1),
+            WorkOrderStatus.Completed,
+            new WorkOrderStep
+            {
+                StepNumber = 10,
+                StepName = "Historical final",
+                WorkCenter = workCenter,
+                QtyOK = 999m,
+                EndTime = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Status = WorkOrderStepStatus.Completed
+            });
+        historicalWorkOrder.Product = product;
         var balance = new StockBalance
         {
             Product = product,
@@ -124,6 +142,7 @@ public class DashboardMetricsTests
         };
         context.AddRange(
             workOrder,
+            historicalWorkOrder,
             balance,
             new QCInspection
             {
@@ -135,7 +154,7 @@ public class DashboardMetricsTests
         await context.SaveChangesAsync();
         commands.Clear();
 
-        var result = await Controller(context).Metrics();
+        var result = await Controller(context, clock, businessTimeZone).Metrics();
 
         var metrics = Assert.IsType<DashboardViewModel>(Assert.IsType<OkObjectResult>(result).Value);
         Assert.Equal(7.5m, metrics.InventoryVolume);
@@ -144,20 +163,57 @@ public class DashboardMetricsTests
         Assert.Equal(1, metrics.HoldQcCount);
         Assert.Equal(["SQLite Zone"], metrics.ZoneLabels);
         Assert.Equal([7.5m], metrics.ZoneQuantities);
+        Assert.Equal(10m, metrics.DailyPlannedOutput[^1]);
+        Assert.Equal(8m, metrics.DailyActualOutput[^1]);
         Assert.NotEmpty(commands);
         var executedSql = string.Join(Environment.NewLine, commands);
         Assert.Contains("SUM(", executedSql, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GROUP BY", executedSql, StringComparison.OrdinalIgnoreCase);
+        var plannedCommand = Assert.Single(commands.Where(command => command.Contains("\"DueDate\"", StringComparison.Ordinal)));
+        Assert.Contains("WHERE", plannedCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(">=", plannedCommand, StringComparison.Ordinal);
+        Assert.Contains("<", plannedCommand, StringComparison.Ordinal);
+        var actualCommand = Assert.Single(commands.Where(command => command.Contains("\"EndTime\"", StringComparison.Ordinal)));
+        Assert.Contains("WHERE", actualCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(">=", actualCommand, StringComparison.Ordinal);
+        Assert.Contains("<", actualCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain(commands, command =>
+            command.Contains("\"Status\"", StringComparison.Ordinal)
+            && command.Contains("\"DueDate\"", StringComparison.Ordinal));
         Assert.DoesNotContain(commands, command => command.Contains("\"BomVersion\"", StringComparison.Ordinal));
         Assert.DoesNotContain(commands, command => command.Contains("\"RoutingVersion\"", StringComparison.Ordinal));
         Assert.DoesNotContain(commands, command => command.Contains("\"StepName\"", StringComparison.Ordinal));
     }
 
     [Fact]
+    public async Task Metrics_PreservesExactDecimalInventoryAggregatesOutsideSqlite()
+    {
+        await using var context = new ApplicationDbContext(Options($"Dashboard_Precision_{Guid.NewGuid()}"));
+        var location = new Location
+        {
+            Code = "PRECISION-01",
+            Name = "Precision location",
+            Zone = new Zone { Code = "PRECISION", Name = "Precision Zone" }
+        };
+        var first = Balance(123456789012345.67m, location);
+        first.QtyReserved = 0.11m;
+        var second = Balance(0.10m, location);
+        context.StockBalances.AddRange(first, second);
+        await context.SaveChangesAsync();
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 7, 20, 18, 0, 0, TimeSpan.Zero));
+
+        var result = await Controller(context, clock, VietnamTimeZone()).Metrics();
+
+        var metrics = Assert.IsType<DashboardViewModel>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.Equal(123456789012345.88m, metrics.InventoryVolume);
+        Assert.Equal([123456789012345.88m], metrics.ZoneQuantities);
+    }
+
+    [Fact]
     public async Task Metrics_CalculatesOeeAlertsDailyOutputAndZoneInventory()
     {
         await using var context = new ApplicationDbContext(Options($"Dashboard_{Guid.NewGuid()}"));
-        var today = DateTime.Today;
+        var today = new DateTime(2026, 1, 15);
         var finishedGoods = new Zone { Code = "FG", Name = "Finished Goods" };
         var rawMaterials = new Zone { Code = "RM", Name = "Raw Materials" };
         var quarantineZone = new Zone { Code = "QUAR", Name = "Quarantine" };
@@ -188,7 +244,8 @@ public class DashboardMetricsTests
             new QCInspection { WorkOrder = completedOrder, Lot = rawBalance.Lot, InspectorId = "qc-1", Result = QCResult.REJECT });
         await context.SaveChangesAsync();
 
-        var result = await Controller(context).Metrics();
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 1, 15, 1, 0, 0, TimeSpan.Zero));
+        var result = await Controller(context, clock, VietnamTimeZone()).Metrics();
 
         var metrics = Assert.IsType<DashboardViewModel>(Assert.IsType<OkObjectResult>(result).Value);
         Assert.Equal(2, metrics.LowStockAlertCount);
@@ -214,7 +271,10 @@ public class DashboardMetricsTests
         Controller(
             context,
             TimeProvider.System,
-            TimeZoneInfo.CreateCustomTimeZone("Asia/Ho_Chi_Minh", TimeSpan.FromHours(7), "Vietnam", "Vietnam"));
+            VietnamTimeZone());
+
+    private static TimeZoneInfo VietnamTimeZone() =>
+        TimeZoneInfo.CreateCustomTimeZone("Asia/Ho_Chi_Minh", TimeSpan.FromHours(7), "Vietnam", "Vietnam");
 
     private static HomeController Controller(
         ApplicationDbContext context,
