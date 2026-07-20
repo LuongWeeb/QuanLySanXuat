@@ -57,6 +57,62 @@ public class HomeControllerTests
     }
 
     [Fact]
+    public void DashboardView_RendersOeeAndLowStockMetricCards()
+    {
+        var view = File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Home", "Index.cshtml"));
+
+        Assert.Contains("aria-label=\"Chỉ số OEE Sản xuất\"", view);
+        Assert.Contains("id=\"overallOee\"", view);
+        Assert.Contains("@Model.OverallOeePercent%", view);
+        Assert.Contains("id=\"oeeAvailability\"", view);
+        Assert.Contains("@Model.OeeAvailabilityPercent%", view);
+        Assert.Contains("id=\"oeePerformance\"", view);
+        Assert.Contains("@Model.OeePerformancePercent%", view);
+        Assert.Contains("id=\"oeeQuality\"", view);
+        Assert.Contains("@Model.OeeQualityPercent%", view);
+        Assert.Contains("id=\"lowStockAlertCount\"", view);
+        Assert.Contains("@Model.LowStockAlertCount", view);
+    }
+
+    [Fact]
+    public void DashboardView_RendersAccessibleProductionInventoryAndQualityCharts()
+    {
+        var view = File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Home", "Index.cshtml"));
+
+        Assert.Contains("id=\"productionChart\"", view);
+        Assert.Contains("aria-label=\"Sản lượng sản xuất 7 ngày gần nhất\"", view);
+        Assert.Contains("id=\"inventoryZoneChart\"", view);
+        Assert.Contains("aria-label=\"Phân bổ tồn kho theo Zone\"", view);
+        Assert.Contains("id=\"qualityChart\"", view);
+        Assert.Contains("aria-label=\"Phân bổ chất lượng Pass, Hold và Quarantine\"", view);
+    }
+
+    [Fact]
+    public void DashboardView_InitializesAndRefreshesAllChartsWithSafelySerializedMetrics()
+    {
+        var view = File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Home", "Index.cshtml"));
+
+        Assert.Contains("<script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script>", view);
+        Assert.Contains("JsonSerializer.Serialize(Model.DailyLabels)", view);
+        Assert.Contains("JsonSerializer.Serialize(Model.DailyPlannedOutput)", view);
+        Assert.Contains("JsonSerializer.Serialize(Model.DailyActualOutput)", view);
+        Assert.Contains("JsonSerializer.Serialize(Model.ZoneLabels)", view);
+        Assert.Contains("JsonSerializer.Serialize(Model.ZoneQuantities)", view);
+        Assert.DoesNotContain("string.Join", view);
+        Assert.Contains("const productionChart = new Chart", view);
+        Assert.Contains("const inventoryZoneChart = new Chart", view);
+        Assert.Contains("const qualityChart = new Chart", view);
+        Assert.Contains("metrics.oeeAvailabilityPercent", view);
+        Assert.Contains("metrics.lowStockAlertCount", view);
+        Assert.Contains("metrics.dailyPlannedOutput", view);
+        Assert.Contains("metrics.zoneQuantities", view);
+        Assert.Contains("metrics.passedQcCount", view);
+        Assert.Contains("productionChart.update()", view);
+        Assert.Contains("inventoryZoneChart.update()", view);
+        Assert.Contains("qualityChart.update()", view);
+    }
+
+    [Fact]
     public void DashboardView_RetriesHubsIndependentlyAndRejectsStaleMetricResponses()
     {
         var view = File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Home", "Index.cshtml"));
