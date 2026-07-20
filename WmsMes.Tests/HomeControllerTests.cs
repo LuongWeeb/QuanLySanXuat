@@ -99,9 +99,9 @@ public class HomeControllerTests
         Assert.Contains("JsonSerializer.Serialize(Model.ZoneLabels)", view);
         Assert.Contains("JsonSerializer.Serialize(Model.ZoneQuantities)", view);
         Assert.DoesNotContain("string.Join", view);
-        Assert.Contains("const productionChart = new Chart", view);
-        Assert.Contains("const inventoryZoneChart = new Chart", view);
-        Assert.Contains("const qualityChart = new Chart", view);
+        Assert.Contains("productionChart = new window.Chart", view);
+        Assert.Contains("inventoryZoneChart = new window.Chart", view);
+        Assert.Contains("qualityChart = new window.Chart", view);
         Assert.Contains("metrics.oeeAvailabilityPercent", view);
         Assert.Contains("metrics.lowStockAlertCount", view);
         Assert.Contains("metrics.dailyPlannedOutput", view);
@@ -110,6 +110,19 @@ public class HomeControllerTests
         Assert.Contains("productionChart.update()", view);
         Assert.Contains("inventoryZoneChart.update()", view);
         Assert.Contains("qualityChart.update()", view);
+    }
+
+    [Fact]
+    public void DashboardView_ContinuesRealtimeSetupWhenChartJsIsUnavailable()
+    {
+        var view = File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Home", "Index.cshtml"));
+
+        Assert.Contains("const initializeCharts = () => {", view);
+        Assert.Contains("if (typeof window.Chart !== \"function\") return;", view);
+        Assert.Contains("initializeCharts();", view);
+        Assert.Contains("let productionChart;", view);
+        Assert.Contains("if (!productionChart || !inventoryZoneChart || !qualityChart) return;", view);
+        Assert.True(view.IndexOf("initializeCharts();", StringComparison.Ordinal) < view.IndexOf("const createConnection", StringComparison.Ordinal));
     }
 
     [Fact]

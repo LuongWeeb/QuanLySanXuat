@@ -43,3 +43,14 @@
 
 - Không có blocker hoặc known functional issue. CDN Chart.js phụ thuộc kết nối mạng của client như yêu cầu.
 - Code review độc lập: không có finding critical, important hoặc minor; reviewer cũng chạy `dotnet test WmsMes.Tests/WmsMes.Tests.csproj --no-restore` với 106/106 pass.
+
+## Follow-up — graceful degradation khi Chart.js CDN không tải được
+
+- Root cause: `new Chart(...)` được gọi ở đầu IIFE. Khi CDN Chart.js không tải được, `Chart` undefined ném lỗi đồng bộ và ngăn phần thiết lập hai SignalR hub chạy.
+- RED: thêm `DashboardView_ContinuesRealtimeSetupWhenChartJsIsUnavailable` và điều chỉnh source contract của chart constructor, sau đó chạy
+  `dotnet test WmsMes.sln --filter "FullyQualifiedName~DashboardView_ContinuesRealtimeSetupWhenChartJsIsUnavailable" --no-restore`.
+  Kết quả RED đúng kỳ vọng: thiếu `const initializeCharts = () => {`.
+- GREEN: khai báo chart instances có thể null, tách `initializeCharts`, guard `typeof window.Chart !== "function"`, và guard `updateCharts` khi không có đủ instances. Do `initializeCharts()` chỉ return cục bộ, luồng IIFE tiếp tục đến hai SignalR connections; refresh KPI/fetch giữ nguyên.
+- Focused GREEN: cùng lệnh trên — 1/1 passed.
+- Step 3 full regression: `dotnet test WmsMes.sln --no-restore` — 107 passed, 0 failed.
+- Step 4 re-verification: `dotnet build WmsMes.sln` — Build succeeded, 0 warnings, 0 errors; sau đó `dotnet test WmsMes.sln --no-restore` — 107 passed, 0 failed.

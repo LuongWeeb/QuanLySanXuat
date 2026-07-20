@@ -113,33 +113,40 @@
                 zoneQuantities: @Html.Raw(JsonSerializer.Serialize(Model.ZoneQuantities)),
                 qualityCounts: @Html.Raw(JsonSerializer.Serialize(new[] { Model.PassedQcCount, Model.HoldQcCount, Model.QuarantineQcCount }))
             };
-            const productionChart = new Chart(document.getElementById("productionChart"), {
-                type: "bar",
-                data: {
-                    labels: initialMetrics.dailyLabels,
-                    datasets: [
-                        { label: "Kế hoạch", data: initialMetrics.dailyPlannedOutput, backgroundColor: "rgba(13, 110, 253, 0.35)", borderColor: "#0d6efd", borderWidth: 1 },
-                        { type: "line", label: "Thực tế", data: initialMetrics.dailyActualOutput, borderColor: "#198754", backgroundColor: "#198754", tension: 0.25, fill: false }
-                    ]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
-            const inventoryZoneChart = new Chart(document.getElementById("inventoryZoneChart"), {
-                type: "doughnut",
-                data: {
-                    labels: initialMetrics.zoneLabels,
-                    datasets: [{ data: initialMetrics.zoneQuantities, backgroundColor: ["#0d6efd", "#20c997", "#ffc107", "#6f42c1", "#fd7e14"] }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
-            const qualityChart = new Chart(document.getElementById("qualityChart"), {
-                type: "doughnut",
-                data: {
-                    labels: ["Pass", "Hold", "Quarantine"],
-                    datasets: [{ data: initialMetrics.qualityCounts, backgroundColor: ["#198754", "#ffc107", "#dc3545"] }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
+            let productionChart;
+            let inventoryZoneChart;
+            let qualityChart;
+            const initializeCharts = () => {
+                if (typeof window.Chart !== "function") return;
+                productionChart = new window.Chart(document.getElementById("productionChart"), {
+                    type: "bar",
+                    data: {
+                        labels: initialMetrics.dailyLabels,
+                        datasets: [
+                            { label: "Kế hoạch", data: initialMetrics.dailyPlannedOutput, backgroundColor: "rgba(13, 110, 253, 0.35)", borderColor: "#0d6efd", borderWidth: 1 },
+                            { type: "line", label: "Thực tế", data: initialMetrics.dailyActualOutput, borderColor: "#198754", backgroundColor: "#198754", tension: 0.25, fill: false }
+                        ]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+                inventoryZoneChart = new window.Chart(document.getElementById("inventoryZoneChart"), {
+                    type: "doughnut",
+                    data: {
+                        labels: initialMetrics.zoneLabels,
+                        datasets: [{ data: initialMetrics.zoneQuantities, backgroundColor: ["#0d6efd", "#20c997", "#ffc107", "#6f42c1", "#fd7e14"] }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+                qualityChart = new window.Chart(document.getElementById("qualityChart"), {
+                    type: "doughnut",
+                    data: {
+                        labels: ["Pass", "Hold", "Quarantine"],
+                        datasets: [{ data: initialMetrics.qualityCounts, backgroundColor: ["#198754", "#ffc107", "#dc3545"] }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+            };
+            initializeCharts();
             const connectivity = new Map();
             let refreshTimer;
             let refreshGeneration = 0;
@@ -163,6 +170,7 @@
             };
 
             const updateCharts = (metrics) => {
+                if (!productionChart || !inventoryZoneChart || !qualityChart) return;
                 productionChart.data.labels = metrics.dailyLabels;
                 productionChart.data.datasets[0].data = metrics.dailyPlannedOutput;
                 productionChart.data.datasets[1].data = metrics.dailyActualOutput;
