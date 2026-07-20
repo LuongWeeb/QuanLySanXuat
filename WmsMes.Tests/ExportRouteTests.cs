@@ -69,6 +69,7 @@ public sealed class ExportWebApplicationFactory : WebApplicationFactory<Program>
     {
         builder.UseEnvironment("Development");
         builder.UseSetting("DatabaseInitialization:Enabled", "false");
+        builder.UseSetting("Jwt:SigningKey", "test-only-export-route-signing-key-32-bytes");
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IReportExportService>();

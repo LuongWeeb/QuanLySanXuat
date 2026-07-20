@@ -6,3 +6,4 @@
 **/out
 **/.agents
 .env
+secrets

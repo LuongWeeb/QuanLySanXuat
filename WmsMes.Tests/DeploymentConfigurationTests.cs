@@ -13,10 +13,13 @@ public class DeploymentConfigurationTests
         var compose = Read("docker-compose.yml");
 
         Assert.DoesNotContain("YourSecurePassword", compose, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("${MSSQL_SA_PASSWORD:?", compose);
-        Assert.Contains("${MSSQL_MIGRATION_PASSWORD:?", compose);
-        Assert.Contains("${MSSQL_APP_PASSWORD:?", compose);
-        Assert.Contains("${JWT_SECRET_KEY:?", compose);
+        Assert.Contains("mssql_sa_password:", compose);
+        Assert.Contains("mssql_migration_password:", compose);
+        Assert.Contains("mssql_app_password:", compose);
+        Assert.Contains("jwt_signing_key:", compose);
+        Assert.Contains("/run/secrets/mssql_app_password", compose);
+        Assert.Contains("/run/secrets/jwt_signing_key", compose);
+        Assert.DoesNotContain("Password=${", compose, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("1433:1433", compose);
         Assert.Contains("ASPNETCORE_ENVIRONMENT: Production", compose);
     }
@@ -28,22 +31,27 @@ public class DeploymentConfigurationTests
 
         Assert.Contains("wmsmes-provision:", compose);
         Assert.Contains("wmsmes-migrate:", compose);
-        Assert.Contains("User Id=wmsmes_migrator", compose);
-        Assert.Contains("User Id=wmsmes_app", compose);
-        Assert.DoesNotContain("User Id=sa", compose, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Database__User: wmsmes_migrator", compose);
+        Assert.Contains("Database__User: wmsmes_app", compose);
         Assert.Contains("--initialize-database", compose);
         Assert.Contains("condition: service_completed_successfully", compose);
+        Assert.Contains("--provision-database", compose);
         Assert.DoesNotContain("-v MigrationPassword", compose);
+        Assert.DoesNotContain("provision.sql", compose, StringComparison.OrdinalIgnoreCase);
 
-        var provisioningPath = Path.Combine(RepositoryRoot, "docker", "sql", "provision.sql");
-        Assert.True(File.Exists(provisioningPath), "A first-start SQL provisioning script is required.");
-        var provisioning = File.ReadAllText(provisioningPath);
-        Assert.Contains("ALTER ROLE [db_owner] ADD MEMBER [wmsmes_migrator]", provisioning);
-        Assert.Contains("ALTER ROLE [db_datareader] ADD MEMBER [wmsmes_app]", provisioning);
-        Assert.Contains("ALTER ROLE [db_datawriter] ADD MEMBER [wmsmes_app]", provisioning);
-        Assert.DoesNotContain("ALTER ROLE [db_owner] ADD MEMBER [wmsmes_app]", provisioning);
-        Assert.DoesNotContain(":setvar MigrationPassword", provisioning, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(":setvar ApplicationPassword", provisioning, StringComparison.OrdinalIgnoreCase);
+        var provisioner = Read(Path.Combine("Data", "SqlServerDatabaseProvisioner.cs"));
+        Assert.Contains("ALTER ROLE [db_owner] ADD MEMBER [wmsmes_migrator]", provisioner);
+        Assert.Contains("ALTER ROLE [db_datareader] ADD MEMBER [wmsmes_app]", provisioner);
+        Assert.Contains("ALTER ROLE [db_datawriter] ADD MEMBER [wmsmes_app]", provisioner);
+        Assert.DoesNotContain("ALTER ROLE [db_owner] ADD MEMBER [wmsmes_app]", provisioner);
+        Assert.Contains("@Password", provisioner);
+        Assert.Contains("IF SUSER_ID(@LoginName) IS NULL", provisioner);
+        Assert.Contains("sp_password", provisioner);
+        Assert.Contains("IF USER_ID(N'wmsmes_app') IS NULL", provisioner);
+
+        var sqlEntrypoint = Read(Path.Combine("docker", "sql", "entrypoint.sh"));
+        Assert.Contains("/run/secrets/mssql_sa_password", sqlEntrypoint);
+        Assert.DoesNotContain("$1", sqlEntrypoint, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -55,10 +63,10 @@ public class DeploymentConfigurationTests
 
         foreach (var variable in new[]
                  {
-                     "MSSQL_SA_PASSWORD",
-                     "MSSQL_MIGRATION_PASSWORD",
-                     "MSSQL_APP_PASSWORD",
-                     "JWT_SECRET_KEY"
+                     "MSSQL_SA_PASSWORD_FILE",
+                     "MSSQL_MIGRATION_PASSWORD_FILE",
+                     "MSSQL_APP_PASSWORD_FILE",
+                     "JWT_SIGNING_KEY_FILE"
                  })
         {
             Assert.Matches(new Regex($@"(?m)^{variable}=\s*$"), example);
@@ -98,10 +106,12 @@ public class DeploymentConfigurationTests
     public void ProgramSupportsOneShotMigrationAndDisablingInitializationForWebRuntime()
     {
         var program = Read("Program.cs");
+        var policy = Read(Path.Combine("Data", "DatabaseInitializationPolicy.cs"));
         var compose = Read("docker-compose.yml");
 
-        Assert.Contains("--initialize-database", program);
-        Assert.Contains("DatabaseInitialization:Enabled", program);
+        Assert.Contains("--initialize-database", policy);
+        Assert.Contains("DatabaseInitialization:Enabled", policy);
+        Assert.Contains("DatabaseInitializationPolicy.ShouldInitialize", program);
         Assert.Contains("DatabaseInitialization__Enabled: \"false\"", compose);
     }
 

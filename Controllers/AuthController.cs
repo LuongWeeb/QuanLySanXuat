@@ -2,10 +2,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
+using WmsMes.Web.Authentication;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.ViewModels;
 
@@ -13,19 +11,18 @@ namespace WmsMes.Web.Controllers;
 
 public class AuthController : Controller
 {
-    private const string JwtIssuer = "WmsMesServer";
-    private const string JwtAudience = "WmsMesClient";
-    private const string JwtSigningKey = "SuperSecretKeyWmsMesProject2026SecureLongKey";
-
     private readonly SignInManager<ApplicationUser> _signInManager;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly IJwtTokenService _jwtTokenService;
 
     public AuthController(
         SignInManager<ApplicationUser> signInManager,
-        UserManager<ApplicationUser> userManager)
+        UserManager<ApplicationUser> userManager,
+        IJwtTokenService jwtTokenService)
     {
         _signInManager = signInManager;
         _userManager = userManager;
+        _jwtTokenService = jwtTokenService;
     }
 
     [HttpGet]
@@ -87,7 +84,7 @@ public class AuthController : Controller
             return Unauthorized();
         }
 
-        var token = await CreateJwtTokenAsync(user);
+        var token = await _jwtTokenService.CreateTokenAsync(user);
         return Ok(new { token });
     }
 
@@ -103,30 +100,4 @@ public class AuthController : Controller
         });
     }
 
-    private async Task<string> CreateJwtTokenAsync(ApplicationUser user)
-    {
-        var roles = await _userManager.GetRolesAsync(user);
-        var claims = new List<Claim>
-        {
-            new(JwtRegisteredClaimNames.Sub, user.Id),
-            new(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty),
-            new(ClaimTypes.Name, user.FullName),
-            new(ClaimTypes.Email, user.Email ?? string.Empty)
-        };
-
-        claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
-
-        var credentials = new SigningCredentials(
-            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtSigningKey)),
-            SecurityAlgorithms.HmacSha256);
-
-        var token = new JwtSecurityToken(
-            issuer: JwtIssuer,
-            audience: JwtAudience,
-            claims: claims,
-            expires: DateTime.UtcNow.AddHours(8),
-            signingCredentials: credentials);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
-    }
 }

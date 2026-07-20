@@ -3,14 +3,17 @@ services:
     image: mcr.microsoft.com/mssql/server:2022-latest
     environment:
       ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}"
+    secrets:
+      - mssql_sa_password
     volumes:
       - sqldata:/var/opt/mssql/data
+      - ./docker/sql/entrypoint.sh:/opt/wmsmes/entrypoint.sh:ro
+    entrypoint: ["/bin/bash", "/opt/wmsmes/entrypoint.sh"]
     healthcheck:
       test:
         - CMD-SHELL
         - >-
-          SQLCMDPASSWORD="$${MSSQL_SA_PASSWORD}"
+          export SQLCMDPASSWORD="$$(cat /run/secrets/mssql_sa_password)" &&
           /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -Q "SELECT 1" || exit 1
       interval: 10s
       timeout: 5s
@@ -18,23 +21,25 @@ services:
       start_period: 20s
 
   wmsmes-provision:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wmsmes-web:local
+    command: ["--provision-database"]
+    environment:
+      DatabaseProvisioning__Server: wmsmes-db
+      DatabaseProvisioning__Database: WmsMesDb
+      DatabaseProvisioning__SaUser: sa
+      DatabaseProvisioning__SaPasswordFile: /run/secrets/mssql_sa_password
+      DatabaseProvisioning__MigratorPasswordFile: /run/secrets/mssql_migration_password
+      DatabaseProvisioning__ApplicationPasswordFile: /run/secrets/mssql_app_password
+    secrets:
+      - mssql_sa_password
+      - mssql_migration_password
+      - mssql_app_password
     depends_on:
       wmsmes-db:
         condition: service_healthy
-    environment:
-      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}"
-      MSSQL_MIGRATION_PASSWORD: "${MSSQL_MIGRATION_PASSWORD:?Set MSSQL_MIGRATION_PASSWORD in .env}"
-      MSSQL_APP_PASSWORD: "${MSSQL_APP_PASSWORD:?Set MSSQL_APP_PASSWORD in .env}"
-    volumes:
-      - ./docker/sql/provision.sql:/opt/wmsmes/provision.sql:ro
-    entrypoint: ["/bin/bash", "-c"]
-    command:
-      - >-
-        SQLCMDPASSWORD="$${MSSQL_SA_PASSWORD}"
-        /opt/mssql-tools18/bin/sqlcmd
-        -S wmsmes-db -U sa -C -b
-        -i /opt/wmsmes/provision.sql
     restart: "no"
 
   wmsmes-migrate:
@@ -45,9 +50,12 @@ services:
     command: ["--initialize-database"]
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ConnectionStrings__DefaultConnection: >-
-        Server=wmsmes-db;Database=WmsMesDb;User Id=wmsmes_migrator;Password=${MSSQL_MIGRATION_PASSWORD:?Set MSSQL_MIGRATION_PASSWORD in .env};TrustServerCertificate=True;MultipleActiveResultSets=true
-      Jwt__SecretKey: "${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}"
+      Database__Server: wmsmes-db
+      Database__Name: WmsMesDb
+      Database__User: wmsmes_migrator
+      Database__PasswordFile: /run/secrets/mssql_migration_password
+    secrets:
+      - mssql_migration_password
     depends_on:
       wmsmes-provision:
         condition: service_completed_successfully
@@ -61,9 +69,14 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       DatabaseInitialization__Enabled: "false"
-      ConnectionStrings__DefaultConnection: >-
-        Server=wmsmes-db;Database=WmsMesDb;User Id=wmsmes_app;Password=${MSSQL_APP_PASSWORD:?Set MSSQL_APP_PASSWORD in .env};TrustServerCertificate=True;MultipleActiveResultSets=true
-      Jwt__SecretKey: "${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}"
+      Database__Server: wmsmes-db
+      Database__Name: WmsMesDb
+      Database__User: wmsmes_app
+      Database__PasswordFile: /run/secrets/mssql_app_password
+      Jwt__SigningKeyFile: /run/secrets/jwt_signing_key
+    secrets:
+      - mssql_app_password
+      - jwt_signing_key
     ports:
       - "5000:8080"
     depends_on:
@@ -72,3 +85,13 @@ services:
 
 volumes:
   sqldata:
+
+secrets:
+  mssql_sa_password:
+    file: "${MSSQL_SA_PASSWORD_FILE:?Set MSSQL_SA_PASSWORD_FILE in .env}"
+  mssql_migration_password:
+    file: "${MSSQL_MIGRATION_PASSWORD_FILE:?Set MSSQL_MIGRATION_PASSWORD_FILE in .env}"
+  mssql_app_password:
+    file: "${MSSQL_APP_PASSWORD_FILE:?Set MSSQL_APP_PASSWORD_FILE in .env}"
+  jwt_signing_key:
+    file: "${JWT_SIGNING_KEY_FILE:?Set JWT_SIGNING_KEY_FILE in .env}"

@@ -8,9 +8,7 @@ namespace WmsMes.Web.Data;
 
 public static class DbSeeder
 {
-    public static async Task SeedRolesAndUsersAsync(
-        RoleManager<ApplicationRole> roleManager,
-        UserManager<ApplicationUser> userManager)
+    public static async Task SeedRolesAsync(RoleManager<ApplicationRole> roleManager)
     {
         string[] roles = { "Admin", "Manager", "Planner", "Warehouse", "Worker", "QC", "Director" };
 
@@ -21,7 +19,10 @@ public static class DbSeeder
                 await roleManager.CreateAsync(new ApplicationRole { Name = role });
             }
         }
+    }
 
+    public static async Task SeedDemoUsersAsync(UserManager<ApplicationUser> userManager)
+    {
         await CreateUserWithRoleAsync(userManager, "admin@wmsmes.com", "Admin User", "Admin", "Password123!");
         await CreateUserWithRoleAsync(userManager, "manager@wmsmes.com", "Production Manager", "Manager", "Password123!");
         await CreateUserWithRoleAsync(userManager, "planner@wmsmes.com", "Production Planner", "Planner", "Password123!");

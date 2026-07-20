@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Options;
 using QuestPDF.Infrastructure;
-using System.Text;
+using WmsMes.Web.Authentication;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Hubs;
@@ -11,8 +11,23 @@ using WmsMes.Web.Repositories;
 using WmsMes.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
-var initializeDatabaseOnly = args.Any(argument =>
-    string.Equals(argument, "--initialize-database", StringComparison.OrdinalIgnoreCase));
+var initializeDatabaseOnly = DatabaseInitializationPolicy.IsOneShot(args);
+var provisionDatabaseOnly = args.Any(argument =>
+    string.Equals(argument, "--provision-database", StringComparison.OrdinalIgnoreCase));
+
+if (provisionDatabaseOnly)
+{
+    await SqlServerDatabaseProvisioner.ProvisionFromConfigurationAsync(builder.Configuration);
+    return;
+}
+
+var jwtSigningKeyFile = builder.Configuration["Jwt:SigningKeyFile"];
+if (!string.IsNullOrWhiteSpace(jwtSigningKeyFile))
+{
+    builder.Configuration["Jwt:SigningKey"] = SecretFile.ReadRequired(
+        jwtSigningKeyFile,
+        "Jwt:SigningKeyFile");
+}
 
 QuestPDF.Settings.License = LicenseType.Community;
 
@@ -28,7 +43,7 @@ builder.Services.AddSingleton(_ => BusinessTimeZoneResolver.Resolve(
     builder.Configuration.GetValue<string>("BusinessTimeZone") ?? "Asia/Ho_Chi_Minh"));
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlServer(DatabaseConnectionStringFactory.Resolve(builder.Configuration)));
 
 builder.Services.AddIdentity<ApplicationUser, ApplicationRole>(options =>
     {
@@ -47,24 +62,15 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.AccessDeniedPath = "/Auth/AccessDenied";
 });
 
-var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "WmsMesServer";
-var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "WmsMesClient";
-var jwtSecretKey = builder.Configuration["Jwt:SecretKey"] ?? "SuperSecretKeyWmsMesProject2026SecureLongKey32BytesMin!";
+builder.Services.AddOptions<JwtOptions>()
+    .Bind(builder.Configuration.GetSection(JwtOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidator>();
+builder.Services.AddSingleton<IConfigureOptions<JwtBearerOptions>, ConfigureJwtBearerOptions>();
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 
 builder.Services.AddAuthentication()
-    .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
-    {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtIssuer,
-            ValidAudience = jwtAudience,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecretKey))
-        };
-    });
+    .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, _ => { });
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -147,7 +153,7 @@ app.MapHub<InventoryHub>("/inventoryHub");
 app.MapHub<ProductionHub>("/productionHub");
 app.MapHub<QualityHub>("/qualityHub");
 
-if (initializeDatabaseOnly || builder.Configuration.GetValue("DatabaseInitialization:Enabled", true))
+if (DatabaseInitializationPolicy.ShouldInitialize(args, builder.Configuration))
 {
     await StartupDatabaseInitializer.InitializeAsync(app.Services, app.Logger);
 }

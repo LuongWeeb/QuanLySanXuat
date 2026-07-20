@@ -260,7 +260,7 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuerSigningKey = true,
         ValidIssuer = "WmsMesServer",
         ValidAudience = "WmsMesClient",
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("SuperSecretKeyWmsMesProject2026SecureLongKey"))
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("<external-signing-key-at-least-32-bytes>"))
     };
 });
 

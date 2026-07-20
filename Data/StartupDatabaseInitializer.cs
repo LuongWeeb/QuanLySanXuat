@@ -31,8 +31,14 @@ public static class StartupDatabaseInitializer
             {
                 var roleManager = services.GetRequiredService<RoleManager<ApplicationRole>>();
                 var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
+                var environment = services.GetRequiredService<IHostEnvironment>();
+                var configuration = services.GetRequiredService<IConfiguration>();
 
-                await DbSeeder.SeedRolesAndUsersAsync(roleManager, userManager);
+                await DbSeeder.SeedRolesAsync(roleManager);
+                if (ShouldSeedDemoUsers(environment, configuration))
+                {
+                    await DbSeeder.SeedDemoUsersAsync(userManager);
+                }
                 await DbSeeder.SeedQcInfrastructureAsync(dbContext);
                 await DbSeeder.SeedUnitOfMeasuresAsync(dbContext);
                 await DbSeeder.SeedWarehouseStructureAsync(dbContext);
@@ -43,6 +49,12 @@ public static class StartupDatabaseInitializer
             logger,
             cancellationToken);
     }
+
+    public static bool ShouldSeedDemoUsers(
+        IHostEnvironment environment,
+        IConfiguration configuration) =>
+        environment.IsDevelopment() &&
+        configuration.GetValue<bool>("DatabaseInitialization:SeedDemoUsers");
 
     public static async Task MigrateThenSeedAsync(
         Func<CancellationToken, Task> migrateAsync,
