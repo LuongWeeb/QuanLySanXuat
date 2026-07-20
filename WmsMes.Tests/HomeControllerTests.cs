@@ -21,7 +21,7 @@ public class HomeControllerTests
         SeedDashboard(context);
         await context.SaveChangesAsync();
 
-        var result = await new HomeController(NullLogger<HomeController>.Instance, context).Index();
+        var result = await Controller(context).Index();
 
         var model = Assert.IsType<DashboardViewModel>(Assert.IsType<ViewResult>(result).Model);
         Assert.Equal(2, model.ActiveWorkOrders);
@@ -36,7 +36,7 @@ public class HomeControllerTests
         SeedDashboard(context);
         await context.SaveChangesAsync();
 
-        var result = await new HomeController(NullLogger<HomeController>.Instance, context).Metrics();
+        var result = await Controller(context).Metrics();
 
         var metrics = Assert.IsType<DashboardViewModel>(Assert.IsType<OkObjectResult>(result).Value);
         Assert.Equal((2, 2, 38m), (metrics.ActiveWorkOrders, metrics.PendingQcLots, metrics.InventoryVolume));
@@ -92,7 +92,8 @@ public class HomeControllerTests
     {
         var view = File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Home", "Index.cshtml"));
 
-        Assert.Contains("<script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script>", view);
+        Assert.Contains("<script src=\"https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js\"></script>", view);
+        Assert.DoesNotContain("<script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script>", view);
         Assert.Contains("JsonSerializer.Serialize(Model.DailyLabels)", view);
         Assert.Contains("JsonSerializer.Serialize(Model.DailyPlannedOutput)", view);
         Assert.Contains("JsonSerializer.Serialize(Model.DailyActualOutput)", view);
@@ -171,6 +172,13 @@ public class HomeControllerTests
     private static ApplicationDbContext CreateContext() => new(
         new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"Dashboard_{Guid.NewGuid()}").Options);
+
+    private static HomeController Controller(ApplicationDbContext context) =>
+        new(
+            NullLogger<HomeController>.Instance,
+            context,
+            TimeProvider.System,
+            TimeZoneInfo.CreateCustomTimeZone("Asia/Ho_Chi_Minh", TimeSpan.FromHours(7), "Vietnam", "Vietnam"));
 
     private static void SeedDashboard(ApplicationDbContext context)
     {

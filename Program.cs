@@ -18,6 +18,9 @@ builder.Logging.AddDebug();
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+builder.Services.AddSingleton(_ => BusinessTimeZoneResolver.Resolve(
+    builder.Configuration.GetValue<string>("BusinessTimeZone") ?? "Asia/Ho_Chi_Minh"));
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));

@@ -15,11 +15,19 @@ public class HomeController : Controller
 {
     private readonly ILogger<HomeController> _logger;
     private readonly ApplicationDbContext _context;
+    private readonly TimeProvider _timeProvider;
+    private readonly TimeZoneInfo _businessTimeZone;
 
-    public HomeController(ILogger<HomeController> logger, ApplicationDbContext context)
+    public HomeController(
+        ILogger<HomeController> logger,
+        ApplicationDbContext context,
+        TimeProvider timeProvider,
+        TimeZoneInfo businessTimeZone)
     {
         _logger = logger;
         _context = context;
+        _timeProvider = timeProvider;
+        _businessTimeZone = businessTimeZone;
     }
 
     public async Task<IActionResult> Index()
@@ -48,43 +56,61 @@ public class HomeController : Controller
     private async Task<DashboardViewModel> GetMetricsAsync()
     {
         var workOrders = await _context.WorkOrders
-            .Include(workOrder => workOrder.Steps)
             .AsNoTracking()
-            .ToListAsync();
-        var stockBalances = await _context.StockBalances
-            .Include(balance => balance.Location)
-            .ThenInclude(location => location!.Zone)
-            .AsNoTracking()
+            .Select(workOrder => new
+            {
+                workOrder.Status,
+                TargetQuantity = workOrder.Qty,
+                workOrder.DueDate,
+                FinalEndTimeUtc = workOrder.Steps
+                    .OrderByDescending(step => step.StepNumber)
+                    .Select(step => step.EndTime)
+                    .FirstOrDefault(),
+                FinalAcceptedQuantity = workOrder.Steps
+                    .OrderByDescending(step => step.StepNumber)
+                    .Select(step => (decimal?)step.QtyOK)
+                    .FirstOrDefault() ?? 0m,
+                FinalRejectedQuantity = workOrder.Steps
+                    .OrderByDescending(step => step.StepNumber)
+                    .Select(step => (decimal?)step.QtyReject)
+                    .FirstOrDefault() ?? 0m
+            })
             .ToListAsync();
 
         var activeWorkOrders = workOrders.Count(workOrder => workOrder.Status == WorkOrderStatus.InProgress);
         var passedQcCount = await _context.QCInspections
             .AsNoTracking()
             .CountAsync(inspection => inspection.Result == QCResult.PASS);
-        var holdQcCount = stockBalances
-            .Where(balance => balance.QtyOnHold > 0 && balance.Location?.Code != QcService.QuarantineLocationCode)
+        var holdQcCount = await _context.StockBalances
+            .AsNoTracking()
+            .Where(balance => balance.QtyOnHold > 0 && balance.Location!.Code != QcService.QuarantineLocationCode)
             .Select(balance => balance.LotId)
             .Distinct()
-            .Count();
-        var quarantineQcCount = stockBalances
-            .Where(balance => balance.QtyOnHold > 0 && balance.Location?.Code == QcService.QuarantineLocationCode)
+            .CountAsync();
+        var quarantineQcCount = await _context.StockBalances
+            .AsNoTracking()
+            .Where(balance => balance.QtyOnHold > 0 && balance.Location!.Code == QcService.QuarantineLocationCode)
             .Select(balance => balance.LotId)
             .Distinct()
-            .Count();
-        var inventoryVolume = stockBalances.Sum(balance => balance.QtyAvailable + balance.QtyReserved + balance.QtyOnHold);
-        var lowStockAlertCount = stockBalances.Count(balance => balance.QtyAvailable <= 10m);
-
-        var oeeOrders = workOrders
-            .Select(workOrder => new
+            .CountAsync();
+        var stockSummary = await _context.StockBalances
+            .AsNoTracking()
+            .GroupBy(_ => 1)
+            .Select(group => new
             {
-                FinalStep = workOrder.Steps.OrderByDescending(step => step.StepNumber).FirstOrDefault()
+                InventoryVolume = group.Sum(balance =>
+                    (double)(balance.QtyAvailable + balance.QtyReserved + balance.QtyOnHold)),
+                LowStockAlertCount = group.Count(balance => balance.QtyAvailable <= 10m)
             })
-            .ToList();
+            .SingleOrDefaultAsync();
+        var inventoryVolume = (decimal)(stockSummary?.InventoryVolume ?? 0d);
+        var lowStockAlertCount = stockSummary?.LowStockAlertCount ?? 0;
+
         var completedOrInProgressCount = workOrders.Count(workOrder =>
             workOrder.Status is WorkOrderStatus.Completed or WorkOrderStatus.InProgress);
-        var totalTargetQuantity = workOrders.Sum(workOrder => workOrder.Qty);
-        var totalProducedQuantity = oeeOrders.Sum(order => (order.FinalStep?.QtyOK ?? 0m) + (order.FinalStep?.QtyReject ?? 0m));
-        var totalAcceptedQuantity = oeeOrders.Sum(order => order.FinalStep?.QtyOK ?? 0m);
+        var totalTargetQuantity = workOrders.Sum(workOrder => workOrder.TargetQuantity);
+        var totalProducedQuantity = workOrders.Sum(workOrder => workOrder.FinalAcceptedQuantity + workOrder.FinalRejectedQuantity);
+        var totalAcceptedQuantity = workOrders.Sum(workOrder => workOrder.FinalAcceptedQuantity);
 
         var oeeAvailabilityPercent = workOrders.Count == 0
             ? 0m
@@ -96,7 +122,7 @@ public class HomeController : Controller
             ? 0m
             : Math.Round(totalAcceptedQuantity * 100m / totalProducedQuantity, 1);
 
-        var today = DateTime.Today;
+        var today = TimeZoneInfo.ConvertTime(_timeProvider.GetUtcNow(), _businessTimeZone).Date;
         var startDate = today.AddDays(-6);
         var dailyLabels = new List<string>();
         var dailyPlannedOutput = new List<decimal>();
@@ -104,22 +130,26 @@ public class HomeController : Controller
         for (var date = startDate; date <= today; date = date.AddDays(1))
         {
             dailyLabels.Add(date.ToString("dd/MM"));
-            dailyPlannedOutput.Add(workOrders.Where(workOrder => workOrder.DueDate.Date == date).Sum(workOrder => workOrder.Qty));
-            dailyActualOutput.Add(oeeOrders
-                .Where(order => order.FinalStep?.EndTime?.Date == date)
-                .Sum(order => order.FinalStep?.QtyOK ?? 0m));
+            dailyPlannedOutput.Add(workOrders
+                .Where(workOrder => workOrder.DueDate.Date == date)
+                .Sum(workOrder => workOrder.TargetQuantity));
+            dailyActualOutput.Add(workOrders
+                .Where(workOrder => workOrder.FinalEndTimeUtc is DateTime endTimeUtc && ToBusinessDate(endTimeUtc) == date)
+                .Sum(workOrder => workOrder.FinalAcceptedQuantity));
         }
 
-        var zoneInventory = stockBalances
-            .Where(balance => balance.Location?.Zone != null)
+        var zoneInventory = await _context.StockBalances
+            .AsNoTracking()
+            .Where(balance => balance.Location!.Zone != null)
             .GroupBy(balance => balance.Location!.Zone!.Name)
             .OrderBy(group => group.Key)
             .Select(group => new
             {
                 Name = group.Key,
-                Quantity = group.Sum(balance => balance.QtyAvailable + balance.QtyReserved + balance.QtyOnHold)
+                Quantity = group.Sum(balance =>
+                    (double)(balance.QtyAvailable + balance.QtyReserved + balance.QtyOnHold))
             })
-            .ToList();
+            .ToListAsync();
 
         return new DashboardViewModel
         {
@@ -134,10 +164,13 @@ public class HomeController : Controller
             DailyPlannedOutput = dailyPlannedOutput,
             DailyActualOutput = dailyActualOutput,
             ZoneLabels = zoneInventory.Select(zone => zone.Name).ToList(),
-            ZoneQuantities = zoneInventory.Select(zone => zone.Quantity).ToList(),
+            ZoneQuantities = zoneInventory.Select(zone => (decimal)zone.Quantity).ToList(),
             PassedQcCount = passedQcCount,
             HoldQcCount = holdQcCount,
             QuarantineQcCount = quarantineQcCount
         };
     }
+
+    private DateTime ToBusinessDate(DateTime utcDateTime) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcDateTime, DateTimeKind.Utc), _businessTimeZone).Date;
 }
