@@ -114,7 +114,9 @@ public class HomeController : Controller
         var finalSteps = _context.WorkOrderSteps
             .AsNoTracking()
             .Where(step => !_context.WorkOrderSteps.Any(candidate =>
-                candidate.WorkOrderId == step.WorkOrderId && candidate.StepNumber > step.StepNumber));
+                candidate.WorkOrderId == step.WorkOrderId
+                && (candidate.StepNumber > step.StepNumber
+                    || (candidate.StepNumber == step.StepNumber && candidate.Id > step.Id))));
         decimal totalAcceptedQuantity;
         decimal totalRejectedQuantity;
         if (useSqliteCompatibility)

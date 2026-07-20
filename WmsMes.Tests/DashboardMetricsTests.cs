@@ -219,7 +219,9 @@ public class DashboardMetricsTests
         var finalSteps = context.WorkOrderSteps
             .AsNoTracking()
             .Where(step => !context.WorkOrderSteps.Any(candidate =>
-                candidate.WorkOrderId == step.WorkOrderId && candidate.StepNumber > step.StepNumber));
+                candidate.WorkOrderId == step.WorkOrderId
+                && (candidate.StepNumber > step.StepNumber
+                    || (candidate.StepNumber == step.StepNumber && candidate.Id > step.Id))));
         var sql = finalSteps
             .GroupBy(_ => 1)
             .Select(group => new
@@ -231,6 +233,7 @@ public class DashboardMetricsTests
         var controllerSource = File.ReadAllText(Path.Combine(ProjectRoot(), "Controllers", "HomeController.cs"));
 
         Assert.Contains("NOT EXISTS", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[Id]", sql, StringComparison.Ordinal);
         Assert.Contains("SUM(", sql, StringComparison.OrdinalIgnoreCase);
         Assert.Matches(@"SUM\(\[[^]]+\]\.\[QtyOK\]\)", sql);
         Assert.Matches(@"SUM\(\[[^]]+\]\.\[QtyReject\]\)", sql);
@@ -238,7 +241,55 @@ public class DashboardMetricsTests
         Assert.DoesNotContain("SUM((SELECT", sql.ReplaceLineEndings(" "), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("_context.WorkOrderSteps", controllerSource, StringComparison.Ordinal);
         Assert.Contains("candidate.StepNumber > step.StepNumber", controllerSource, StringComparison.Ordinal);
+        Assert.Contains("candidate.StepNumber == step.StepNumber && candidate.Id > step.Id", controllerSource, StringComparison.Ordinal);
         Assert.DoesNotContain("group.Sum(order => order.FinalAcceptedQuantity", controllerSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Metrics_UsesHighestIdWhenFinalStepsShareMaximumStepNumber()
+    {
+        await using var context = new ApplicationDbContext(Options($"Dashboard_FinalStepTie_{Guid.NewGuid()}"));
+        var today = new DateTime(2026, 2, 10);
+        context.WorkOrders.Add(WorkOrder(
+            "WO-FINAL-TIE",
+            100m,
+            today,
+            WorkOrderStatus.Completed,
+            new WorkOrderStep
+            {
+                Id = 100,
+                StepNumber = 10,
+                QtyOK = 20m,
+                EndTime = new DateTime(2026, 2, 10, 1, 0, 0, DateTimeKind.Utc),
+                Status = WorkOrderStepStatus.Completed
+            },
+            new WorkOrderStep
+            {
+                Id = 200,
+                StepNumber = 20,
+                QtyOK = 30m,
+                QtyReject = 3m,
+                EndTime = new DateTime(2026, 2, 10, 2, 0, 0, DateTimeKind.Utc),
+                Status = WorkOrderStepStatus.Completed
+            },
+            new WorkOrderStep
+            {
+                Id = 300,
+                StepNumber = 20,
+                QtyOK = 70m,
+                QtyReject = 7m,
+                EndTime = new DateTime(2026, 2, 10, 3, 0, 0, DateTimeKind.Utc),
+                Status = WorkOrderStepStatus.Completed
+            }));
+        await context.SaveChangesAsync();
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 2, 10, 4, 0, 0, TimeSpan.Zero));
+
+        var result = await Controller(context, clock, VietnamTimeZone()).Metrics();
+
+        var metrics = Assert.IsType<DashboardViewModel>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.Equal(77m, metrics.OeePerformancePercent);
+        Assert.Equal(90.9m, metrics.OeeQualityPercent);
+        Assert.Equal(70m, metrics.DailyActualOutput[^1]);
     }
 
     [Fact]

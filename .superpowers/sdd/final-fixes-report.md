@@ -202,3 +202,36 @@ dotnet test WmsMes.sln
 ```
 
 Results: build succeeded with 0 warnings and 0 errors; full suite passed — 113 passed, 0 failed, 0 skipped (both exit code 0).
+
+## Deterministic final-step tie-break fix
+
+The shared final-step query now excludes a step when another step in the same work order has either a greater `StepNumber`, or the same `StepNumber` and a greater `Id`. OEE and actual-output metrics therefore use exactly one deterministic final step: highest step number, then highest ID.
+
+### TDD RED/GREEN
+
+Command:
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~Metrics_UsesHighestIdWhenFinalStepsShareMaximumStepNumber --no-restore
+```
+
+- RED: 1 failed — duplicate maximum step numbers were both included, producing 110% performance instead of the expected 77% from the highest-ID step only.
+- GREEN: 1 passed after adding the ID tie-break to the shared `NOT EXISTS` predicate. The test also verifies quality is 90.9% and actual output is 70 from only the selected step.
+
+### Provider and focused regressions
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter "FullyQualifiedName~Metrics_SqlServerFinalStepAggregate_AvoidsAggregateOverSubquery|FullyQualifiedName~Metrics_SqliteQueriesTranslateAndProjectOnlyDashboardFields" --no-restore
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~DashboardMetricsTests --no-restore
+```
+
+Results: SQL Server generated-SQL plus SQLite execution tests passed — 2 passed, 0 failed; all dashboard metrics tests passed — 8 passed, 0 failed (both exit code 0). The SQL Server shape remains direct-column `SUM` with `NOT EXISTS`, now including the `Id` comparison.
+
+### Fresh full verification
+
+```powershell
+dotnet build WmsMes.sln
+dotnet test WmsMes.sln
+```
+
+Results: build succeeded with 0 warnings and 0 errors; full suite passed — 114 passed, 0 failed, 0 skipped (both exit code 0).
