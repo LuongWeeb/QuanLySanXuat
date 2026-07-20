@@ -17,12 +17,18 @@ public class InventoryController : Controller
 {
     private readonly ApplicationDbContext _context;
     private readonly IInventoryService? _inventoryService;
+    private readonly IReportExportService? _reportExportService;
     private readonly ILogger<InventoryController> _logger;
 
-    public InventoryController(ApplicationDbContext context, IInventoryService? inventoryService = null, ILogger<InventoryController>? logger = null)
+    public InventoryController(
+        ApplicationDbContext context,
+        IInventoryService? inventoryService = null,
+        ILogger<InventoryController>? logger = null,
+        IReportExportService? reportExportService = null)
     {
         _context = context;
         _inventoryService = inventoryService;
+        _reportExportService = reportExportService;
         _logger = logger ?? NullLogger<InventoryController>.Instance;
     }
 
@@ -40,6 +46,21 @@ public class InventoryController : Controller
             .ToListAsync();
 
         return View(balances);
+    }
+
+    [HttpGet("export-excel")]
+    public async Task<IActionResult> ExportExcel(int? warehouseId)
+    {
+        if (_reportExportService is null)
+        {
+            throw new InvalidOperationException("IReportExportService is required to export stock balances.");
+        }
+
+        var bytes = await _reportExportService.ExportStockBalanceToExcelAsync(warehouseId);
+        return File(
+            bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"TonKho_{DateTime.Now:yyyyMMdd}.xlsx");
     }
 
     [HttpGet("api/inventory/picking-recommendations")]

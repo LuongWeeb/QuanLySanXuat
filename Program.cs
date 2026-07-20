@@ -106,6 +106,7 @@ builder.Services.AddScoped<IWorkOrderService, WorkOrderService>();
 builder.Services.AddScoped<ICostingService, CostingService>();
 builder.Services.AddScoped<IQcService, QcService>();
 builder.Services.AddScoped<ITraceabilityService, TraceabilityService>();
+builder.Services.AddScoped<IReportExportService, ReportExportService>();
 
 var app = builder.Build();
 

@@ -16,12 +16,18 @@ public class WorkOrderController : Controller
     private readonly ApplicationDbContext _context;
     private readonly IWorkOrderService _workOrderService;
     private readonly ILogger<WorkOrderController> _logger;
+    private readonly IReportExportService? _reportExportService;
 
-    public WorkOrderController(ApplicationDbContext context, IWorkOrderService workOrderService, ILogger<WorkOrderController> logger)
+    public WorkOrderController(
+        ApplicationDbContext context,
+        IWorkOrderService workOrderService,
+        ILogger<WorkOrderController> logger,
+        IReportExportService? reportExportService = null)
     {
         _context = context;
         _workOrderService = workOrderService;
         _logger = logger;
+        _reportExportService = reportExportService;
     }
 
     public async Task<IActionResult> Index()
@@ -48,6 +54,18 @@ public class WorkOrderController : Controller
             .Where(x => x.WorkOrderId == id)
             .ToListAsync();
         return View(order);
+    }
+
+    [HttpGet("export-pdf/{id:int}")]
+    public async Task<IActionResult> ExportPdf(int id)
+    {
+        if (_reportExportService is null)
+        {
+            throw new InvalidOperationException("IReportExportService is required to export work orders.");
+        }
+
+        var bytes = await _reportExportService.ExportWorkOrderToPdfAsync(id);
+        return File(bytes, "application/pdf", $"LenhSanXuat_{id}_{DateTime.Now:yyyyMMdd}.pdf");
     }
 
     [HttpGet]
