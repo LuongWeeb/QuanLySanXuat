@@ -58,12 +58,19 @@ public class HomeController : Controller
             .ToListAsync();
 
         var activeWorkOrders = workOrders.Count(workOrder => workOrder.Status == WorkOrderStatus.InProgress);
-        var pendingQcLots = await _context.StockBalances
+        var passedQcCount = await _context.QCInspections
             .AsNoTracking()
-            .Where(balance => balance.QtyOnHold > 0 && balance.Location!.Code != QcService.QuarantineLocationCode)
+            .CountAsync(inspection => inspection.Result == QCResult.PASS);
+        var holdQcCount = stockBalances
+            .Where(balance => balance.QtyOnHold > 0 && balance.Location?.Code != QcService.QuarantineLocationCode)
             .Select(balance => balance.LotId)
             .Distinct()
-            .CountAsync();
+            .Count();
+        var quarantineQcCount = stockBalances
+            .Where(balance => balance.QtyOnHold > 0 && balance.Location?.Code == QcService.QuarantineLocationCode)
+            .Select(balance => balance.LotId)
+            .Distinct()
+            .Count();
         var inventoryVolume = stockBalances.Sum(balance => balance.QtyAvailable + balance.QtyReserved + balance.QtyOnHold);
         var lowStockAlertCount = stockBalances.Count(balance => balance.QtyAvailable <= 10m);
 
@@ -117,7 +124,7 @@ public class HomeController : Controller
         return new DashboardViewModel
         {
             ActiveWorkOrders = activeWorkOrders,
-            PendingQcLots = pendingQcLots,
+            PendingQcLots = holdQcCount,
             InventoryVolume = inventoryVolume,
             LowStockAlertCount = lowStockAlertCount,
             OeeAvailabilityPercent = oeeAvailabilityPercent,
@@ -127,7 +134,10 @@ public class HomeController : Controller
             DailyPlannedOutput = dailyPlannedOutput,
             DailyActualOutput = dailyActualOutput,
             ZoneLabels = zoneInventory.Select(zone => zone.Name).ToList(),
-            ZoneQuantities = zoneInventory.Select(zone => zone.Quantity).ToList()
+            ZoneQuantities = zoneInventory.Select(zone => zone.Quantity).ToList(),
+            PassedQcCount = passedQcCount,
+            HoldQcCount = holdQcCount,
+            QuarantineQcCount = quarantineQcCount
         };
     }
 }

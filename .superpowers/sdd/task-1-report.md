@@ -101,3 +101,30 @@ The brief's `TargetQty`, `ProducedQty`, `ScrapQty`, and production-date terms do
 - OEE uses the approved final-step quantities and explicitly returns 0 when no denominator exists.
 - The seven-day series is chronological and zero-fills missing days; zone series is ordered by zone name for stable chart pairing.
 - Existing SignalR code was not changed; `Metrics()` continues returning the dashboard view model.
+
+## Review fix — QC dashboard counts
+
+Reviewer feedback identified that the three QC-count DTO fields were not populated. The controller now maps them as follows:
+
+- `PassedQcCount`: count of `QCInspections` whose `Result` is `PASS`.
+- `HoldQcCount`: distinct lots with `QtyOnHold > 0` outside `QC-QUARANTINE`; `PendingQcLots` uses this same value.
+- `QuarantineQcCount`: distinct lots with `QtyOnHold > 0` at `QC-QUARANTINE`.
+
+### TDD RED
+
+The focused dashboard regression test was expanded with one PASS inspection, two held balances for the same lot in normal locations, and one quarantined lot. Before production logic, the command below failed as expected because `PassedQcCount` was 0 instead of 1:
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~DashboardMetricsTests
+```
+
+Result: 1 failed, 0 passed (exit code 1).
+
+### TDD GREEN and full verification
+
+```powershell
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~DashboardMetricsTests
+dotnet test WmsMes.sln
+```
+
+Results: focused test passed — 1 passed, 0 failed; full suite passed — 103 passed, 0 failed, 0 skipped (both exit code 0).
