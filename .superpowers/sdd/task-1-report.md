@@ -1,130 +1,92 @@
-# Task 1 report — Dashboard OEE & chart metrics
+# Task 1 Report: FEFO/FIFO Picking Recommendation
 
-## Status
+## Scope delivered
 
-Complete.
+Implemented only Task 1 from `task-1-brief.md`:
 
-## Implemented
+- Added `PickingStrategy` (`FEFO`, `FIFO`) and `PickingRecommendationDto`.
+- Added `IInventoryService.GetPickingRecommendationsAsync(int, decimal, PickingStrategy)`.
+- Implemented non-mutating recommendations from available stock, excluding `QcService.QuarantineLocationCode`.
+- FEFO orders by expiry (missing expiry last) then manufacture date; FIFO orders by manufacture date then `StockBalance.Id`.
+- Allocates `RecommendedQty` until `requiredQty` is fulfilled, while retaining actual `AvailableQty`.
+- Added `GET api/inventory/picking-recommendations` returning `200 OK` with service results.
+- Did not implement or modify any Cycle Counting / Task 2 behavior.
 
-- Step 1: extended `DashboardViewModel` with the specified operational, OEE, production-chart, zone-chart, and QC-count properties.
-- Step 2: expanded `HomeController.GetMetricsAsync()` for low-stock alerts, OEE, seven calendar-day planned/actual output, and zone inventory quantities.
-- Added the focused controller regression test in `WmsMes.Tests/DashboardMetricsTests.cs`.
-- Applied the approved domain mapping: `WorkOrder.Qty` is target; final-step `QtyOK + QtyReject` is produced; final-step `QtyReject` is scrap; planned output uses `DueDate`; actual output uses final-step `EndTime` and `QtyOK`.
+`Lot.ManufactureDate` is nullable in the existing entity while the required DTO property is not; the mapping uses `DateTime.MinValue` when no manufacture date exists.
 
-## Verification evidence
+## Files changed
 
-### Step 1
-
-Command:
-
-```powershell
-dotnet test WmsMes.sln
-```
-
-Result: passed — 102 passed, 0 failed, 0 skipped (exit code 0).
-
-### Step 2 — RED
-
-Command:
-
-```powershell
-dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~DashboardMetricsTests
-```
-
-Result: failed as expected — the new regression test expected `LowStockAlertCount` of 2 but the unimplemented controller returned 0 (1 failed, exit code 1).
-
-### Step 2 — GREEN
-
-Command:
-
-```powershell
-dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~DashboardMetricsTests
-```
-
-Result: passed — 1 passed, 0 failed (exit code 0).
-
-Required full-suite command:
-
-```powershell
-dotnet test WmsMes.sln
-```
-
-Result: passed — 103 passed, 0 failed, 0 skipped (exit code 0).
-
-### Final verification after self-review cleanup
-
-The first combined re-run was blocked by sandbox access to `%AppData%\NuGet\NuGet.Config`; no code error was reported. Re-ran each required command with approved profile access:
-
-```powershell
-dotnet build WmsMes.sln
-dotnet test WmsMes.sln
-```
-
-Result: build succeeded with 0 warnings and 0 errors; tests passed — 103 passed, 0 failed, 0 skipped (both exit code 0).
-
-### Step 3
-
-Command:
-
-```powershell
-dotnet build WmsMes.sln
-```
-
-Result: build succeeded — 0 warnings, 0 errors (exit code 0).
-
-Required full-suite command:
-
-```powershell
-dotnet test WmsMes.sln
-```
-
-Result: passed — 103 passed, 0 failed, 0 skipped (exit code 0).
+- `DTOs/PickingRecommendationDto.cs` (new)
+- `Services/IInventoryService.cs`
+- `Services/InventoryService.cs`
+- `Controllers/InventoryController.cs`
+- `WmsMes.Tests/FifoFefoPickingTests.cs` (new)
 
 ## TDD evidence
 
-The focused `DashboardMetricsTests.Metrics_CalculatesOeeAlertsDailyOutputAndZoneInventory` was written before Step 2 production logic. Its first run was RED for the expected missing low-stock calculation; after the minimal controller implementation it was GREEN. The initial planned-output expectation was corrected before the GREEN run to include every work order in the seven-day period, as specified by the approved `DueDate` mapping.
+### RED: service contract/algorithm tests
 
-## Confirmed decision and residual concern
-
-The brief's `TargetQty`, `ProducedQty`, `ScrapQty`, and production-date terms do not exist directly in `WorkOrder`; their approved mappings are documented above. Chart labels use the current server-local `DateTime.Today` in `dd/MM` format, which is a presentation choice for the seven-day data contract.
-
-## Changed files
-
-- `ViewModels/DashboardViewModel.cs`
-- `Controllers/HomeController.cs`
-- `WmsMes.Tests/DashboardMetricsTests.cs`
-- `.superpowers/sdd/task-1-report.md`
-
-## Self-review
-
-- DTO property names, types, defaults, and `OverallOeePercent` formula match Step 1 verbatim.
-- OEE uses the approved final-step quantities and explicitly returns 0 when no denominator exists.
-- The seven-day series is chronological and zero-fills missing days; zone series is ordered by zone name for stable chart pairing.
-- Existing SignalR code was not changed; `Metrics()` continues returning the dashboard view model.
-
-## Review fix — QC dashboard counts
-
-Reviewer feedback identified that the three QC-count DTO fields were not populated. The controller now maps them as follows:
-
-- `PassedQcCount`: count of `QCInspections` whose `Result` is `PASS`.
-- `HoldQcCount`: distinct lots with `QtyOnHold > 0` outside `QC-QUARANTINE`; `PendingQcLots` uses this same value.
-- `QuarantineQcCount`: distinct lots with `QtyOnHold > 0` at `QC-QUARANTINE`.
-
-### TDD RED
-
-The focused dashboard regression test was expanded with one PASS inspection, two held balances for the same lot in normal locations, and one quarantined lot. Before production logic, the command below failed as expected because `PassedQcCount` was 0 instead of 1:
+Command:
 
 ```powershell
-dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~DashboardMetricsTests
+dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
 ```
 
-Result: 1 failed, 0 passed (exit code 1).
+Result: exit code `1`; compilation failed at each service test with expected `CS1061`: `InventoryService` did not contain `GetPickingRecommendationsAsync`.
 
-### TDD GREEN and full verification
+### GREEN: service implementation
+
+Command:
 
 ```powershell
-dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~DashboardMetricsTests
+dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
+```
+
+Result: exit code `0`; `Passed: 3, Failed: 0`.
+
+### RED: API endpoint test
+
+Command:
+
+```powershell
+dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
+```
+
+Result: exit code `1`; compilation failed with expected `CS1061`: `InventoryController` did not contain `GetPickingRecommendations`.
+
+### GREEN: endpoint implementation and review coverage
+
+Commands:
+
+```powershell
+dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
 dotnet test WmsMes.sln
 ```
 
-Results: focused test passed — 1 passed, 0 failed; full suite passed — 103 passed, 0 failed, 0 skipped (both exit code 0).
+Results:
+
+- Focused post-endpoint run: exit code `0`; `Passed: 4, Failed: 0`.
+- After adding review-requested tie-breaker/null-expiry coverage: focused run exit code `0`; `Passed: 6, Failed: 0`.
+- Fresh full-suite run: exit code `0`; `Passed: 120, Failed: 0, Skipped: 0`.
+
+The final full-suite command was run outside the filesystem sandbox after the sandboxed process was denied read access to the user NuGet config; the same command then restored successfully and ran all tests.
+
+## Test coverage
+
+- FEFO chooses earliest expiry and splits a quantity request across balances.
+- FIFO chooses earliest manufacture date.
+- FEFO uses manufacture date when expiry dates tie and places no-expiry lots last.
+- FIFO uses `StockBalance.Id` when manufacture dates tie.
+- Quarantine balances are excluded.
+- Controller delegates exact inputs to `IInventoryService` and returns `Ok` with its result.
+
+## Self-review
+
+- Confirmed signature, DTO fields, route, FEFO/FIFO sort clauses, allocation, and quarantine exclusion against every Task 1 requirement.
+- Confirmed the recommendation query uses `AsNoTracking`, so an API call cannot mutate inventory.
+- Ran `git diff --check`: no whitespace errors.
+- Independent review reported no Critical or Important issues. Its Minor test-coverage finding (tie-breakers and null expiry) was addressed by the final two tests.
+
+## Concerns
+
+None. The endpoint follows existing controller behavior by throwing a clear exception only if the optional constructor dependency is omitted; normal DI registration supplies `IInventoryService`.

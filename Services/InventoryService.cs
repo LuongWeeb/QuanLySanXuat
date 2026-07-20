@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
+using WmsMes.Web.DTOs;
 using WmsMes.Web.Hubs;
 
 namespace WmsMes.Web.Services;
@@ -30,6 +31,59 @@ public class InventoryService : IInventoryService
         _context = context;
         _hubContext = hubContext;
         _logger = logger ?? NullLogger<InventoryService>.Instance;
+    }
+
+    public async Task<List<PickingRecommendationDto>> GetPickingRecommendationsAsync(int productId, decimal requiredQty, PickingStrategy strategy)
+    {
+        if (requiredQty <= 0)
+        {
+            return [];
+        }
+
+        var query = _context.StockBalances
+            .AsNoTracking()
+            .Include(balance => balance.Product)
+            .Include(balance => balance.Lot)
+            .Include(balance => balance.Location)
+            .Where(balance => balance.ProductId == productId &&
+                              balance.QtyAvailable > 0 &&
+                              balance.Location!.Code != QcService.QuarantineLocationCode);
+
+        var balances = strategy == PickingStrategy.FIFO
+            ? await query.OrderBy(balance => balance.Lot!.ManufactureDate).ThenBy(balance => balance.Id).ToListAsync()
+            : await query.OrderBy(balance => balance.Lot!.ExpiryDate ?? DateTime.MaxValue)
+                .ThenBy(balance => balance.Lot!.ManufactureDate)
+                .ToListAsync();
+
+        var remainingQty = requiredQty;
+        var recommendations = new List<PickingRecommendationDto>();
+
+        foreach (var balance in balances)
+        {
+            if (remainingQty <= 0)
+            {
+                break;
+            }
+
+            var recommendedQty = Math.Min(balance.QtyAvailable, remainingQty);
+            recommendations.Add(new PickingRecommendationDto
+            {
+                ProductId = balance.ProductId,
+                ProductCode = balance.Product?.Code ?? string.Empty,
+                ProductName = balance.Product?.Name ?? string.Empty,
+                LocationId = balance.LocationId,
+                LocationCode = balance.Location?.Code ?? string.Empty,
+                LotId = balance.LotId,
+                LotNo = balance.Lot?.LotNo ?? string.Empty,
+                ExpiryDate = balance.Lot?.ExpiryDate,
+                ManufactureDate = balance.Lot?.ManufactureDate ?? DateTime.MinValue,
+                AvailableQty = balance.QtyAvailable,
+                RecommendedQty = recommendedQty
+            });
+            remainingQty -= recommendedQty;
+        }
+
+        return recommendations;
     }
 
     public async Task<IEnumerable<StockBalance>> GetSuggestedLotsAsync(int productId, decimal qty)

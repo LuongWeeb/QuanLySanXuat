@@ -1,9 +1,12 @@
 using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.DTOs;
 
 namespace WmsMes.Web.Services;
 
 public interface IInventoryService
 {
+    Task<List<PickingRecommendationDto>> GetPickingRecommendationsAsync(int productId, decimal requiredQty, PickingStrategy strategy);
+
     Task<IEnumerable<StockBalance>> GetSuggestedLotsAsync(int productId, decimal qty);
 
     Task<bool> CompleteGoodsReceiptAsync(int receiptId, string userId);

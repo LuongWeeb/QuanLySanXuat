@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
+using WmsMes.Web.DTOs;
 using WmsMes.Web.Services;
 
 namespace WmsMes.Web.Controllers;
@@ -39,6 +40,18 @@ public class InventoryController : Controller
             .ToListAsync();
 
         return View(balances);
+    }
+
+    [HttpGet("api/inventory/picking-recommendations")]
+    public async Task<IActionResult> GetPickingRecommendations(int productId, decimal requiredQty, PickingStrategy strategy = PickingStrategy.FEFO)
+    {
+        if (_inventoryService is null)
+        {
+            throw new InvalidOperationException("IInventoryService is required to get picking recommendations.");
+        }
+
+        var result = await _inventoryService.GetPickingRecommendationsAsync(productId, requiredQty, strategy);
+        return Ok(result);
     }
 
     [Authorize(Roles = "Admin,Warehouse,Manager")]
