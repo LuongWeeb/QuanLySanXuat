@@ -9,6 +9,7 @@ using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.DTOs;
 using WmsMes.Web.Services;
+using WmsMes.Web.ViewModels;
 
 namespace WmsMes.Web.Controllers;
 
@@ -109,60 +110,89 @@ public class InventoryController : Controller
     public async Task<IActionResult> CreateIssue()
     {
         await LoadIssueSelectionsAsync();
-        return View();
+        return View(new CreateIssueViewModel { Lines = { new IssueLineInput() } });
     }
 
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Roles = "Admin,Warehouse,Manager")]
-    public async Task<IActionResult> CreateIssue(int customerId, int productId, int lotId, decimal qty, int locationId)
+    public async Task<IActionResult> CreateIssue(CreateIssueViewModel model)
     {
+        model.Lines ??= new List<IssueLineInput>();
         var userId = HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrWhiteSpace(userId))
             ModelState.AddModelError(string.Empty, "Không xác định được người dùng đang đăng nhập.");
+
         var customerIsActive = await _context.Customers
             .AsNoTracking()
-            .AnyAsync(customer => customer.Id == customerId && customer.IsActive);
+            .AnyAsync(customer => customer.Id == model.CustomerId && customer.IsActive);
         if (!customerIsActive)
         {
-            ModelState.AddModelError(nameof(customerId), "Khách hàng không hợp lệ hoặc đã ngừng hoạt động.");
+            ModelState.AddModelError(nameof(model.CustomerId), "Khách hàng không hợp lệ hoặc đã ngừng hoạt động.");
         }
 
-        if (qty <= 0)
+        if (model.Lines.Count == 0)
         {
-            ModelState.AddModelError(nameof(qty), "Số lượng phải lớn hơn 0.");
+            ModelState.AddModelError(nameof(model.Lines), "Phiếu xuất kho phải có ít nhất một dòng.");
         }
 
-        var balance = await _context.StockBalances
-            .Include(item => item.Product)
-            .Include(item => item.Lot)
-            .Include(item => item.Location)
-            .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.ProductId == productId && item.LotId == lotId && item.LocationId == locationId);
-        if (balance?.Product is null || !balance.Product.IsActive)
+        for (var index = 0; index < model.Lines.Count; index++)
         {
-            ModelState.AddModelError(nameof(productId), "Sản phẩm không hợp lệ hoặc đã ngừng hoạt động.");
-        }
+            var line = model.Lines[index];
+            var keyPrefix = $"Lines[{index}]";
+            var productIsActive = await _context.Products
+                .AsNoTracking()
+                .AnyAsync(product => product.Id == line.ProductId && product.IsActive);
+            if (!productIsActive)
+            {
+                ModelState.AddModelError($"{keyPrefix}.{nameof(line.ProductId)}", "Sản phẩm không hợp lệ hoặc đã ngừng hoạt động.");
+            }
 
-        if (balance?.Lot is null || balance.Lot.ProductId != productId)
-        {
-            ModelState.AddModelError(nameof(lotId), "Lô hàng không thuộc sản phẩm đã chọn.");
-        }
+            var lotMatchesProduct = await _context.Lots
+                .AsNoTracking()
+                .AnyAsync(lot => lot.Id == line.LotId && lot.ProductId == line.ProductId);
+            if (!lotMatchesProduct)
+            {
+                ModelState.AddModelError($"{keyPrefix}.{nameof(line.LotId)}", "Lô hàng không thuộc sản phẩm đã chọn.");
+            }
 
-        if (balance?.Location is null || !balance.Location.IsActive)
-        {
-            ModelState.AddModelError(nameof(locationId), "Vị trí không hợp lệ hoặc đã ngừng hoạt động.");
-        }
+            var locationIsActive = await _context.Locations
+                .AsNoTracking()
+                .AnyAsync(location => location.Id == line.LocationId && location.IsActive);
+            if (!locationIsActive)
+            {
+                ModelState.AddModelError($"{keyPrefix}.{nameof(line.LocationId)}", "Vị trí không hợp lệ hoặc đã ngừng hoạt động.");
+            }
 
-        if (qty > 0 && (balance is null || balance.QtyAvailable < qty))
-        {
-            ModelState.AddModelError(nameof(qty), "Số lượng xuất vượt quá tồn kho khả dụng của lô tại vị trí đã chọn.");
+            if (line.Qty <= 0)
+            {
+                ModelState.AddModelError($"{keyPrefix}.{nameof(line.Qty)}", "Số lượng phải lớn hơn 0.");
+            }
+            else
+            {
+                var qtyAvailable = await _context.StockBalances
+                    .AsNoTracking()
+                    .Where(balance =>
+                        balance.ProductId == line.ProductId &&
+                        balance.LotId == line.LotId &&
+                        balance.LocationId == line.LocationId)
+                    .Select(balance => (decimal?)balance.QtyAvailable)
+                    .FirstOrDefaultAsync();
+                if (qtyAvailable is null || qtyAvailable < line.Qty)
+                {
+                    ModelState.AddModelError($"{keyPrefix}.{nameof(line.Qty)}", "Số lượng xuất vượt quá tồn kho khả dụng của lô tại vị trí đã chọn.");
+                }
+            }
         }
 
         if (!ModelState.IsValid)
         {
+            if (model.Lines.Count == 0)
+            {
+                model.Lines.Add(new IssueLineInput());
+            }
             await LoadIssueSelectionsAsync();
-            return View();
+            return View(model);
         }
 
         if (_inventoryService is null)
@@ -175,11 +205,14 @@ public class InventoryController : Controller
             IssueNo = $"GI-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
             IssueDate = DateTime.UtcNow,
             Status = DocumentStatus.Draft,
-            CustomerId = customerId,
-            Lines =
+            CustomerId = model.CustomerId,
+            Lines = model.Lines.Select(line => new GoodsIssueLine
             {
-                new GoodsIssueLine { ProductId = productId, LotId = lotId, Qty = qty, LocationId = locationId }
-            }
+                ProductId = line.ProductId,
+                LotId = line.LotId,
+                Qty = line.Qty,
+                LocationId = line.LocationId
+            }).ToList()
         };
 
         await using var transaction = _context.Database.IsRelational()
@@ -193,7 +226,7 @@ public class InventoryController : Controller
             if (!await _inventoryService.CompleteGoodsIssueWithoutNotificationAsync(issue.Id, userId!))
             {
                 await RollbackIssueAsync(issue, transaction);
-                return await IssueCompletionErrorAsync("Không thể hoàn tất phiếu xuất kho. Vui lòng thử lại.");
+                return await IssueCompletionErrorAsync(model, "Không thể hoàn tất phiếu xuất kho. Vui lòng thử lại.");
             }
 
             if (transaction is not null)
@@ -203,13 +236,13 @@ public class InventoryController : Controller
 
             await NotifyAfterCommitAsync();
 
-            TempData["StatusMessage"] = $"Đã xuất kho {qty:N2} thành công.";
+            TempData["StatusMessage"] = $"Đã xuất kho {model.Lines.Sum(line => line.Qty):N2} thành công.";
             return RedirectToAction(nameof(Issues));
         }
         catch (Exception)
         {
             await RollbackIssueAsync(issue, transaction);
-            return await IssueCompletionErrorAsync("Có lỗi khi hoàn tất phiếu xuất kho. Vui lòng thử lại.");
+            return await IssueCompletionErrorAsync(model, "Có lỗi khi hoàn tất phiếu xuất kho. Vui lòng thử lại.");
         }
     }
 
@@ -218,67 +251,63 @@ public class InventoryController : Controller
     public async Task<IActionResult> CreateReceipt()
     {
         await LoadReceiptSelectionsAsync();
-        return View();
+        return View(new CreateReceiptViewModel { Lines = { new ReceiptLineInput() } });
     }
 
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Roles = "Admin,Warehouse,Manager")]
-    public async Task<IActionResult> CreateReceipt(
-        int supplierId,
-        int productId,
-        string lotNo,
-        decimal qty,
-        decimal unitPrice,
-        int locationId)
+    public async Task<IActionResult> CreateReceipt(CreateReceiptViewModel model)
     {
+        model.Lines ??= new List<ReceiptLineInput>();
         var userId = HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrWhiteSpace(userId))
             ModelState.AddModelError(string.Empty, "Không xác định được người dùng đang đăng nhập.");
-        if (!await _context.Suppliers.AsNoTracking().AnyAsync(x => x.Id == supplierId && x.IsActive))
-            ModelState.AddModelError(nameof(supplierId), "Nhà cung cấp không hợp lệ hoặc đã ngừng hoạt động.");
-        if (!await _context.Products.AsNoTracking().AnyAsync(x => x.Id == productId && x.IsActive))
-            ModelState.AddModelError(nameof(productId), "Sản phẩm không hợp lệ hoặc đã ngừng hoạt động.");
-        if (!await _context.Locations.AsNoTracking().AnyAsync(x => x.Id == locationId && x.IsActive))
-            ModelState.AddModelError(nameof(locationId), "Vị trí không hợp lệ hoặc đã ngừng hoạt động.");
-        if (string.IsNullOrWhiteSpace(lotNo))
-        {
-            ModelState.AddModelError(nameof(lotNo), "Số lô là bắt buộc.");
-        }
+        if (!await _context.Suppliers.AsNoTracking().AnyAsync(x => x.Id == model.SupplierId && x.IsActive))
+            ModelState.AddModelError(nameof(model.SupplierId), "Nhà cung cấp không hợp lệ hoặc đã ngừng hoạt động.");
+        if (model.Lines.Count == 0)
+            ModelState.AddModelError(nameof(model.Lines), "Phiếu nhập kho phải có ít nhất một dòng.");
 
-        if (qty <= 0)
+        for (var index = 0; index < model.Lines.Count; index++)
         {
-            ModelState.AddModelError(nameof(qty), "Số lượng phải lớn hơn 0.");
-        }
-
-        if (unitPrice < 0)
-        {
-            ModelState.AddModelError(nameof(unitPrice), "Đơn giá không được âm.");
+            var line = model.Lines[index];
+            var keyPrefix = $"Lines[{index}]";
+            if (!await _context.Products.AsNoTracking().AnyAsync(x => x.Id == line.ProductId && x.IsActive))
+                ModelState.AddModelError($"{keyPrefix}.{nameof(line.ProductId)}", "Sản phẩm không hợp lệ hoặc đã ngừng hoạt động.");
+            if (!await _context.Locations.AsNoTracking().AnyAsync(x => x.Id == line.LocationId && x.IsActive))
+                ModelState.AddModelError($"{keyPrefix}.{nameof(line.LocationId)}", "Vị trí không hợp lệ hoặc đã ngừng hoạt động.");
+            if (string.IsNullOrWhiteSpace(line.LotNo))
+                ModelState.AddModelError($"{keyPrefix}.{nameof(line.LotNo)}", "Số lô là bắt buộc.");
+            if (line.Qty <= 0)
+                ModelState.AddModelError($"{keyPrefix}.{nameof(line.Qty)}", "Số lượng phải lớn hơn 0.");
+            if (line.UnitPrice < 0)
+                ModelState.AddModelError($"{keyPrefix}.{nameof(line.UnitPrice)}", "Đơn giá không được âm.");
         }
 
         if (!ModelState.IsValid)
         {
+            if (model.Lines.Count == 0)
+            {
+                model.Lines.Add(new ReceiptLineInput());
+            }
             await LoadReceiptSelectionsAsync();
-            return View();
+            return View(model);
         }
 
         var receipt = new GoodsReceipt
         {
             ReceiptNo = $"GR-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
             ReceiptDate = DateTime.UtcNow,
-            SupplierId = supplierId,
+            SupplierId = model.SupplierId,
             Status = DocumentStatus.Draft,
-            Lines =
+            Lines = model.Lines.Select(line => new GoodsReceiptLine
             {
-                new GoodsReceiptLine
-                {
-                    ProductId = productId,
-                    LotNo = lotNo.Trim(),
-                    Qty = qty,
-                    UnitPrice = unitPrice,
-                    LocationId = locationId
-                }
-            }
+                ProductId = line.ProductId,
+                LotNo = line.LotNo.Trim(),
+                Qty = line.Qty,
+                UnitPrice = line.UnitPrice,
+                LocationId = line.LocationId
+            }).ToList()
         };
 
         if (_inventoryService is null)
@@ -299,7 +328,7 @@ public class InventoryController : Controller
             if (!completed)
             {
                 await RollbackReceiptAsync(receipt, transaction);
-                return await ReceiptCompletionErrorAsync("Không thể hoàn tất phiếu nhập kho. Vui lòng thử lại.");
+                return await ReceiptCompletionErrorAsync(model, "Không thể hoàn tất phiếu nhập kho. Vui lòng thử lại.");
             }
 
             if (transaction is not null)
@@ -309,13 +338,13 @@ public class InventoryController : Controller
 
             await NotifyAfterCommitAsync();
 
-            TempData["StatusMessage"] = $"Đã nhập kho lô hàng {lotNo.Trim()} thành công.";
+            TempData["StatusMessage"] = $"Đã nhập kho {model.Lines.Count} dòng hàng thành công.";
             return RedirectToAction(nameof(Receipts));
         }
         catch (Exception)
         {
             await RollbackReceiptAsync(receipt, transaction);
-            return await ReceiptCompletionErrorAsync("Có lỗi khi hoàn tất phiếu nhập kho. Vui lòng thử lại.");
+            return await ReceiptCompletionErrorAsync(model, "Có lỗi khi hoàn tất phiếu nhập kho. Vui lòng thử lại.");
         }
     }
 
@@ -386,18 +415,18 @@ public class InventoryController : Controller
         await _context.SaveChangesAsync();
     }
 
-    private async Task<IActionResult> ReceiptCompletionErrorAsync(string message)
+    private async Task<IActionResult> ReceiptCompletionErrorAsync(CreateReceiptViewModel model, string message)
     {
         ModelState.AddModelError(string.Empty, message);
         await LoadReceiptSelectionsAsync();
-        return View();
+        return View(nameof(CreateReceipt), model);
     }
 
-    private async Task<IActionResult> IssueCompletionErrorAsync(string message)
+    private async Task<IActionResult> IssueCompletionErrorAsync(CreateIssueViewModel model, string message)
     {
         ModelState.AddModelError(string.Empty, message);
         await LoadIssueSelectionsAsync();
-        return View(nameof(CreateIssue));
+        return View(nameof(CreateIssue), model);
     }
 
     private async Task NotifyAfterCommitAsync()

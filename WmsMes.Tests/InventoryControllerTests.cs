@@ -9,6 +9,7 @@ using WmsMes.Web.Controllers;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Services;
+using WmsMes.Web.ViewModels;
 
 namespace WmsMes.Tests;
 
@@ -23,7 +24,7 @@ public class InventoryControllerTests
         var service = new Mock<IInventoryService>();
         var controller = new InventoryController(context, Mock.Of<IReportExportService>(), service.Object);
 
-        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 1, seeded.locationId);
+        var result = await controller.CreateIssue(IssueModel(seeded, 1));
 
         Assert.IsType<ViewResult>(result);
         service.Verify(x => x.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), It.IsAny<string>()), Times.Never);
@@ -44,7 +45,7 @@ public class InventoryControllerTests
         var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
         controller.TempData = Mock.Of<ITempDataDictionary>();
 
-        var result = await controller.CreateReceipt(2, 3, "LOT", 1, 1, 4);
+        var result = await controller.CreateReceipt(ReceiptModel(2, 3, "LOT", 1, 1, 4));
 
         Assert.IsType<RedirectToActionResult>(result);
         Assert.Single(context.GoodsReceipts);
@@ -89,7 +90,9 @@ public class InventoryControllerTests
 
         var result = await controller.CreateIssue();
 
-        Assert.IsType<ViewResult>(result);
+        var view = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<CreateIssueViewModel>(view.Model);
+        Assert.Single(model.Lines);
         object availableBalances = controller.ViewBag.AvailableBalances;
         var balances = Assert.IsAssignableFrom<IEnumerable<StockBalance>>(availableBalances).ToList();
         Assert.Equal(new[] { "SOONER", "LATER" }, balances.Select(balance => balance.Lot!.LotNo));
@@ -106,7 +109,7 @@ public class InventoryControllerTests
         service.Setup(item => item.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user")).ReturnsAsync(true);
         var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object)); controller.TempData = Mock.Of<ITempDataDictionary>();
 
-        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 2.5m, seeded.locationId);
+        var result = await controller.CreateIssue(IssueModel(seeded, 2.5m));
 
         Assert.Equal(nameof(InventoryController.Issues), Assert.IsType<RedirectToActionResult>(result).ActionName);
         var issue = await context.GoodsIssues.Include(item => item.Lines).SingleAsync();
@@ -115,6 +118,82 @@ public class InventoryControllerTests
         Assert.Equal((seeded.productId, seeded.lotId, 2.5m, seeded.locationId), (line.ProductId, line.LotId, line.Qty, line.LocationId));
         service.Verify(item => item.CompleteGoodsIssueWithoutNotificationAsync(issue.Id, "warehouse-user"), Times.Once);
         service.Verify(item => item.NotifyStockChangedAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateIssue_Post_PersistsAllLinesAndCompletesOnce()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Issue_Multi_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        var seeded = await SeedIssueStockAsync(context);
+        var service = new Mock<IInventoryService>();
+        service.Setup(item => item.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user")).ReturnsAsync(true);
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
+        controller.TempData = Mock.Of<ITempDataDictionary>();
+        var model = IssueModel(seeded, 2);
+        model.Lines.Add(new IssueLineInput
+        {
+            ProductId = seeded.productId,
+            LotId = seeded.lotId,
+            Qty = 3,
+            LocationId = seeded.locationId
+        });
+
+        var result = await controller.CreateIssue(model);
+
+        Assert.Equal(nameof(InventoryController.Issues), Assert.IsType<RedirectToActionResult>(result).ActionName);
+        var issue = await context.GoodsIssues.Include(item => item.Lines).SingleAsync();
+        Assert.Equal(new[] { 2m, 3m }, issue.Lines.Select(line => line.Qty));
+        service.Verify(item => item.CompleteGoodsIssueWithoutNotificationAsync(issue.Id, "warehouse-user"), Times.Once);
+        service.Verify(item => item.NotifyStockChangedAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateIssue_Post_KeysValidationErrorsToTheInvalidLine()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Issue_Line_Error_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        var seeded = await SeedIssueStockAsync(context);
+        var service = new Mock<IInventoryService>();
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
+        var model = IssueModel(seeded, 1);
+        model.Lines.Add(new IssueLineInput
+        {
+            ProductId = seeded.productId,
+            LotId = seeded.lotId,
+            Qty = 11,
+            LocationId = seeded.locationId
+        });
+
+        var result = await controller.CreateIssue(model);
+
+        var view = Assert.IsType<ViewResult>(result);
+        Assert.Same(model, view.Model);
+        Assert.True(controller.ModelState.ContainsKey("Lines[1].Qty"));
+        Assert.False(controller.ModelState.ContainsKey("Lines[0].Qty"));
+        Assert.Empty(context.GoodsIssues);
+        service.Verify(item => item.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateIssue_Post_WithoutLines_RedisplaysOneBlankLine()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Issue_No_Lines_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        var seeded = await SeedIssueStockAsync(context);
+        var service = new Mock<IInventoryService>();
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
+        var model = new CreateIssueViewModel { CustomerId = seeded.customerId };
+
+        var result = await controller.CreateIssue(model);
+
+        var returnedModel = Assert.IsType<CreateIssueViewModel>(Assert.IsType<ViewResult>(result).Model);
+        Assert.True(controller.ModelState.ContainsKey("Lines"));
+        Assert.Single(returnedModel.Lines);
+        service.Verify(item => item.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), It.IsAny<string>()), Times.Never);
     }
 
     [Theory]
@@ -129,7 +208,7 @@ public class InventoryControllerTests
         var service = new Mock<IInventoryService>();
         var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
 
-        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, qty, seeded.locationId);
+        var result = await controller.CreateIssue(IssueModel(seeded, qty));
 
         Assert.IsType<ViewResult>(result);
         Assert.False(controller.ModelState.IsValid);
@@ -151,7 +230,7 @@ public class InventoryControllerTests
         if (throws) setup.ThrowsAsync(new InvalidOperationException("failed")); else setup.ReturnsAsync(false);
         var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
 
-        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 2, seeded.locationId);
+        var result = await controller.CreateIssue(IssueModel(seeded, 2));
 
         Assert.IsType<ViewResult>(result);
         Assert.False(controller.ModelState.IsValid);
@@ -205,10 +284,14 @@ public class InventoryControllerTests
         await context.SaveChangesAsync();
         var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), Mock.Of<IInventoryService>()));
 
-        var result = await controller.CreateIssue(6, product.Id, lot.Id, 1, location.Id);
+        var result = await controller.CreateIssue(new CreateIssueViewModel
+        {
+            CustomerId = 6,
+            Lines = { new IssueLineInput { ProductId = product.Id, LotId = lot.Id, Qty = 1, LocationId = location.Id } }
+        });
 
         Assert.IsType<ViewResult>(result);
-        var key = inactiveProduct ? "productId" : "locationId";
+        var key = inactiveProduct ? "Lines[0].ProductId" : "Lines[0].LocationId";
         Assert.True(controller.ModelState.ContainsKey(key));
         Assert.Empty(context.GoodsIssues);
     }
@@ -228,10 +311,14 @@ public class InventoryControllerTests
         await context.SaveChangesAsync();
         var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), Mock.Of<IInventoryService>()));
 
-        var result = await controller.CreateIssue(6, product.Id, lot.Id, 1, location.Id);
+        var result = await controller.CreateIssue(new CreateIssueViewModel
+        {
+            CustomerId = 6,
+            Lines = { new IssueLineInput { ProductId = product.Id, LotId = lot.Id, Qty = 1, LocationId = location.Id } }
+        });
 
         Assert.IsType<ViewResult>(result);
-        Assert.True(controller.ModelState.ContainsKey("lotId"));
+        Assert.True(controller.ModelState.ContainsKey("Lines[0].LotId"));
         Assert.Empty(context.GoodsIssues);
     }
 
@@ -246,7 +333,7 @@ public class InventoryControllerTests
         var seeded = await SeedIssueStockAsync(context);
         var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), new InventoryService(context))); controller.TempData = Mock.Of<ITempDataDictionary>();
 
-        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 3, seeded.locationId);
+        var result = await controller.CreateIssue(IssueModel(seeded, 3));
 
         Assert.IsType<RedirectToActionResult>(result);
         context.ChangeTracker.Clear();
@@ -268,11 +355,43 @@ public class InventoryControllerTests
         service.Setup(x => x.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user")).ReturnsAsync(false);
         var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
 
-        var result = await controller.CreateIssue(seeded.customerId, seeded.productId, seeded.lotId, 3, seeded.locationId);
+        var result = await controller.CreateIssue(IssueModel(seeded, 3));
 
-        Assert.IsType<ViewResult>(result);
+        var view = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<CreateIssueViewModel>(view.Model);
+        Assert.Single(model.Lines);
         context.ChangeTracker.Clear();
         Assert.Empty(await context.GoodsIssues.ToListAsync());
+        Assert.Equal(10, (await context.StockBalances.SingleAsync()).QtyAvailable);
+    }
+
+    [Fact]
+    public async Task CreateIssue_Post_WithSqlite_RollsBackEveryLineWhenCombinedQuantityCannotComplete()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var seeded = await SeedIssueStockAsync(context);
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), new InventoryService(context)));
+        var model = IssueModel(seeded, 6);
+        model.Lines.Add(new IssueLineInput
+        {
+            ProductId = seeded.productId,
+            LotId = seeded.lotId,
+            Qty = 6,
+            LocationId = seeded.locationId
+        });
+
+        var result = await controller.CreateIssue(model);
+
+        var view = Assert.IsType<ViewResult>(result);
+        Assert.Same(model, view.Model);
+        context.ChangeTracker.Clear();
+        Assert.Empty(await context.GoodsIssues.ToListAsync());
+        Assert.Empty(await context.GoodsIssueLines.ToListAsync());
+        Assert.Empty(await context.StockTransactions.ToListAsync());
         Assert.Equal(10, (await context.StockBalances.SingleAsync()).QtyAvailable);
     }
 
@@ -392,7 +511,9 @@ public class InventoryControllerTests
 
         var result = await controller.CreateReceipt();
 
-        Assert.IsType<ViewResult>(result);
+        var view = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<CreateReceiptViewModel>(view.Model);
+        Assert.Single(model.Lines);
         Assert.Single(Assert.IsAssignableFrom<IEnumerable<Product>>(controller.ViewBag.Products));
         Assert.Single(Assert.IsAssignableFrom<IEnumerable<Supplier>>(controller.ViewBag.Suppliers));
         Assert.Single(Assert.IsAssignableFrom<IEnumerable<Location>>(controller.ViewBag.Locations));
@@ -415,7 +536,7 @@ public class InventoryControllerTests
         var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), inventoryService.Object));
         controller.TempData = Mock.Of<ITempDataDictionary>();
 
-        var result = await controller.CreateReceipt(2, 3, "LOT-9", 12.5m, 4.25m, 4);
+        var result = await controller.CreateReceipt(ReceiptModel(2, 3, "LOT-9", 12.5m, 4.25m, 4));
 
         var redirect = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal(nameof(InventoryController.Receipts), redirect.ActionName);
@@ -432,24 +553,100 @@ public class InventoryControllerTests
     }
 
     [Fact]
+    public async Task CreateReceipt_Post_PersistsAllLinesAndCompletesOnce()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Receipt_Multi_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        context.Suppliers.Add(new Supplier { Id = 2, Code = "SUP", Name = "Supplier" });
+        context.Products.AddRange(
+            new Product { Id = 3, Code = "P1", Name = "Product 1" },
+            new Product { Id = 5, Code = "P2", Name = "Product 2" });
+        context.Locations.Add(new Location { Id = 4, Code = "LOC", Name = "Location", Zone = new Zone { Code = "Z", Name = "Zone" } });
+        await context.SaveChangesAsync();
+        var service = new Mock<IInventoryService>();
+        service.Setup(item => item.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user")).ReturnsAsync(true);
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
+        controller.TempData = Mock.Of<ITempDataDictionary>();
+        var model = ReceiptModel(2, 3, "LOT-1", 2, 1.25m, 4);
+        model.Lines.Add(new ReceiptLineInput { ProductId = 5, LotNo = " LOT-2 ", Qty = 3, UnitPrice = 2.5m, LocationId = 4 });
+
+        var result = await controller.CreateReceipt(model);
+
+        Assert.Equal(nameof(InventoryController.Receipts), Assert.IsType<RedirectToActionResult>(result).ActionName);
+        var receipt = await context.GoodsReceipts.Include(item => item.Lines).SingleAsync();
+        Assert.Equal(new[] { "LOT-1", "LOT-2" }, receipt.Lines.Select(line => line.LotNo));
+        service.Verify(item => item.CompleteGoodsReceiptWithoutNotificationAsync(receipt.Id, "warehouse-user"), Times.Once);
+        service.Verify(item => item.NotifyStockChangedAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateReceipt_Post_KeysValidationErrorsToTheInvalidLine()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Receipt_Line_Error_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        context.Suppliers.Add(new Supplier { Id = 2, Code = "SUP", Name = "Supplier" });
+        context.Products.Add(new Product { Id = 3, Code = "P", Name = "Product" });
+        context.Locations.Add(new Location { Id = 4, Code = "LOC", Name = "Location", Zone = new Zone { Code = "Z", Name = "Zone" } });
+        await context.SaveChangesAsync();
+        var service = new Mock<IInventoryService>();
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
+        var model = ReceiptModel(2, 3, "LOT-1", 1, 1, 4);
+        model.Lines.Add(new ReceiptLineInput { ProductId = 3, LotNo = " ", Qty = 1, UnitPrice = -1, LocationId = 4 });
+
+        var result = await controller.CreateReceipt(model);
+
+        var view = Assert.IsType<ViewResult>(result);
+        Assert.Same(model, view.Model);
+        Assert.True(controller.ModelState.ContainsKey("Lines[1].LotNo"));
+        Assert.True(controller.ModelState.ContainsKey("Lines[1].UnitPrice"));
+        Assert.False(controller.ModelState.ContainsKey("Lines[0].LotNo"));
+        Assert.Empty(context.GoodsReceipts);
+        service.Verify(item => item.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateReceipt_Post_WithoutLines_RedisplaysOneBlankLine()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Receipt_No_Lines_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        context.Suppliers.Add(new Supplier { Id = 2, Code = "SUP", Name = "Supplier" });
+        await context.SaveChangesAsync();
+        var service = new Mock<IInventoryService>();
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
+        var model = new CreateReceiptViewModel { SupplierId = 2 };
+
+        var result = await controller.CreateReceipt(model);
+
+        var returnedModel = Assert.IsType<CreateReceiptViewModel>(Assert.IsType<ViewResult>(result).Model);
+        Assert.True(controller.ModelState.ContainsKey("Lines"));
+        Assert.Single(returnedModel.Lines);
+        service.Verify(item => item.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
     public async Task CreateReceipt_Post_WhenCompletionReturnsFalse_ShowsErrorAndRemovesDraft()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"Inv_Create_False_{Guid.NewGuid()}")
             .Options;
         await using var context = new ApplicationDbContext(options);
+        await SeedReceiptReferencesAsync(context);
         var inventoryService = new Mock<IInventoryService>();
         inventoryService.Setup(service => service.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"))
             .ReturnsAsync(false);
         var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), inventoryService.Object));
         controller.TempData = Mock.Of<ITempDataDictionary>();
 
-        var result = await controller.CreateReceipt(2, 3, "LOT-FALSE", 12.5m, 4.25m, 4);
+        var result = await controller.CreateReceipt(ReceiptModel(2, 3, "LOT-FALSE", 12.5m, 4.25m, 4));
 
         Assert.IsType<ViewResult>(result);
         Assert.False(controller.ModelState.IsValid);
         Assert.Empty(await context.GoodsReceipts.ToListAsync());
         Assert.Empty(await context.GoodsReceiptLines.ToListAsync());
+        inventoryService.Verify(service => service.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"), Times.Once);
     }
 
     [Fact]
@@ -459,18 +656,20 @@ public class InventoryControllerTests
             .UseInMemoryDatabase($"Inv_Create_Exception_{Guid.NewGuid()}")
             .Options;
         await using var context = new ApplicationDbContext(options);
+        await SeedReceiptReferencesAsync(context);
         var inventoryService = new Mock<IInventoryService>();
         inventoryService.Setup(service => service.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"))
             .ThrowsAsync(new InvalidOperationException("completion failed"));
         var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), inventoryService.Object));
         controller.TempData = Mock.Of<ITempDataDictionary>();
 
-        var result = await controller.CreateReceipt(2, 3, "LOT-ERROR", 12.5m, 4.25m, 4);
+        var result = await controller.CreateReceipt(ReceiptModel(2, 3, "LOT-ERROR", 12.5m, 4.25m, 4));
 
         Assert.IsType<ViewResult>(result);
         Assert.False(controller.ModelState.IsValid);
         Assert.Empty(await context.GoodsReceipts.ToListAsync());
         Assert.Empty(await context.GoodsReceiptLines.ToListAsync());
+        inventoryService.Verify(service => service.CompleteGoodsReceiptWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user"), Times.Once);
     }
     private static T Authenticated<T>(T controller) where T : Controller
     {
@@ -483,5 +682,58 @@ public class InventoryControllerTests
             }
         };
         return controller;
+    }
+
+    private static CreateIssueViewModel IssueModel(
+        (int customerId, int productId, int lotId, int locationId) seeded,
+        decimal qty) => new()
+        {
+            CustomerId = seeded.customerId,
+            Lines =
+            {
+                new IssueLineInput
+                {
+                    ProductId = seeded.productId,
+                    LotId = seeded.lotId,
+                    Qty = qty,
+                    LocationId = seeded.locationId
+                }
+            }
+        };
+
+    private static CreateReceiptViewModel ReceiptModel(
+        int supplierId,
+        int productId,
+        string lotNo,
+        decimal qty,
+        decimal unitPrice,
+        int locationId) => new()
+        {
+            SupplierId = supplierId,
+            Lines =
+            {
+                new ReceiptLineInput
+                {
+                    ProductId = productId,
+                    LotNo = lotNo,
+                    Qty = qty,
+                    UnitPrice = unitPrice,
+                    LocationId = locationId
+                }
+            }
+        };
+
+    private static async Task SeedReceiptReferencesAsync(ApplicationDbContext context)
+    {
+        context.Suppliers.Add(new Supplier { Id = 2, Code = "SUP", Name = "Supplier" });
+        context.Products.Add(new Product { Id = 3, Code = "P", Name = "Product" });
+        context.Locations.Add(new Location
+        {
+            Id = 4,
+            Code = "LOC",
+            Name = "Location",
+            Zone = new Zone { Code = "Z", Name = "Zone" }
+        });
+        await context.SaveChangesAsync();
     }
 }
