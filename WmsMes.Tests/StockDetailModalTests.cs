@@ -52,17 +52,26 @@ public class StockDetailModalTests
         var zone = new Zone { Code = "Z-01", Name = "Khu A", Warehouse = warehouse };
         var location = new Location { Code = "A-01", Name = "Kệ A-01", Zone = zone };
         var lot = new Lot { LotNo = "LOT-01", Product = product };
-        context.StockBalances.Add(new StockBalance
-        {
-            Product = product, Lot = lot, Location = location,
-            QtyAvailable = 8, QtyReserved = 2, QtyOnHold = 1
-        });
+        context.StockBalances.AddRange(
+            new StockBalance
+            {
+                Product = product, Lot = lot, Location = location,
+                QtyAvailable = 8, QtyReserved = 2, QtyOnHold = 1
+            },
+            new StockBalance
+            {
+                Product = product,
+                Lot = new Lot { LotNo = "LOT-OUT", Product = product },
+                Location = new Location { Code = "OUT-01", Name = "Vị trí ngoài cây", ZoneId = 999 },
+                QtyAvailable = 3
+            });
         await context.SaveChangesAsync();
 
         var result = await new WarehouseController(context).Index();
 
         var view = Assert.IsType<ViewResult>(result);
-        var balances = Assert.IsAssignableFrom<IEnumerable<StockBalance>>(view.ViewData["StockBalances"]);
+        var balances = Assert.IsAssignableFrom<IEnumerable<StockBalance>>(view.ViewData["StockBalances"]).ToList();
+        Assert.DoesNotContain(balances, balance => balance.Location!.Code == "OUT-01");
         var balance = Assert.Single(balances);
         Assert.Equal(("A-01", "SKU-01", "LOT-01", 8m, 2m, 1m),
             (balance.Location!.Code, balance.Product!.Code, balance.Lot!.LotNo,

@@ -24,7 +24,14 @@ public class WarehouseController : Controller
             .AsNoTracking()
             .ToListAsync();
 
+        var locationIds = warehouses
+            .SelectMany(warehouse => warehouse.Zones)
+            .SelectMany(zone => zone.Locations)
+            .Select(location => location.Id)
+            .ToList();
+
         ViewData["StockBalances"] = await _context.StockBalances
+            .Where(balance => locationIds.Contains(balance.LocationId))
             .Include(balance => balance.Location)
             .Include(balance => balance.Product)
             .Include(balance => balance.Lot)
