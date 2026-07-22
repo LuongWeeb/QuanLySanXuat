@@ -25,7 +25,9 @@ public class WorkerController : Controller
             .Include(s => s.WorkOrder)
             .ThenInclude(w => w!.Product)
             .Include(s => s.WorkCenter)
-            .Where(s => s.Status != WorkOrderStepStatus.Completed)
+            .Where(s => s.Status != WorkOrderStepStatus.Completed &&
+                        s.WorkOrder != null &&
+                        (s.WorkOrder.Status == WorkOrderStatus.Approved || s.WorkOrder.Status == WorkOrderStatus.InProgress))
             .OrderBy(s => s.WorkOrder!.DueDate)
             .ThenBy(s => s.WorkOrder!.Code)
             .ThenBy(s => s.StepNumber)
