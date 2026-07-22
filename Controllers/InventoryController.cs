@@ -398,8 +398,15 @@ public class InventoryController : Controller
             return;
         }
 
-        _context.GoodsReceipts.Remove(receipt);
-        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        var persistedReceipt = await _context.GoodsReceipts
+            .Include(item => item.Lines)
+            .FirstOrDefaultAsync(item => item.Id == receipt.Id);
+        if (persistedReceipt is not null)
+        {
+            _context.GoodsReceipts.Remove(persistedReceipt);
+            await _context.SaveChangesAsync();
+        }
     }
 
     private async Task RollbackIssueAsync(GoodsIssue issue, IDbContextTransaction? transaction)
@@ -411,8 +418,15 @@ public class InventoryController : Controller
             return;
         }
 
-        _context.GoodsIssues.Remove(issue);
-        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        var persistedIssue = await _context.GoodsIssues
+            .Include(item => item.Lines)
+            .FirstOrDefaultAsync(item => item.Id == issue.Id);
+        if (persistedIssue is not null)
+        {
+            _context.GoodsIssues.Remove(persistedIssue);
+            await _context.SaveChangesAsync();
+        }
     }
 
     private async Task<IActionResult> ReceiptCompletionErrorAsync(CreateReceiptViewModel model, string message)

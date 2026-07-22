@@ -396,6 +396,36 @@ public class InventoryControllerTests
     }
 
     [Fact]
+    public async Task CreateIssue_Post_WithInMemoryRealService_DiscardsPendingChangesWhenLaterLineFails()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Issue_InMemory_Partial_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        var seeded = await SeedIssueStockAsync(context);
+        var controller = Authenticated(new InventoryController(
+            context,
+            Mock.Of<IReportExportService>(),
+            new InventoryService(context)));
+        var model = IssueModel(seeded, 6);
+        model.Lines.Add(new IssueLineInput
+        {
+            ProductId = seeded.productId,
+            LotId = seeded.lotId,
+            Qty = 6,
+            LocationId = seeded.locationId
+        });
+
+        var result = await controller.CreateIssue(model);
+
+        Assert.IsType<ViewResult>(result);
+        context.ChangeTracker.Clear();
+        Assert.Empty(await context.GoodsIssues.ToListAsync());
+        Assert.Empty(await context.GoodsIssueLines.ToListAsync());
+        Assert.Empty(await context.StockTransactions.ToListAsync());
+        Assert.Equal(10, (await context.StockBalances.SingleAsync()).QtyAvailable);
+    }
+
+    [Fact]
     public async Task CompleteGoodsIssue_WithStaleRelationalContext_PreventsOversell()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
