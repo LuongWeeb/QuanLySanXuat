@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Security.Claims;
 using WmsMes.Web.Controllers;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
@@ -40,6 +42,144 @@ public class HomeControllerTests
 
         var metrics = Assert.IsType<DashboardViewModel>(Assert.IsType<OkObjectResult>(result).Value);
         Assert.Equal((2, 2, 38m), (metrics.ActiveWorkOrders, metrics.PendingQcLots, metrics.InventoryVolume));
+    }
+
+    [Fact]
+    public async Task Search_RedirectsToDashboard_WhenQueryIsBlank()
+    {
+        await using var context = CreateContext();
+
+        var result = await Controller(context).Search("   ");
+
+        var redirect = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal(nameof(HomeController.Index), redirect.ActionName);
+    }
+
+    [Fact]
+    public async Task Search_ReturnsTrimmedQueryAndMatchingResultsForEachGroup()
+    {
+        await using var context = CreateContext();
+        var product = new Product { Id = 1, Code = "SKU-MATCH", Name = "Sản phẩm tìm kiếm" };
+        context.Products.Add(product);
+        context.WorkOrders.Add(new WorkOrder
+        {
+            Id = 1, Code = "WO-MATCH", Product = product, Qty = 1, DueDate = DateTime.UtcNow,
+            BomVersion = "1", RoutingVersion = "1"
+        });
+        context.Lots.Add(new Lot { Id = 1, LotNo = "LOT-MATCH", Product = product });
+        context.Locations.Add(new Location { Id = 1, Code = "LOC-MATCH", Name = "Vị trí", ZoneId = 1 });
+        await context.SaveChangesAsync();
+
+        var controller = Controller(context);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.Role, "Manager") }, "Test"))
+            }
+        };
+
+        var result = await controller.Search(" MATCH ");
+
+        var model = Assert.IsType<SearchResultViewModel>(Assert.IsType<ViewResult>(result).Model);
+        Assert.Equal("MATCH", model.Query);
+        Assert.Equal("SKU-MATCH", Assert.Single(model.Products).Code);
+        Assert.Equal("WO-MATCH", Assert.Single(model.WorkOrders).Code);
+        Assert.Equal("LOT-MATCH", Assert.Single(model.Lots).LotNo);
+        Assert.Equal("SKU-MATCH", Assert.Single(model.Lots).Product!.Code);
+        Assert.Equal("LOC-MATCH", Assert.Single(model.Locations).Code);
+    }
+
+    [Fact]
+    public async Task Search_LimitsEachResultGroupToTenRecords()
+    {
+        await using var context = CreateContext();
+        for (var index = 1; index <= 11; index++)
+        {
+            context.Products.Add(new Product { Id = index, Code = $"SKU-MATCH-{index}", Name = "Sản phẩm" });
+            context.WorkOrders.Add(new WorkOrder
+            {
+                Id = index, Code = $"WO-MATCH-{index}", ProductId = index, Qty = 1, DueDate = DateTime.UtcNow,
+                BomVersion = "1", RoutingVersion = "1"
+            });
+            context.Lots.Add(new Lot { Id = index, LotNo = $"LOT-MATCH-{index}", ProductId = index });
+            context.Locations.Add(new Location { Id = index, Code = $"LOC-MATCH-{index}", Name = "Vị trí", ZoneId = 1 });
+        }
+        await context.SaveChangesAsync();
+
+        var controller = Controller(context);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.Role, "Manager") }, "Test"))
+            }
+        };
+
+        var result = await controller.Search("MATCH");
+
+        var model = Assert.IsType<SearchResultViewModel>(Assert.IsType<ViewResult>(result).Model);
+        Assert.Equal(10, model.Products.Count);
+        Assert.Equal(10, model.WorkOrders.Count);
+        Assert.Equal(10, model.Lots.Count);
+        Assert.Equal(10, model.Locations.Count);
+    }
+
+    [Fact]
+    public async Task Search_HidesWorkOrdersFromUsersWithoutProductionRoles()
+    {
+        await using var context = CreateContext();
+        context.WorkOrders.Add(new WorkOrder
+        {
+            Id = 1, Code = "WO-MATCH", ProductId = 1, Qty = 1, DueDate = DateTime.UtcNow,
+            BomVersion = "1", RoutingVersion = "1"
+        });
+        await context.SaveChangesAsync();
+        var controller = Controller(context);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.Role, "Warehouse") }, "Test"))
+            }
+        };
+
+        var result = await controller.Search("MATCH");
+
+        var model = Assert.IsType<SearchResultViewModel>(Assert.IsType<ViewResult>(result).Model);
+        Assert.Empty(model.WorkOrders);
+    }
+
+    [Fact]
+    public void SearchView_GroupsResultsAndLinksToRelevantScreens()
+    {
+        var view = File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Home", "Search.cshtml"));
+
+        Assert.Contains("Sản phẩm", view);
+        Assert.Contains("Lệnh sản xuất", view);
+        Assert.Contains("Lô", view);
+        Assert.Contains("Vị trí", view);
+        Assert.Contains("asp-controller=\"Product\"", view);
+        Assert.Contains("asp-controller=\"WorkOrder\"", view);
+        Assert.Contains("asp-controller=\"Traceability\"", view);
+        Assert.Contains("asp-controller=\"Warehouse\"", view);
+        Assert.Contains("Không tìm thấy kết quả", view);
+    }
+
+    [Fact]
+    public void Layout_RendersGlobalSearchForm()
+    {
+        var layout = File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Shared", "_Layout.cshtml"));
+
+        Assert.Contains("asp-controller=\"Home\" asp-action=\"Search\"", layout);
+        Assert.Contains("name=\"q\"", layout);
+        Assert.Contains("placeholder=\"Tìm SKU, lệnh SX, số lô...\"", layout);
+        Assert.Contains("required", layout);
+        Assert.Contains("Tìm", layout);
+        Assert.Contains("max-width: 250px", layout);
     }
 
     [Fact]
