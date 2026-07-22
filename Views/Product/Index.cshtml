@@ -4,6 +4,7 @@
 @{
     ViewData["Title"] = "Danh mục sản phẩm";
     var uoms = ViewBag.UnitOfMeasures as IEnumerable<UnitOfMeasure> ?? Enumerable.Empty<UnitOfMeasure>();
+    var stockBalances = ViewData["StockBalances"] as IEnumerable<StockBalance> ?? Enumerable.Empty<StockBalance>();
     var canEdit = User.IsInRole("Admin") || User.IsInRole("Manager") || User.IsInRole("Planner");
 }
 
@@ -41,6 +42,7 @@
                     <th class="text-end">Max</th>
                     <th>Lot</th>
                     <th>Trạng thái</th>
+                    <th class="text-end">Tồn kho</th>
                 </tr>
             </thead>
             <tbody>
@@ -59,6 +61,11 @@
                             @(item.IsActive ? "Hoạt động" : "Ngừng")
                         </span>
                     </td>
+                    <td class="text-end">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#productStockModal-@item.Id" aria-label="Xem vị trí tồn kho của @item.Code">
+                            Vị trí tồn
+                        </button>
+                    </td>
                 </tr>
             }
             </tbody>
@@ -72,6 +79,60 @@
         </div>
     }
 </section>
+
+@foreach (var item in Model)
+{
+    var productBalances = stockBalances.Where(balance => balance.ProductId == item.Id).ToList();
+    <div class="modal fade" id="productStockModal-@item.Id" tabindex="-1" aria-labelledby="productStockModalLabel-@item.Id" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title fs-5" id="productStockModalLabel-@item.Id">Vị trí tồn kho: @item.Code</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                </div>
+                <div class="modal-body">
+                    @if (productBalances.Any())
+                    {
+                        <div class="table-responsive">
+                            <table class="table data-table align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Vị trí kho</th>
+                                        <th>Số lô</th>
+                                        <th class="text-end">Khả dụng</th>
+                                        <th class="text-end">Giữ chỗ</th>
+                                        <th class="text-end">Tạm giữ</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                @foreach (var balance in productBalances)
+                                {
+                                    <tr>
+                                        <td><code>@balance.Location?.Code</code></td>
+                                        <td><code>@balance.Lot?.LotNo</code></td>
+                                        <td class="text-end">@balance.QtyAvailable.ToString("N2")</td>
+                                        <td class="text-end">@balance.QtyReserved.ToString("N2")</td>
+                                        <td class="text-end">@balance.QtyOnHold.ToString("N2")</td>
+                                    </tr>
+                                }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="empty-state compact">
+                            <p class="mb-0">Không có tồn kho tại vị trí nào cho sản phẩm này.</p>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Đóng</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @if (canEdit)
 {

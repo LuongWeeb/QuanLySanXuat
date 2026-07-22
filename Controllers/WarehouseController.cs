@@ -24,6 +24,16 @@ public class WarehouseController : Controller
             .AsNoTracking()
             .ToListAsync();
 
+        ViewData["StockBalances"] = await _context.StockBalances
+            .Include(balance => balance.Location)
+            .Include(balance => balance.Product)
+            .Include(balance => balance.Lot)
+            .AsNoTracking()
+            .OrderBy(balance => balance.Location!.Code)
+            .ThenBy(balance => balance.Product!.Code)
+            .ThenBy(balance => balance.Lot!.LotNo)
+            .ToListAsync();
+
         return View(warehouses);
     }
 }

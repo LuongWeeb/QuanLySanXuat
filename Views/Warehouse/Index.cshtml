@@ -1,6 +1,7 @@
 @model IEnumerable<WmsMes.Web.Domain.Entities.Warehouse>
 @{
     ViewData["Title"] = "Cấu trúc kho";
+    var stockBalances = ViewData["StockBalances"] as IEnumerable<WmsMes.Web.Domain.Entities.StockBalance> ?? Enumerable.Empty<WmsMes.Web.Domain.Entities.StockBalance>();
 }
 
 <section class="toolbar-row">
@@ -34,7 +35,59 @@
                 <div class="location-list">
                 @foreach (var location in zone.Locations.OrderBy(location => location.Code))
                 {
-                    <span class="location-chip">@location.Code</span>
+                    var locationBalances = stockBalances.Where(balance => balance.LocationId == location.Id).ToList();
+                    <button type="button" class="location-chip border-0" data-bs-toggle="modal" data-bs-target="#locationStockModal-@location.Id" aria-label="Xem tồn kho tại vị trí @location.Code">@location.Code</button>
+                    <div class="modal fade" id="locationStockModal-@location.Id" tabindex="-1" aria-labelledby="locationStockModalLabel-@location.Id" aria-hidden="true">
+                        <div class="modal-dialog modal-xl modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h2 class="modal-title fs-5" id="locationStockModalLabel-@location.Id">Tồn kho tại vị trí: @location.Code</h2>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                                </div>
+                                <div class="modal-body">
+                                    @if (locationBalances.Any())
+                                    {
+                                        <div class="table-responsive">
+                                            <table class="table data-table align-middle mb-0">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Mã SKU</th>
+                                                        <th>Tên sản phẩm</th>
+                                                        <th>Số lô</th>
+                                                        <th class="text-end">Khả dụng</th>
+                                                        <th class="text-end">Giữ chỗ</th>
+                                                        <th class="text-end">Tạm giữ</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                @foreach (var balance in locationBalances)
+                                                {
+                                                    <tr>
+                                                        <td><code>@balance.Product?.Code</code></td>
+                                                        <td>@balance.Product?.Name</td>
+                                                        <td><code>@balance.Lot?.LotNo</code></td>
+                                                        <td class="text-end">@balance.QtyAvailable.ToString("N2")</td>
+                                                        <td class="text-end">@balance.QtyReserved.ToString("N2")</td>
+                                                        <td class="text-end">@balance.QtyOnHold.ToString("N2")</td>
+                                                    </tr>
+                                                }
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="empty-state compact">
+                                            <p class="mb-0">Không có tồn kho tại vị trí này.</p>
+                                        </div>
+                                    }
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Đóng</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 }
                 </div>
             </section>
