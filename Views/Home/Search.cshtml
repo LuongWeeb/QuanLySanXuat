@@ -6,7 +6,7 @@
 
 <section class="toolbar-row">
     <div>
-        <p class="eyebrow">Global search</p>
+        <p class="eyebrow">Tìm kiếm toàn hệ thống</p>
         <h2>Kết quả cho "@Model.Query"</h2>
     </div>
 </section>
@@ -55,7 +55,7 @@ else
                         {
                             <tr>
                                 <td><code>@workOrder.Code</code></td>
-                                <td><span class="status-pill">@workOrder.Status</span></td>
+                                <td><span class="status-pill">@workOrder.Status.ToVietnameseString()</span></td>
                                 <td class="text-end"><a class="btn btn-sm btn-outline-primary" asp-controller="WorkOrder" asp-action="Details" asp-route-id="@workOrder.Id">Chi tiết</a></td>
                             </tr>
                         }

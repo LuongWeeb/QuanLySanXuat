@@ -34,7 +34,7 @@
                 <tr>
                     <td><code>@bom.Product?.Code</code> - @bom.Product?.Name</td>
                     <td>@bom.Version</td>
-                    <td>@bom.EffectiveDate.ToString("yyyy-MM-dd")</td>
+                    <td>@bom.EffectiveDate.ToVietnameseDate()</td>
                     <td>
                         @if (bom.IsActive)
                         {

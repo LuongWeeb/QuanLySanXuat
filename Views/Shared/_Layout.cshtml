@@ -12,17 +12,17 @@
     <link rel="stylesheet" href="~/WmsMes.Web.styles.css" asp-append-version="true" />
 </head>
 <body class="app-shell">
-    <aside class="app-sidebar" aria-label="Main navigation">
+    <aside class="app-sidebar" aria-label="Điều hướng chính">
         <a class="brand-lockup" asp-controller="Home" asp-action="Index">
             <span class="brand-mark">WM</span>
             <span>
                 <strong>WMS MES</strong>
-                <small>Operations</small>
+                <small>Vận hành</small>
             </span>
         </a>
         <nav class="side-nav">
             <div class="nav-section-title">Tổng quan</div>
-            <a asp-controller="Home" asp-action="Index">Dashboard</a>
+            <a asp-controller="Home" asp-action="Index">Bảng điều khiển</a>
 
             <div class="nav-section-title">Quản lý Kho (WMS)</div>
             <a asp-controller="Inventory" asp-action="Index">Số dư tồn kho</a>
@@ -48,7 +48,7 @@
     <div class="app-main">
         <header class="app-topbar">
             <div>
-                <p class="eyebrow">Foundation phase</p>
+                <p class="eyebrow">Nền tảng vận hành</p>
                 <h1>@ViewData["Title"]</h1>
             </div>
             <div class="topbar-actions">

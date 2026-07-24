@@ -6,7 +6,7 @@
 
 <section class="toolbar-row">
     <div>
-        <p class="eyebrow">Storage map</p>
+        <p class="eyebrow">Sơ đồ kho</p>
         <h2>Kho, khu vực và vị trí</h2>
     </div>
 </section>
@@ -30,7 +30,7 @@
             <section class="zone-node">
                 <div class="zone-heading">
                     <span><code>@zone.Code</code> @zone.Name</span>
-                    <span>@zone.Locations.Count vị trí</span>
+                    <span>@zone.Locations.Count.ToVietnameseNumber() vị trí</span>
                 </div>
                 <div class="location-list">
                 @foreach (var location in zone.Locations.OrderBy(location => location.Code))
@@ -66,9 +66,9 @@
                                                         <td><code>@balance.Product?.Code</code></td>
                                                         <td>@balance.Product?.Name</td>
                                                         <td><code>@balance.Lot?.LotNo</code></td>
-                                                        <td class="text-end">@balance.QtyAvailable.ToString("N2")</td>
-                                                        <td class="text-end">@balance.QtyReserved.ToString("N2")</td>
-                                                        <td class="text-end">@balance.QtyOnHold.ToString("N2")</td>
+                                                        <td class="text-end">@balance.QtyAvailable.ToVietnameseNumber()</td>
+                                                        <td class="text-end">@balance.QtyReserved.ToVietnameseNumber()</td>
+                                                        <td class="text-end">@balance.QtyOnHold.ToVietnameseNumber()</td>
                                                     </tr>
                                                 }
                                                 </tbody>
@@ -101,6 +101,6 @@
 {
     <div class="empty-state">
         <h2>Chưa có dữ liệu kho</h2>
-        <p>Thêm dữ liệu warehouse, zone và location qua migration/seed hoặc màn hình quản trị ở các giai đoạn sau.</p>
+        <p>Thêm dữ liệu kho, khu vực và vị trí bằng dữ liệu khởi tạo hoặc màn hình quản trị ở các giai đoạn sau.</p>
     </div>
 }

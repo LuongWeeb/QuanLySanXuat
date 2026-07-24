@@ -15,7 +15,7 @@ public class DailyProductionLogViewTests
         Assert.Contains("aria-valuemin=\"0\"", view);
         Assert.Contains("aria-valuemax=\"100\"", view);
         Assert.Contains("Trễ hạn sản xuất!", view);
-        Assert.Contains("Còn @daysRemaining ngày", view);
+        Assert.Contains("Còn @daysRemaining.ToVietnameseNumber() ngày", view);
     }
 
     [Fact]
@@ -27,7 +27,7 @@ public class DailyProductionLogViewTests
         Assert.Contains("Math.Clamp", view);
         Assert.Contains("CultureInfo.InvariantCulture", view);
         Assert.Contains("Trễ hạn sản xuất!", view);
-        Assert.Contains("Còn @daysRemaining ngày", view);
+        Assert.Contains("Còn @daysRemaining.ToVietnameseNumber() ngày", view);
         Assert.Contains("Nhật ký sản lượng", view);
         Assert.Contains("table-responsive", view);
         Assert.Contains("OrderByDescending", view);

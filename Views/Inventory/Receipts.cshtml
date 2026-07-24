@@ -41,8 +41,8 @@
                         <td>@receipt.Supplier?.Name</td>
                         <td><code>@line.LotNo</code></td>
                         <td><code>@line.Location?.Code</code></td>
-                        <td class="text-end fw-semibold text-success">+@line.Qty.ToString("N2")</td>
-                        <td>@receipt.ReceiptDate.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td class="text-end fw-semibold text-success">+@line.Qty.ToVietnameseNumber()</td>
+                        <td>@receipt.ReceiptDate.ToVietnameseDateTime()</td>
                     </tr>
                 }
             }

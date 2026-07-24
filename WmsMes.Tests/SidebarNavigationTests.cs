@@ -15,7 +15,7 @@ public class SidebarNavigationTests
         AssertSection(layout, "Quản lý Sản xuất (MES)");
         AssertSection(layout, "Kiểm soát Chất lượng & Truy vết");
 
-        AssertLink(layout, "Home", "Index", "Dashboard");
+        AssertLink(layout, "Home", "Index", "Bảng điều khiển");
         AssertLink(layout, "Inventory", "Index", "Số dư tồn kho");
         AssertLink(layout, "Inventory", "Receipts", "Nhập kho");
         AssertLink(layout, "Inventory", "Issues", "Xuất kho");

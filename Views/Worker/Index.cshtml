@@ -14,12 +14,12 @@
                         <p class="eyebrow mb-1">@step.WorkOrder?.Code</p>
                         <h2>@step.WorkOrder?.Product?.Name</h2>
                     </div>
-                    <span class="status-pill">@step.Status</span>
+                    <span class="status-pill">@step.Status.ToVietnameseString()</span>
                 </div>
                 <dl class="worker-meta">
                     <div>
                         <dt>Công đoạn</dt>
-                        <dd>@step.StepNumber - @step.StepName</dd>
+                        <dd>@step.StepNumber.ToVietnameseNumber() - @step.StepName</dd>
                     </div>
                     <div>
                         <dt>Trạm</dt>

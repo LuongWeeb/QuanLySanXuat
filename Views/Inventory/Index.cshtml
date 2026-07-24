@@ -1,6 +1,6 @@
 @model IEnumerable<WmsMes.Web.Domain.Entities.StockBalance>
 @{
-    ViewData["Title"] = "Tồn kho realtime";
+    ViewData["Title"] = "Tồn kho thực tế";
     var balances = Model.ToList();
     var totalAvailable = balances.Sum(item => item.QtyAvailable);
     var totalReserved = balances.Sum(item => item.QtyReserved);
@@ -9,7 +9,7 @@
 
 <section class="toolbar-row">
     <div>
-        <p class="eyebrow">Realtime inventory</p>
+        <p class="eyebrow">Tồn kho thực tế</p>
         <h2>Tồn kho theo lô và vị trí</h2>
     </div>
     <div class="connection-pill" id="inventoryConnectionState" aria-live="polite">
@@ -18,22 +18,22 @@
     </div>
 </section>
 
-<section class="metric-grid" aria-label="Inventory summary">
+<section class="metric-grid" aria-label="Tóm tắt tồn kho">
     <article class="metric-card">
         <span>Khả dụng</span>
-        <strong>@totalAvailable.ToString("N2")</strong>
+        <strong>@totalAvailable.ToVietnameseNumber()</strong>
     </article>
     <article class="metric-card">
         <span>Giữ chỗ</span>
-        <strong>@totalReserved.ToString("N2")</strong>
+        <strong>@totalReserved.ToVietnameseNumber()</strong>
     </article>
     <article class="metric-card">
         <span>Tạm giữ</span>
-        <strong>@totalOnHold.ToString("N2")</strong>
+        <strong>@totalOnHold.ToVietnameseNumber()</strong>
     </article>
     <article class="metric-card">
         <span>Dòng tồn</span>
-        <strong>@balances.Count.ToString("N0")</strong>
+        <strong>@balances.Count.ToVietnameseNumber()</strong>
     </article>
 </section>
 
@@ -60,15 +60,15 @@
                         <span class="table-subtext">@item.Product?.Name</span>
                     </td>
                     <td><code>@item.Lot?.LotNo</code></td>
-                    <td>@(item.Lot?.ExpiryDate?.ToString("yyyy-MM-dd") ?? "-")</td>
+                    <td>@(item.Lot?.ExpiryDate?.ToVietnameseDate() ?? "-")</td>
                     <td>
                         <code>@item.Location?.Code</code>
                         <span class="table-subtext">@item.Location?.Zone?.Code</span>
                     </td>
-                    <td class="text-end fw-semibold">@item.QtyAvailable.ToString("N2")</td>
-                    <td class="text-end">@item.QtyReserved.ToString("N2")</td>
+                    <td class="text-end fw-semibold">@item.QtyAvailable.ToVietnameseNumber()</td>
+                    <td class="text-end">@item.QtyReserved.ToVietnameseNumber()</td>
                     <td class="text-end">
-                        <span class="hold-value @(item.QtyOnHold > 0 ? "has-hold" : "")">@item.QtyOnHold.ToString("N2")</span>
+                        <span class="hold-value @(item.QtyOnHold > 0 ? "has-hold" : "")">@item.QtyOnHold.ToVietnameseNumber()</span>
                     </td>
                 </tr>
             }
@@ -104,11 +104,11 @@
         });
 
         connection.onreconnecting(() => setConnectionState("Đang nối lại", "is-waiting"));
-        connection.onreconnected(() => setConnectionState("Realtime", "is-live"));
+        connection.onreconnected(() => setConnectionState("Thời gian thực", "is-live"));
         connection.onclose(() => setConnectionState("Mất kết nối", "is-offline"));
 
         connection.start()
-            .then(() => setConnectionState("Realtime", "is-live"))
+            .then(() => setConnectionState("Thời gian thực", "is-live"))
             .catch(() => setConnectionState("Không kết nối", "is-offline"));
     </script>
 }

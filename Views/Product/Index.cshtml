@@ -18,7 +18,7 @@
 
 <section class="toolbar-row">
     <div>
-        <p class="eyebrow">Master data</p>
+        <p class="eyebrow">Dữ liệu danh mục</p>
         <h2>SKU & đơn vị tính</h2>
     </div>
     @if (canEdit)
@@ -38,9 +38,9 @@
                     <th>Tên sản phẩm</th>
                     <th>Loại</th>
                     <th>UOM</th>
-                    <th class="text-end">Min</th>
-                    <th class="text-end">Max</th>
-                    <th>Lot</th>
+                    <th class="text-end">Tồn tối thiểu</th>
+                    <th class="text-end">Tồn tối đa</th>
+                    <th>Lô</th>
                     <th>Trạng thái</th>
                     <th class="text-end">Tồn kho</th>
                 </tr>
@@ -51,10 +51,10 @@
                 <tr>
                     <td><code>@item.Code</code></td>
                     <td>@item.Name</td>
-                    <td>@item.Type</td>
+                    <td>@item.Type.ToVietnameseString()</td>
                     <td>@(item.BaseUom?.Code ?? "-")</td>
-                    <td class="text-end">@item.MinStock.ToString("N2")</td>
-                    <td class="text-end">@item.MaxStock.ToString("N2")</td>
+                    <td class="text-end">@item.MinStock.ToVietnameseNumber()</td>
+                    <td class="text-end">@item.MaxStock.ToVietnameseNumber()</td>
                     <td>@(item.IsLotTracked ? "Có" : "Không")</td>
                     <td>
                         <span class="status-pill @(item.IsActive ? "is-active" : "is-muted")">
@@ -110,9 +110,9 @@
                                     <tr>
                                         <td><code>@balance.Location?.Code</code></td>
                                         <td><code>@balance.Lot?.LotNo</code></td>
-                                        <td class="text-end">@balance.QtyAvailable.ToString("N2")</td>
-                                        <td class="text-end">@balance.QtyReserved.ToString("N2")</td>
-                                        <td class="text-end">@balance.QtyOnHold.ToString("N2")</td>
+                                        <td class="text-end">@balance.QtyAvailable.ToVietnameseNumber()</td>
+                                        <td class="text-end">@balance.QtyReserved.ToVietnameseNumber()</td>
+                                        <td class="text-end">@balance.QtyOnHold.ToVietnameseNumber()</td>
                                     </tr>
                                 }
                                 </tbody>
@@ -157,9 +157,9 @@
                             <div class="col-md-4">
                                 <label class="form-label" for="Type">Loại</label>
                                 <select class="form-select" id="Type" name="Type">
-                                    <option value="@ProductType.RawMaterial">Raw material</option>
-                                    <option value="@ProductType.WIP">WIP</option>
-                                    <option value="@ProductType.FinishedGood">Finished good</option>
+                                    <option value="@ProductType.RawMaterial">@ProductType.RawMaterial.ToVietnameseString()</option>
+                                    <option value="@ProductType.WIP">@ProductType.WIP.ToVietnameseString()</option>
+                                    <option value="@ProductType.FinishedGood">@ProductType.FinishedGood.ToVietnameseString()</option>
                                 </select>
                             </div>
                             <div class="col-md-4">
@@ -172,11 +172,11 @@
                                 </select>
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label" for="MinStock">Min</label>
+                                <label class="form-label" for="MinStock">Tồn tối thiểu</label>
                                 <input class="form-control" id="MinStock" name="MinStock" type="number" min="0" step="0.01" value="0" />
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label" for="MaxStock">Max</label>
+                                <label class="form-label" for="MaxStock">Tồn tối đa</label>
                                 <input class="form-control" id="MaxStock" name="MaxStock" type="number" min="0" step="0.01" value="0" />
                             </div>
                             <div class="col-md-4">
@@ -188,7 +188,7 @@
                             <div class="col-md-4">
                                 <div class="form-check form-switch mt-4">
                                     <input class="form-check-input" id="IsLotTracked" name="IsLotTracked" type="checkbox" value="true" />
-                                    <label class="form-check-label" for="IsLotTracked">Quản lý lot</label>
+                                    <label class="form-check-label" for="IsLotTracked">Quản lý lô</label>
                                 </div>
                             </div>
                             <input type="hidden" name="IsActive" value="true" />

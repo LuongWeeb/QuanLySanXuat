@@ -7,7 +7,7 @@
     var customers = (IEnumerable<Customer>)ViewBag.Customers;
 }
 
-<section class="toolbar-row"><div><p class="eyebrow">Goods Issue</p><h2>Tạo Phiếu Xuất kho mới</h2></div></section>
+<section class="toolbar-row"><div><p class="eyebrow">Phiếu xuất kho</p><h2>Tạo Phiếu Xuất kho mới</h2></div></section>
 
 <div class="ops-panel mt-3">
     <form asp-action="CreateIssue" method="post">
@@ -42,7 +42,7 @@
                                         <option value="@balance.ProductId|@balance.LotId|@balance.LocationId"
                                                 data-product-id="@balance.ProductId" data-lot-id="@balance.LotId" data-location-id="@balance.LocationId"
                                                 selected="@(selected ? "selected" : null)">
-                                            @balance.Product?.Code - @balance.Product?.Name | @balance.Lot?.LotNo | HSD: @(balance.Lot?.ExpiryDate?.ToString("yyyy-MM-dd") ?? "FIFO") | @balance.Location?.Code | Có thể xuất: @balance.QtyAvailable.ToString("N2")
+                                            @balance.Product?.Code - @balance.Product?.Name | @balance.Lot?.LotNo | HSD: @(balance.Lot?.ExpiryDate?.ToVietnameseDate() ?? "FIFO") | @balance.Location?.Code | Có thể xuất: @balance.QtyAvailable.ToVietnameseNumber()
                                         </option>
                                     }
                                 </select>
@@ -80,7 +80,7 @@
                 @foreach (var balance in balances)
                 {
                     <option value="@balance.ProductId|@balance.LotId|@balance.LocationId" data-product-id="@balance.ProductId" data-lot-id="@balance.LotId" data-location-id="@balance.LocationId">
-                        @balance.Product?.Code - @balance.Product?.Name | @balance.Lot?.LotNo | HSD: @(balance.Lot?.ExpiryDate?.ToString("yyyy-MM-dd") ?? "FIFO") | @balance.Location?.Code | Có thể xuất: @balance.QtyAvailable.ToString("N2")
+                        @balance.Product?.Code - @balance.Product?.Name | @balance.Lot?.LotNo | HSD: @(balance.Lot?.ExpiryDate?.ToVietnameseDate() ?? "FIFO") | @balance.Location?.Code | Có thể xuất: @balance.QtyAvailable.ToVietnameseNumber()
                     </option>
                 }
             </select>

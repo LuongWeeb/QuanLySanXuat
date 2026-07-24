@@ -203,15 +203,15 @@ public class HomeControllerTests
 
         Assert.Contains("aria-label=\"Chỉ số OEE Sản xuất\"", view);
         Assert.Contains("id=\"overallOee\"", view);
-        Assert.Contains("@Model.OverallOeePercent%", view);
+        Assert.Contains("@Model.OverallOeePercent.ToVietnameseNumber(\"N1\")%", view);
         Assert.Contains("id=\"oeeAvailability\"", view);
-        Assert.Contains("@Model.OeeAvailabilityPercent%", view);
+        Assert.Contains("@Model.OeeAvailabilityPercent.ToVietnameseNumber(\"N1\")%", view);
         Assert.Contains("id=\"oeePerformance\"", view);
-        Assert.Contains("@Model.OeePerformancePercent%", view);
+        Assert.Contains("@Model.OeePerformancePercent.ToVietnameseNumber(\"N1\")%", view);
         Assert.Contains("id=\"oeeQuality\"", view);
-        Assert.Contains("@Model.OeeQualityPercent%", view);
+        Assert.Contains("@Model.OeeQualityPercent.ToVietnameseNumber(\"N1\")%", view);
         Assert.Contains("id=\"lowStockAlertCount\"", view);
-        Assert.Contains("@Model.LowStockAlertCount", view);
+        Assert.Contains("@Model.LowStockAlertCount.ToVietnameseNumber()", view);
     }
 
     [Fact]
@@ -222,9 +222,9 @@ public class HomeControllerTests
         Assert.Contains("id=\"productionChart\"", view);
         Assert.Contains("aria-label=\"Sản lượng sản xuất 7 ngày gần nhất\"", view);
         Assert.Contains("id=\"inventoryZoneChart\"", view);
-        Assert.Contains("aria-label=\"Phân bổ tồn kho theo Zone\"", view);
+        Assert.Contains("aria-label=\"Phân bổ tồn kho theo khu vực\"", view);
         Assert.Contains("id=\"qualityChart\"", view);
-        Assert.Contains("aria-label=\"Phân bổ chất lượng Pass, Hold và Quarantine\"", view);
+        Assert.Contains("aria-label=\"Phân bổ chất lượng Đạt, Tạm giữ và Cách ly\"", view);
     }
 
     [Fact]

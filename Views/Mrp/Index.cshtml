@@ -1,9 +1,13 @@
 @model IEnumerable<WmsMes.Web.DTOs.MrpResultDto>?
 @using WmsMes.Web.Domain.Entities
+@using System.Globalization
 @{
     ViewData["Title"] = "Lập kế hoạch MRP";
     var products = ViewData["Products"] as IEnumerable<Product> ?? Enumerable.Empty<Product>();
     var selectedProductId = ViewData["ProductId"]?.ToString();
+    var qtyValue = ViewData["Qty"] is decimal qty
+        ? qty.ToString(CultureInfo.InvariantCulture)
+        : string.Empty;
 }
 
 <section class="ops-panel">
@@ -22,7 +26,7 @@
         </div>
         <div class="col-md-4">
             <label class="form-label" for="qty">Số lượng kế hoạch</label>
-            <input id="qty" type="number" name="qty" class="form-control" min="0.01" step="0.01" value="@ViewData["Qty"]" required aria-describedby="qty-validation" />
+            <input id="qty" type="number" name="qty" class="form-control" min="0.01" step="0.01" value="@qtyValue" required aria-describedby="qty-validation" />
             <span id="qty-validation" class="text-danger">@Html.ValidationMessage("qty")</span>
         </div>
         <div class="col-md-3">
@@ -51,10 +55,10 @@
                         <tr>
                             <td class="fw-semibold">@item.ComponentCode</td>
                             <td>@item.ComponentName</td>
-                            <td class="text-end">@item.GrossDemand.ToString("N2")</td>
-                            <td class="text-end">@item.StockAvailable.ToString("N2")</td>
+                            <td class="text-end">@item.GrossDemand.ToVietnameseNumber()</td>
+                            <td class="text-end">@item.StockAvailable.ToVietnameseNumber()</td>
                             <td class="text-end @(item.NetDemand > 0 ? "text-danger fw-bold" : "text-success fw-semibold")">
-                                @item.NetDemand.ToString("N2")
+                                @item.NetDemand.ToVietnameseNumber()
                             </td>
                         </tr>
                     }

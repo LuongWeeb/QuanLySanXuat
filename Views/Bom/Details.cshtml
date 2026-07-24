@@ -5,7 +5,7 @@
 
 <section class="toolbar-row">
     <div>
-        <p class="eyebrow">Bill of Materials</p>
+        <p class="eyebrow">Định mức vật tư</p>
         <h2>BOM @Model.Version</h2>
     </div>
     <a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a>
@@ -18,7 +18,7 @@
         <dt class="col-sm-4 col-lg-3">Phiên bản</dt>
         <dd class="col-sm-8 col-lg-9">@Model.Version</dd>
         <dt class="col-sm-4 col-lg-3">Ngày hiệu lực</dt>
-        <dd class="col-sm-8 col-lg-9">@Model.EffectiveDate.ToString("yyyy-MM-dd")</dd>
+        <dd class="col-sm-8 col-lg-9">@Model.EffectiveDate.ToVietnameseDate()</dd>
         <dt class="col-sm-4 col-lg-3">Trạng thái</dt>
         <dd class="col-sm-8 col-lg-9">
             <span class="badge @(Model.IsActive ? "bg-success" : "bg-secondary")">
@@ -48,8 +48,8 @@
                 <tr>
                     <td><code>@item.ComponentProduct?.Code</code></td>
                     <td>@item.ComponentProduct?.Name</td>
-                    <td class="text-end fw-semibold">@item.QtyPer.ToString("N4")</td>
-                    <td class="text-end">@item.ScrapPercent.ToString("N2")</td>
+                    <td class="text-end fw-semibold">@item.QtyPer.ToVietnameseNumber("N4")</td>
+                    <td class="text-end">@item.ScrapPercent.ToVietnameseNumber()</td>
                 </tr>
             }
             @if (!Model.Items.Any())
