@@ -30,7 +30,7 @@ public class SidebarNavigationTests
     }
 
     [Fact]
-    public void Layout_RestrictsProductionPlanningLinksToProductionManagementRoles()
+    public void Layout_RestrictsBomButKeepsProductIndexOutsideProductionManagementRoles()
     {
         var layoutPath = Path.Combine(FindRepositoryRoot(), "Views", "Shared", "_Layout.cshtml");
         var layout = File.ReadAllText(layoutPath);
@@ -43,8 +43,9 @@ public class SidebarNavigationTests
         var links = match.Groups["links"].Value;
         AssertLink(links, "WorkOrder", "Index", "Lệnh sản xuất");
         AssertLink(links, "Mrp", "Index", "Lập kế hoạch MRP");
-        AssertLink(links, "Product", "Index", "Sản phẩm (SKU)");
         AssertLink(links, "Bom", "Index", "Định mức vật tư (BOM)");
+        Assert.DoesNotContain("asp-controller=\"Product\"", links, StringComparison.OrdinalIgnoreCase);
+        AssertLink(layout, "Product", "Index", "Sản phẩm (SKU)");
     }
 
     private static void AssertSection(string layout, string title)
