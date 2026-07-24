@@ -1,11 +1,14 @@
 using System.ComponentModel.DataAnnotations;
+using System.Data.Common;
 using System.Reflection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
 using WmsMes.Web.Controllers;
 using WmsMes.Web.Data;
@@ -376,6 +379,55 @@ public class BomControllerTests
         Assert.True(targetRead > transactionStart, "Target activation state must be read inside the serializable transaction.");
     }
 
+    [Theory]
+    [InlineData(1205)]
+    [InlineData(1222)]
+    [InlineData(3960)]
+    public async Task ToggleActive_WhenSqlConflictAlreadyCompletedRollback_ReturnsVietnameseFeedback(
+        int errorNumber)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var setupOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        int targetId;
+        await using (var setup = new ApplicationDbContext(setupOptions))
+        {
+            await setup.Database.EnsureCreatedAsync();
+            var product = Product("FG-CONFLICT", ProductType.FinishedGood);
+            product.BaseUom = new UnitOfMeasure { Code = "EA", Name = "Each" };
+            var target = Bom(product, "V1", new DateTime(2026, 8, 1));
+            setup.BOMs.Add(target);
+            await setup.SaveChangesAsync();
+            targetId = target.Id;
+        }
+
+        var failingOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(
+                new ThrowSqlExceptionOnBomReadInterceptor(CreateSqlException(errorNumber)),
+                new ThrowWhenRollingBackCompletedTransactionInterceptor())
+            .Options;
+        await using (var failing = new ApplicationDbContext(failingOptions))
+        {
+            var controller = Controller(failing);
+
+            var result = await controller.ToggleActive(targetId);
+
+            Assert.Equal(
+                nameof(BomController.Index),
+                Assert.IsType<RedirectToActionResult>(result).ActionName);
+            Assert.Contains(
+                "xung đột",
+                controller.TempData["StatusMessage"]!.ToString(),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        await using var verification = new ApplicationDbContext(setupOptions);
+        Assert.False((await verification.BOMs.FindAsync(targetId))!.IsActive);
+    }
+
     [Fact]
     public async Task ToggleActive_WhenMissing_ReturnsNotFound()
     {
@@ -533,6 +585,69 @@ public class BomControllerTests
         };
         controller.TempData = new TempDataDictionary(controller.HttpContext, Mock.Of<ITempDataProvider>());
         return controller;
+    }
+
+    private static SqlException CreateSqlException(int number)
+    {
+        var error = (SqlError)typeof(SqlError)
+            .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Single(constructor => constructor.GetParameters().Length == 9)
+            .Invoke(
+            [
+                number,
+                (byte)0,
+                (byte)0,
+                "test-server",
+                $"SQL failure {number}",
+                "test-procedure",
+                0,
+                (uint)0,
+                null!
+            ]);
+        var errors = (SqlErrorCollection)Activator.CreateInstance(
+            typeof(SqlErrorCollection),
+            nonPublic: true)!;
+        typeof(SqlErrorCollection)
+            .GetMethod("Add", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(errors, [error]);
+
+        return (SqlException)typeof(SqlException)
+            .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Single(constructor => constructor.GetParameters().Length == 4)
+            .Invoke(["SQL BOM conflict", errors, null!, Guid.NewGuid()]);
+    }
+
+    private sealed class ThrowSqlExceptionOnBomReadInterceptor(SqlException exception)
+        : DbCommandInterceptor
+    {
+        private bool _hasThrown;
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_hasThrown &&
+                command.CommandText.Contains("BOMs", StringComparison.OrdinalIgnoreCase))
+            {
+                _hasThrown = true;
+                throw exception;
+            }
+
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class ThrowWhenRollingBackCompletedTransactionInterceptor
+        : DbTransactionInterceptor
+    {
+        public override ValueTask<InterceptionResult> TransactionRollingBackAsync(
+            DbTransaction transaction,
+            TransactionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The transaction has completed; it is no longer usable.");
     }
 
     private static Product Product(

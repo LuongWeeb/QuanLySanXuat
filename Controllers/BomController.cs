@@ -1,7 +1,9 @@
 using System.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -12,6 +14,16 @@ namespace WmsMes.Web.Controllers;
 [Authorize(Roles = "Admin,Planner,Manager")]
 public class BomController : Controller
 {
+    private static readonly HashSet<int> BomConcurrencyConflictSqlErrorNumbers =
+    [
+        1205,
+        1222,
+        3960,
+        41302,
+        41305,
+        41325
+    ];
+
     private readonly ApplicationDbContext _context;
 
     public BomController(ApplicationDbContext context)
@@ -174,22 +186,26 @@ public class BomController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ToggleActive(int id)
     {
-        await using var transaction = _context.Database.IsRelational()
-            ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable)
-            : null;
-
-        var bom = await _context.BOMs
-            .Include(x => x.Items)
-            .SingleOrDefaultAsync(x => x.Id == id);
-        if (bom is null)
-        {
-            if (transaction is not null)
-                await transaction.RollbackAsync();
-            return NotFound();
-        }
+        IDbContextTransaction? transaction = null;
+        BOM? bom = null;
 
         try
         {
+            if (_context.Database.IsRelational())
+            {
+                transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+            }
+
+            bom = await _context.BOMs
+                .Include(x => x.Items)
+                .SingleOrDefaultAsync(x => x.Id == id);
+            if (bom is null)
+            {
+                if (transaction is not null)
+                    await transaction.RollbackAsync();
+                return NotFound();
+            }
+
             if (bom.IsActive)
             {
                 bom.IsActive = false;
@@ -243,12 +259,11 @@ public class BomController : Controller
         }
         catch (DbUpdateException)
         {
-            if (transaction is not null)
-                await transaction.RollbackAsync();
-            _context.ChangeTracker.Clear();
-            TempData["StatusMessage"] =
-                "Không thể cập nhật trạng thái BOM do xung đột dữ liệu. Vui lòng thử lại.";
-            return RedirectToAction(nameof(Index));
+            return await BomConflictResultAsync(transaction);
+        }
+        catch (Exception exception) when (IsBomConcurrencyConflict(exception))
+        {
+            return await BomConflictResultAsync(transaction);
         }
         catch
         {
@@ -257,11 +272,50 @@ public class BomController : Controller
             _context.ChangeTracker.Clear();
             throw;
         }
+        finally
+        {
+            if (transaction is not null)
+                await transaction.DisposeAsync();
+        }
 
-        TempData["StatusMessage"] = bom.IsActive
+        TempData["StatusMessage"] = bom!.IsActive
             ? $"Đã kích hoạt BOM {bom.Version}."
             : $"Đã ngừng kích hoạt BOM {bom.Version}.";
         return RedirectToAction(nameof(Index));
+    }
+
+    private async Task<IActionResult> BomConflictResultAsync(
+        IDbContextTransaction? transaction)
+    {
+        if (transaction is not null)
+        {
+            try
+            {
+                await transaction.RollbackAsync();
+            }
+            catch
+            {
+                // SQL Server already rolls back a deadlock victim; a second
+                // rollback may report that the transaction is completed.
+            }
+        }
+        _context.ChangeTracker.Clear();
+        TempData["StatusMessage"] =
+            "Không thể cập nhật trạng thái BOM do xung đột dữ liệu. Vui lòng thử lại.";
+        return RedirectToAction(nameof(Index));
+    }
+
+    private static bool IsBomConcurrencyConflict(Exception exception)
+    {
+        if (exception is SqlException sqlException)
+        {
+            return sqlException.Errors
+                .Cast<SqlError>()
+                .Any(error => BomConcurrencyConflictSqlErrorNumbers.Contains(error.Number));
+        }
+
+        return exception.InnerException is not null &&
+            IsBomConcurrencyConflict(exception.InnerException);
     }
 
     private static bool HasReachableCycle(
