@@ -178,6 +178,45 @@ public class InventoryControllerTests
     }
 
     [Fact]
+    public async Task CreateIssue_Post_ProtectsReservedStockAndReportsRemainingAvailableQuantity()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Issue_Reserved_{Guid.NewGuid()}").Options;
+        await using var context = new ApplicationDbContext(options);
+        var seeded = await SeedIssueStockAsync(context);
+        var balance = await context.StockBalances.SingleAsync();
+        balance.QtyAvailable = 5;
+        balance.QtyReserved = 10;
+        await context.SaveChangesAsync();
+        var service = new Mock<IInventoryService>();
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
+        var model = IssueModel(seeded, 1);
+        model.Lines.Add(new IssueLineInput
+        {
+            ProductId = seeded.productId,
+            LotId = seeded.lotId,
+            Qty = 6,
+            LocationId = seeded.locationId
+        });
+
+        var result = await controller.CreateIssue(model);
+
+        var view = Assert.IsType<ViewResult>(result);
+        Assert.Same(model, view.Model);
+        var error = Assert.Single(controller.ModelState["Lines[1].Qty"]!.Errors);
+        Assert.Equal(
+            "Lô hàng tại vị trí đã chọn không đủ số lượng khả dụng để xuất (Chỉ còn 5.00). Số lượng giữ chỗ đang được bảo vệ.",
+            error.ErrorMessage);
+        Assert.Single(Assert.IsAssignableFrom<IEnumerable<StockBalance>>(controller.ViewBag.AvailableBalances));
+        Assert.Empty(await context.GoodsIssues.ToListAsync());
+        service.Verify(item => item.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        context.ChangeTracker.Clear();
+        var unchangedBalance = await context.StockBalances.SingleAsync();
+        Assert.Equal(5, unchangedBalance.QtyAvailable);
+        Assert.Equal(10, unchangedBalance.QtyReserved);
+    }
+
+    [Fact]
     public async Task CreateIssue_Post_WithoutLines_RedisplaysOneBlankLine()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

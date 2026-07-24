@@ -180,7 +180,10 @@ public class InventoryController : Controller
                     .FirstOrDefaultAsync();
                 if (qtyAvailable is null || qtyAvailable < line.Qty)
                 {
-                    ModelState.AddModelError($"{keyPrefix}.{nameof(line.Qty)}", "Số lượng xuất vượt quá tồn kho khả dụng của lô tại vị trí đã chọn.");
+                    var available = qtyAvailable ?? 0m;
+                    ModelState.AddModelError(
+                        $"{keyPrefix}.{nameof(line.Qty)}",
+                        $"Lô hàng tại vị trí đã chọn không đủ số lượng khả dụng để xuất (Chỉ còn {available:N2}). Số lượng giữ chỗ đang được bảo vệ.");
                 }
             }
         }
