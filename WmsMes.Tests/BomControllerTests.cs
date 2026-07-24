@@ -232,6 +232,49 @@ public class BomControllerTests
     }
 
     [Fact]
+    public async Task CreatePost_RejectsDuplicateComponentsWithIndexedErrors()
+    {
+        await using var context = new ApplicationDbContext(
+            Options($"BOM_DuplicateComponents_{Guid.NewGuid()}"));
+        var parent = Product("FG", ProductType.FinishedGood);
+        var component = Product("RM", ProductType.RawMaterial, manufactured: false);
+        context.Products.AddRange(parent, component);
+        await context.SaveChangesAsync();
+        var controller = Controller(context);
+
+        var result = await controller.Create(new BomCreateInputModel
+        {
+            ProductId = parent.Id,
+            Version = "V1",
+            EffectiveDate = new DateTime(2026, 7, 24),
+            Items =
+            [
+                new BomItemInputModel
+                {
+                    ComponentProductId = component.Id,
+                    QtyPer = 1,
+                    ScrapPercent = 0
+                },
+                new BomItemInputModel
+                {
+                    ComponentProductId = component.Id,
+                    QtyPer = 2,
+                    ScrapPercent = 0
+                }
+            ]
+        });
+
+        Assert.IsType<ViewResult>(result);
+        foreach (var index in new[] { 0, 1 })
+        {
+            var error = Assert.Single(
+                controller.ModelState[$"Items[{index}].ComponentProductId"]!.Errors);
+            Assert.Contains("trùng", error.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        }
+        Assert.Empty(context.BOMs);
+    }
+
+    [Fact]
     public async Task CreatePost_RejectsDuplicateProductVersion()
     {
         await using var context = new ApplicationDbContext(
@@ -267,6 +310,75 @@ public class BomControllerTests
             controller.ModelState[nameof(BomCreateInputModel.Version)]!.Errors);
         Assert.Contains("đã tồn tại", error.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Single(context.BOMs);
+    }
+
+    [Fact]
+    public async Task CreatePost_WhenConcurrentWriterWinsVersionRace_ReturnsKeyedValidation()
+    {
+        var database = $"file:bom-create-race-{Guid.NewGuid():N}?mode=memory&cache=shared";
+        var connectionString = $"Data Source={database}";
+        await using var keepAlive = new SqliteConnection(connectionString);
+        await keepAlive.OpenAsync();
+        var setupOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        int parentId;
+        int componentId;
+        await using (var setup = new ApplicationDbContext(setupOptions))
+        {
+            await setup.Database.EnsureCreatedAsync();
+            var uom = new UnitOfMeasure { Code = "EA", Name = "Each" };
+            var parent = Product("FG-RACE", ProductType.FinishedGood);
+            var component = Product("RM-RACE", ProductType.RawMaterial, manufactured: false);
+            parent.BaseUom = component.BaseUom = uom;
+            setup.Products.AddRange(parent, component);
+            await setup.SaveChangesAsync();
+            parentId = parent.Id;
+            componentId = component.Id;
+        }
+
+        var raceOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connectionString)
+            .AddInterceptors(new InsertCompetingBomBeforeTransactionInterceptor(
+                connectionString,
+                parentId,
+                "V-RACE"))
+            .Options;
+        await using (var failing = new ApplicationDbContext(raceOptions))
+        {
+            var controller = Controller(failing);
+            var input = new BomCreateInputModel
+            {
+                ProductId = parentId,
+                Version = " V-RACE ",
+                EffectiveDate = new DateTime(2026, 8, 1),
+                Items =
+                [
+                    new BomItemInputModel
+                    {
+                        ComponentProductId = componentId,
+                        QtyPer = 1,
+                        ScrapPercent = 0
+                    }
+                ]
+            };
+
+            var result = await controller.Create(input);
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Same(input, view.Model);
+            var error = Assert.Single(
+                controller.ModelState[nameof(BomCreateInputModel.Version)]!.Errors);
+            Assert.Contains("đã tồn tại", error.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(view.ViewData["ParentProducts"]);
+            Assert.NotNull(view.ViewData["ComponentProducts"]);
+            Assert.Empty(failing.ChangeTracker.Entries());
+        }
+
+        await using var verification = new ApplicationDbContext(setupOptions);
+        var winner = Assert.Single(await verification.BOMs.AsNoTracking().ToListAsync());
+        Assert.Equal("V-RACE", winner.Version);
+        Assert.Empty(await verification.BOMItems.AsNoTracking().ToListAsync());
     }
 
     [Fact]
@@ -648,6 +760,37 @@ public class BomControllerTests
             InterceptionResult result,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("The transaction has completed; it is no longer usable.");
+    }
+
+    private sealed class InsertCompetingBomBeforeTransactionInterceptor(
+        string connectionString,
+        int productId,
+        string version) : DbTransactionInterceptor
+    {
+        private bool _inserted;
+
+        public override async ValueTask<InterceptionResult<DbTransaction>> TransactionStartingAsync(
+            DbConnection connection,
+            TransactionStartingEventData eventData,
+            InterceptionResult<DbTransaction> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_inserted)
+                return result;
+
+            _inserted = true;
+            await using var competitor = new SqliteConnection(connectionString);
+            await competitor.OpenAsync(cancellationToken);
+            await using var command = competitor.CreateCommand();
+            command.CommandText =
+                """INSERT INTO "BOMs" ("EffectiveDate", "IsActive", "ProductId", "Version") VALUES ($date, 0, $productId, $version);""";
+            command.Parameters.AddWithValue("$date", new DateTime(2026, 7, 31));
+            command.Parameters.AddWithValue("$productId", productId);
+            command.Parameters.AddWithValue("$version", version);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+
+            return result;
+        }
     }
 
     private static Product Product(

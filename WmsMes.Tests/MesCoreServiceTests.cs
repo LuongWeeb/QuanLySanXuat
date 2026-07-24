@@ -90,6 +90,39 @@ public class MesCoreServiceTests
     }
 
     [Fact]
+    public async Task CalculateRequirementsAsync_AggregatesLegacyDuplicateComponentsBeforeSubtractingStock()
+    {
+        await using var context = CreateContext();
+        await SeedCommonDataAsync(context);
+        context.BOMs.Add(new BOM
+        {
+            ProductId = 1,
+            Version = "LEGACY",
+            IsActive = true,
+            Items =
+            {
+                new BOMItem { ComponentProductId = 2, QtyPer = 5m, ScrapPercent = 0m },
+                new BOMItem { ComponentProductId = 2, QtyPer = 5m, ScrapPercent = 0m }
+            }
+        });
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 2,
+            LotId = 10,
+            LocationId = 77,
+            QtyAvailable = 8m
+        });
+        await context.SaveChangesAsync();
+
+        var result = Assert.Single(
+            await new MrpService(context).CalculateRequirementsAsync(1, 1m));
+
+        Assert.Equal(10m, result.GrossDemand);
+        Assert.Equal(8m, result.StockAvailable);
+        Assert.Equal(2m, result.NetDemand);
+    }
+
+    [Fact]
     public async Task ApproveWorkOrderAsync_ReservesMaterialByFefoThenFifoAndCreatesRoutingSteps()
     {
         await using var context = CreateContext();

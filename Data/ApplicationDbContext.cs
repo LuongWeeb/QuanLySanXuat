@@ -334,6 +334,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasForeignKey(i => i.ComponentProductId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.Entity<BOMItem>()
+            .HasIndex(item => new { item.BomId, item.ComponentProductId })
+            .IsUnique()
+            .HasDatabaseName("UX_BOMItems_BomId_ComponentProductId");
+
         builder.Entity<Routing>()
             .HasMany(r => r.Steps)
             .WithOne(s => s.Routing)

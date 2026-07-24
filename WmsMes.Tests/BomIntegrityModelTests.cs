@@ -31,6 +31,26 @@ public class BomIntegrityModelTests
     }
 
     [Fact]
+    public void Model_EnforcesUniqueComponentPerBom()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"BomItemIntegrity_{Guid.NewGuid()}")
+            .Options;
+        using var context = new ApplicationDbContext(options);
+        var itemType = context.Model.FindEntityType(typeof(BOMItem));
+        Assert.NotNull(itemType);
+
+        var componentIndex = Assert.Single(itemType!.GetIndexes().Where(index =>
+            index.Properties.Select(property => property.Name)
+                .SequenceEqual([nameof(BOMItem.BomId), nameof(BOMItem.ComponentProductId)])));
+
+        Assert.True(componentIndex.IsUnique);
+        Assert.Equal(
+            "UX_BOMItems_BomId_ComponentProductId",
+            componentIndex.GetDatabaseName());
+    }
+
+    [Fact]
     public async Task Sqlite_RejectsDuplicateProductVersionFromAlternateWriter()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -83,6 +103,37 @@ public class BomIntegrityModelTests
     }
 
     [Fact]
+    public async Task Sqlite_RejectsDuplicateComponentRowsInSameBom()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var parent = Product("FG");
+        var component = Product("RM");
+        component.Type = ProductType.RawMaterial;
+        component.IsManufactured = false;
+        context.Products.AddRange(parent, component);
+        await context.SaveChangesAsync();
+        context.BOMs.Add(new BOM
+        {
+            ProductId = parent.Id,
+            Version = "V1",
+            EffectiveDate = new DateTime(2026, 8, 1),
+            Items =
+            [
+                new BOMItem { ComponentProductId = component.Id, QtyPer = 1 },
+                new BOMItem { ComponentProductId = component.Id, QtyPer = 2 }
+            ]
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
+    }
+
+    [Fact]
     public void EnforceBomIntegrityMigration_ContainsOnlyBomIndexesAndNoCycleCountSchema()
     {
         var root = FindRepositoryRoot();
@@ -117,6 +168,33 @@ public class BomIntegrityModelTests
             "CycleCount",
             snapshot,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void EnforceUniqueBomComponentsMigration_IsScopedAndCycleCountFree()
+    {
+        var root = FindRepositoryRoot();
+        var migrationPaths = Directory.GetFiles(
+            Path.Combine(root, "Data", "Migrations"),
+            "*_EnforceUniqueBomComponents.cs",
+            SearchOption.TopDirectoryOnly);
+        var migrationPath = Assert.Single(migrationPaths);
+        var migration = File.ReadAllText(migrationPath);
+
+        Assert.Contains("UX_BOMItems_BomId_ComponentProductId", migration);
+        Assert.DoesNotContain("CycleCount", migration, StringComparison.OrdinalIgnoreCase);
+
+        var designer = File.ReadAllText(Path.ChangeExtension(migrationPath, ".Designer.cs"));
+        Assert.Contains("UX_BOMItems_BomId_ComponentProductId", designer);
+        Assert.DoesNotContain("CycleCount", designer, StringComparison.OrdinalIgnoreCase);
+
+        var snapshot = File.ReadAllText(Path.Combine(
+            root,
+            "Data",
+            "Migrations",
+            "ApplicationDbContextModelSnapshot.cs"));
+        Assert.Contains("UX_BOMItems_BomId_ComponentProductId", snapshot);
+        Assert.DoesNotContain("CycleCount", snapshot, StringComparison.OrdinalIgnoreCase);
     }
 
     private static Product Product(string code) =>

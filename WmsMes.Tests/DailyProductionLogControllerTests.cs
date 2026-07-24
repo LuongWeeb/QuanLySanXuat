@@ -1,10 +1,12 @@
 using System.ComponentModel.DataAnnotations;
+using System.Data.Common;
 using System.Reflection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Moq;
 using WmsMes.Web.Controllers;
@@ -193,6 +195,35 @@ public class DailyProductionLogControllerTests
         Assert.Contains("Không thể", controller.TempData["StatusMessage"]!.ToString());
     }
 
+    [Fact]
+    public async Task AddDailyLog_WhenFailureAlreadyCompletedTransaction_PreservesLocalizedFailure()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(new ThrowWhenRollingBackCompletedTransactionInterceptor())
+            .Options;
+        await using var context = new FailAfterSaveDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var order = await AddOrderAsync(context, WorkOrderStatus.InProgress);
+        context.FailAfterSave = true;
+        var controller = Controller(context);
+
+        var result = await InvokeAddDailyLogAsync(
+            controller, order.Id, DateTime.Today, 2m, "deadlock rollback");
+
+        Assert.Equal(
+            nameof(WorkOrderController.Details),
+            Assert.IsType<RedirectToActionResult>(result).ActionName);
+        Assert.Contains(
+            "Không thể",
+            controller.TempData["StatusMessage"]!.ToString(),
+            StringComparison.OrdinalIgnoreCase);
+        await using var verification = new ApplicationDbContext(options);
+        Assert.Empty(await verification.DailyProductionLogs.AsNoTracking().ToListAsync());
+    }
+
     private static async Task<IActionResult> InvokeAddDailyLogAsync(
         WorkOrderController controller,
         int id,
@@ -302,5 +333,16 @@ public class DailyProductionLogControllerTests
                 throw new InvalidOperationException("Injected failure after database write.");
             return result;
         }
+    }
+
+    private sealed class ThrowWhenRollingBackCompletedTransactionInterceptor
+        : DbTransactionInterceptor
+    {
+        public override ValueTask<InterceptionResult> TransactionRollingBackAsync(
+            DbTransaction transaction,
+            TransactionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The transaction has completed; it is no longer usable.");
     }
 }

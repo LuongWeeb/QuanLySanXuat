@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using WmsMes.Web.Data;
+using WmsMes.Web.Domain.Common;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.DTOs;
@@ -187,7 +188,7 @@ public class InventoryController : Controller
                     var available = qtyAvailable ?? 0m;
                     ModelState.AddModelError(
                         $"{keyPrefix}.{nameof(line.Qty)}",
-                        $"Lô hàng tại vị trí đã chọn không đủ số lượng khả dụng để xuất (Chỉ còn {available:N2}). Số lượng giữ chỗ đang được bảo vệ.");
+                        $"Lô hàng tại vị trí đã chọn không đủ số lượng khả dụng để xuất (Chỉ còn {available.ToVietnameseNumber()}). Số lượng giữ chỗ đang được bảo vệ.");
                 }
             }
         }
@@ -238,7 +239,7 @@ public class InventoryController : Controller
 
                 ModelState.AddModelError(
                     $"Lines[{item.Index}].{nameof(item.Line.Qty)}",
-                    $"Tổng số lượng yêu cầu cho cùng lô và vị trí là {requestedQty:N2}, vượt quá số lượng khả dụng {qtyAvailable:N2}.");
+                    $"Tổng số lượng yêu cầu cho cùng lô và vị trí là {requestedQty.ToVietnameseNumber()}, vượt quá số lượng khả dụng {qtyAvailable.ToVietnameseNumber()}.");
             }
         }
 
@@ -293,7 +294,8 @@ public class InventoryController : Controller
 
             await NotifyAfterCommitAsync();
 
-            TempData["StatusMessage"] = $"Đã xuất kho {model.Lines.Sum(line => line.Qty):N2} thành công.";
+            TempData["StatusMessage"] =
+                $"Đã xuất kho {model.Lines.Sum(line => line.Qty).ToVietnameseNumber()} thành công.";
             return RedirectToAction(nameof(Issues));
         }
         catch (Exception)

@@ -99,6 +99,19 @@ public class BomController : Controller
             input.Items.Add(new BomItemInputModel());
         }
 
+        foreach (var duplicateGroup in input.Items
+            .Select((item, index) => new { Item = item, Index = index })
+            .GroupBy(entry => entry.Item.ComponentProductId)
+            .Where(group => group.Count() > 1))
+        {
+            foreach (var entry in duplicateGroup)
+            {
+                ModelState.AddModelError(
+                    $"Items[{entry.Index}].{nameof(entry.Item.ComponentProductId)}",
+                    "Vật tư thành phần bị trùng trong BOM.");
+            }
+        }
+
         var requestedComponentIds = input.Items
             .Select(x => x.ComponentProductId)
             .Distinct()
@@ -161,21 +174,50 @@ public class BomController : Controller
             }).ToList()
         };
 
-        await using var transaction = _context.Database.IsRelational()
-            ? await _context.Database.BeginTransactionAsync()
-            : null;
+        IDbContextTransaction? transaction = null;
         try
         {
+            if (_context.Database.IsRelational())
+                transaction = await _context.Database.BeginTransactionAsync();
+
             _context.BOMs.Add(bom);
             await _context.SaveChangesAsync();
             if (transaction is not null)
                 await transaction.CommitAsync();
+        }
+        catch (DbUpdateException)
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync();
+                await transaction.DisposeAsync();
+                transaction = null;
+            }
+
+            _context.ChangeTracker.Clear();
+            if (await _context.BOMs.AsNoTracking().AnyAsync(existing =>
+                existing.ProductId == input.ProductId &&
+                existing.Version == normalizedVersion))
+            {
+                ModelState.AddModelError(
+                    nameof(input.Version),
+                    "Phiên bản BOM này đã tồn tại cho sản phẩm đã chọn.");
+                await LoadProductChoicesAsync();
+                return View(input);
+            }
+
+            throw;
         }
         catch
         {
             if (transaction is not null)
                 await transaction.RollbackAsync();
             throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+                await transaction.DisposeAsync();
         }
 
         TempData["StatusMessage"] = $"Đã tạo BOM {bom.Version} ở trạng thái chưa kích hoạt.";

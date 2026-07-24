@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
@@ -115,6 +116,7 @@ public class InventoryControllerTests
     [Fact]
     public async Task CreateIssue_Post_WhenDuplicateTupleExceedsAvailability_KeysAggregateErrorToOverflowLine()
     {
+        using var culture = new CultureScope("en-US");
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"Inv_Issue_Aggregate_{Guid.NewGuid()}").Options;
         await using var context = new ApplicationDbContext(options);
@@ -139,7 +141,9 @@ public class InventoryControllerTests
         Assert.False(controller.ModelState.ContainsKey("Lines[0].Qty"));
         Assert.True(controller.ModelState.ContainsKey("Lines[1].Qty"));
         var error = Assert.Single(controller.ModelState["Lines[1].Qty"]!.Errors);
-        Assert.Contains("tổng số lượng", error.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "Tổng số lượng yêu cầu cho cùng lô và vị trí là 12,00, vượt quá số lượng khả dụng 10,00.",
+            error.ErrorMessage);
         Assert.Empty(context.GoodsIssues);
         service.Verify(item => item.CompleteGoodsIssueWithoutNotificationAsync(
             It.IsAny<int>(), It.IsAny<string>()), Times.Never);
@@ -173,13 +177,17 @@ public class InventoryControllerTests
     [Fact]
     public async Task CreateIssue_Post_PersistsLineAndCompletesIssue()
     {
+        using var culture = new CultureScope("en-US");
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"Inv_Issue_Post_{Guid.NewGuid()}").Options;
         await using var context = new ApplicationDbContext(options);
         var seeded = await SeedIssueStockAsync(context);
         var service = new Mock<IInventoryService>();
         service.Setup(item => item.CompleteGoodsIssueWithoutNotificationAsync(It.IsAny<int>(), "warehouse-user")).ReturnsAsync(true);
-        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object)); controller.TempData = Mock.Of<ITempDataDictionary>();
+        var controller = Authenticated(new InventoryController(context, Mock.Of<IReportExportService>(), service.Object));
+        controller.TempData = new TempDataDictionary(
+            controller.HttpContext,
+            Mock.Of<ITempDataProvider>());
 
         var result = await controller.CreateIssue(IssueModel(seeded, 2.5m));
 
@@ -188,6 +196,9 @@ public class InventoryControllerTests
         Assert.Equal(seeded.customerId, issue.CustomerId);
         var line = Assert.Single(issue.Lines);
         Assert.Equal((seeded.productId, seeded.lotId, 2.5m, seeded.locationId), (line.ProductId, line.LotId, line.Qty, line.LocationId));
+        Assert.Equal(
+            "Đã xuất kho 2,50 thành công.",
+            controller.TempData["StatusMessage"]);
         service.Verify(item => item.CompleteGoodsIssueWithoutNotificationAsync(issue.Id, "warehouse-user"), Times.Once);
         service.Verify(item => item.NotifyStockChangedAsync(), Times.Once);
     }
@@ -252,6 +263,7 @@ public class InventoryControllerTests
     [Fact]
     public async Task CreateIssue_Post_ProtectsReservedStockAndReportsRemainingAvailableQuantity()
     {
+        using var culture = new CultureScope("en-US");
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"Inv_Issue_Reserved_{Guid.NewGuid()}").Options;
         await using var context = new ApplicationDbContext(options);
@@ -277,7 +289,7 @@ public class InventoryControllerTests
         Assert.Same(model, view.Model);
         var error = Assert.Single(controller.ModelState["Lines[1].Qty"]!.Errors);
         Assert.Equal(
-            "Lô hàng tại vị trí đã chọn không đủ số lượng khả dụng để xuất (Chỉ còn 5.00). Số lượng giữ chỗ đang được bảo vệ.",
+            "Lô hàng tại vị trí đã chọn không đủ số lượng khả dụng để xuất (Chỉ còn 5,00). Số lượng giữ chỗ đang được bảo vệ.",
             error.ErrorMessage);
         Assert.Single(Assert.IsAssignableFrom<IEnumerable<StockBalance>>(controller.ViewBag.AvailableBalances));
         Assert.Empty(await context.GoodsIssues.ToListAsync());
@@ -1052,5 +1064,23 @@ public class InventoryControllerTests
             directory = directory.Parent;
 
         return Assert.IsType<DirectoryInfo>(directory).FullName;
+    }
+
+    private sealed class CultureScope : IDisposable
+    {
+        private readonly CultureInfo _originalCulture = CultureInfo.CurrentCulture;
+        private readonly CultureInfo _originalUiCulture = CultureInfo.CurrentUICulture;
+
+        public CultureScope(string cultureName)
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(cultureName);
+        }
+
+        public void Dispose()
+        {
+            CultureInfo.CurrentCulture = _originalCulture;
+            CultureInfo.CurrentUICulture = _originalUiCulture;
+        }
     }
 }

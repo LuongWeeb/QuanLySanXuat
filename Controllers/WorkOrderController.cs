@@ -101,7 +101,14 @@ public class WorkOrderController : Controller
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync();
+            try
+            {
+                await transaction.RollbackAsync();
+            }
+            catch
+            {
+                // SQL Server may already have rolled back a deadlock victim.
+            }
             return DailyLogFailure(ex, id);
         }
 
