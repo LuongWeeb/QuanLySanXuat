@@ -196,6 +196,77 @@ public class BomControllerTests
     }
 
     [Fact]
+    public async Task CreatePost_RejectsParentAsComponentWithIndexedError()
+    {
+        await using var context = new ApplicationDbContext(
+            Options($"BOM_SelfReference_{Guid.NewGuid()}"));
+        var parent = Product("FG", ProductType.FinishedGood);
+        context.Products.Add(parent);
+        await context.SaveChangesAsync();
+        var controller = Controller(context);
+
+        var result = await controller.Create(new BomCreateInputModel
+        {
+            ProductId = parent.Id,
+            Version = "V1",
+            EffectiveDate = new DateTime(2026, 7, 24),
+            Items =
+            [
+                new BomItemInputModel
+                {
+                    ComponentProductId = parent.Id,
+                    QtyPer = 1,
+                    ScrapPercent = 0
+                }
+            ]
+        });
+
+        Assert.IsType<ViewResult>(result);
+        var error = Assert.Single(
+            controller.ModelState["Items[0].ComponentProductId"]!.Errors);
+        Assert.Contains("chính nó", error.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(context.BOMs);
+    }
+
+    [Fact]
+    public async Task CreatePost_RejectsDuplicateProductVersion()
+    {
+        await using var context = new ApplicationDbContext(
+            Options($"BOM_DuplicateVersion_{Guid.NewGuid()}"));
+        var parent = Product("FG", ProductType.FinishedGood);
+        var component = Product(
+            "RM",
+            ProductType.RawMaterial,
+            manufactured: false);
+        context.BOMs.Add(Bom(parent, "V1", new DateTime(2026, 7, 1)));
+        context.Products.Add(component);
+        await context.SaveChangesAsync();
+        var controller = Controller(context);
+
+        var result = await controller.Create(new BomCreateInputModel
+        {
+            ProductId = parent.Id,
+            Version = " V1 ",
+            EffectiveDate = new DateTime(2026, 8, 1),
+            Items =
+            [
+                new BomItemInputModel
+                {
+                    ComponentProductId = component.Id,
+                    QtyPer = 1,
+                    ScrapPercent = 0
+                }
+            ]
+        });
+
+        Assert.IsType<ViewResult>(result);
+        var error = Assert.Single(
+            controller.ModelState[nameof(BomCreateInputModel.Version)]!.Errors);
+        Assert.Contains("đã tồn tại", error.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(context.BOMs);
+    }
+
+    [Fact]
     public async Task CreatePost_WithValidInput_PersistsInactiveBomAndAllItemsInSqlite()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -297,7 +368,7 @@ public class BomControllerTests
             actionStart,
             StringComparison.Ordinal);
         var targetRead = source.IndexOf(
-            "_context.BOMs.SingleOrDefaultAsync(x => x.Id == id)",
+            ".SingleOrDefaultAsync(x => x.Id == id)",
             actionStart,
             StringComparison.Ordinal);
 
@@ -363,6 +434,54 @@ public class BomControllerTests
     }
 
     [Fact]
+    public async Task ToggleActive_WhenCandidateClosesDependencyCycle_RejectsWithoutStateChange()
+    {
+        await using var context = new ApplicationDbContext(
+            Options($"BOM_Cycle_{Guid.NewGuid()}"));
+        var productA = Product("A", ProductType.FinishedGood);
+        var productB = Product("B", ProductType.WIP);
+        var productC = Product("C", ProductType.WIP);
+        var candidate = Bom(productA, "A1", new DateTime(2026, 8, 1));
+        candidate.Items.Add(new BOMItem
+        {
+            ComponentProduct = productB,
+            QtyPer = 1
+        });
+        var activeB = Bom(productB, "B1", new DateTime(2026, 7, 1));
+        activeB.IsActive = true;
+        activeB.Items.Add(new BOMItem
+        {
+            ComponentProduct = productC,
+            QtyPer = 1
+        });
+        var activeC = Bom(productC, "C1", new DateTime(2026, 7, 1));
+        activeC.IsActive = true;
+        activeC.Items.Add(new BOMItem
+        {
+            ComponentProduct = productA,
+            QtyPer = 1
+        });
+        context.BOMs.AddRange(candidate, activeB, activeC);
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+        var controller = Controller(context);
+
+        var result = await controller.ToggleActive(candidate.Id);
+
+        Assert.Equal(
+            nameof(BomController.Index),
+            Assert.IsType<RedirectToActionResult>(result).ActionName);
+        context.ChangeTracker.Clear();
+        Assert.False((await context.BOMs.FindAsync(candidate.Id))!.IsActive);
+        Assert.True((await context.BOMs.FindAsync(activeB.Id))!.IsActive);
+        Assert.True((await context.BOMs.FindAsync(activeC.Id))!.IsActive);
+        Assert.Contains(
+            "chu trình",
+            controller.TempData["StatusMessage"]!.ToString(),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ToggleActive_WhenSiblingUpdateFails_RollsBackRelationalActivation()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -383,12 +502,22 @@ public class BomControllerTests
             targetId = target.Id;
             siblingId = sibling.Id;
             await setup.Database.ExecuteSqlRawAsync(
-                """CREATE TRIGGER reject_block_update BEFORE UPDATE ON BOMs WHEN OLD.Version = 'BLOCK' BEGIN SELECT RAISE(ABORT, 'reject'); END;""");
+                """CREATE TRIGGER reject_target_activation BEFORE UPDATE ON BOMs WHEN OLD.Version = 'V2' AND NEW.IsActive = 1 BEGIN SELECT RAISE(ABORT, 'reject'); END;""");
         }
 
         await using (var failing = new ApplicationDbContext(options))
         {
-            await Assert.ThrowsAsync<DbUpdateException>(() => Controller(failing).ToggleActive(targetId));
+            var controller = Controller(failing);
+
+            var result = await controller.ToggleActive(targetId);
+
+            Assert.Equal(
+                nameof(BomController.Index),
+                Assert.IsType<RedirectToActionResult>(result).ActionName);
+            Assert.Contains(
+                "xung đột",
+                controller.TempData["StatusMessage"]!.ToString(),
+                StringComparison.OrdinalIgnoreCase);
         }
 
         await using var verification = new ApplicationDbContext(options);

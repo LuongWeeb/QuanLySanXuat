@@ -63,10 +63,19 @@ public class BomController : Controller
                 "Thành phẩm hoặc bán thành phẩm không hợp lệ hoặc đã ngừng hoạt động.");
         }
 
-        if (string.IsNullOrWhiteSpace(input.Version))
+        var normalizedVersion = input.Version?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedVersion))
             ModelState.AddModelError(nameof(input.Version), "Phiên bản BOM là bắt buộc.");
-        else if (input.Version.Trim().Length > 50)
+        else if (normalizedVersion.Length > 50)
             ModelState.AddModelError(nameof(input.Version), "Phiên bản BOM không được vượt quá 50 ký tự.");
+        else if (await _context.BOMs.AsNoTracking().AnyAsync(x =>
+            x.ProductId == input.ProductId &&
+            x.Version == normalizedVersion))
+        {
+            ModelState.AddModelError(
+                nameof(input.Version),
+                "Phiên bản BOM này đã tồn tại cho sản phẩm đã chọn.");
+        }
 
         if (input.EffectiveDate is null)
             ModelState.AddModelError(nameof(input.EffectiveDate), "Ngày hiệu lực là bắt buộc.");
@@ -98,6 +107,13 @@ public class BomController : Controller
                     "Vật tư thành phần không hợp lệ hoặc đã ngừng hoạt động.");
             }
 
+            if (item.ComponentProductId == input.ProductId)
+            {
+                ModelState.AddModelError(
+                    $"Items[{index}].{nameof(item.ComponentProductId)}",
+                    "Sản phẩm không thể sử dụng chính nó làm vật tư thành phần.");
+            }
+
             if (item.QtyPer <= 0)
             {
                 ModelState.AddModelError(
@@ -122,7 +138,7 @@ public class BomController : Controller
         var bom = new BOM
         {
             ProductId = input.ProductId,
-            Version = input.Version.Trim(),
+            Version = normalizedVersion!,
             EffectiveDate = input.EffectiveDate!.Value,
             IsActive = false,
             Items = input.Items.Select(x => new BOMItem
@@ -162,9 +178,15 @@ public class BomController : Controller
             ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable)
             : null;
 
-        var bom = await _context.BOMs.SingleOrDefaultAsync(x => x.Id == id);
+        var bom = await _context.BOMs
+            .Include(x => x.Items)
+            .SingleOrDefaultAsync(x => x.Id == id);
         if (bom is null)
+        {
+            if (transaction is not null)
+                await transaction.RollbackAsync();
             return NotFound();
+        }
 
         try
         {
@@ -174,22 +196,65 @@ public class BomController : Controller
             }
             else
             {
-                bom.IsActive = true;
+                var activeGraphBoms = await _context.BOMs
+                    .AsNoTracking()
+                    .Include(x => x.Items)
+                    .Where(x => x.IsActive && x.ProductId != bom.ProductId)
+                    .ToListAsync();
+                var dependencyGraph = activeGraphBoms
+                    .GroupBy(x => x.ProductId)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => group
+                            .SelectMany(x => x.Items)
+                            .Select(x => x.ComponentProductId)
+                            .Distinct()
+                            .ToArray());
+                dependencyGraph[bom.ProductId] = bom.Items
+                    .Select(x => x.ComponentProductId)
+                    .Distinct()
+                    .ToArray();
+                if (HasReachableCycle(bom.ProductId, dependencyGraph))
+                {
+                    if (transaction is not null)
+                        await transaction.RollbackAsync();
+                    _context.ChangeTracker.Clear();
+                    TempData["StatusMessage"] =
+                        "Không thể kích hoạt BOM vì cấu trúc vật tư tạo thành chu trình.";
+                    return RedirectToAction(nameof(Index));
+                }
+
                 var activeSiblings = await _context.BOMs
                     .Where(x => x.ProductId == bom.ProductId && x.Id != bom.Id && x.IsActive)
+                    .OrderBy(x => x.Id)
                     .ToListAsync();
                 foreach (var sibling in activeSiblings)
                     sibling.IsActive = false;
+
+                if (activeSiblings.Count > 0)
+                    await _context.SaveChangesAsync();
+
+                bom.IsActive = true;
             }
 
             await _context.SaveChangesAsync();
             if (transaction is not null)
                 await transaction.CommitAsync();
         }
+        catch (DbUpdateException)
+        {
+            if (transaction is not null)
+                await transaction.RollbackAsync();
+            _context.ChangeTracker.Clear();
+            TempData["StatusMessage"] =
+                "Không thể cập nhật trạng thái BOM do xung đột dữ liệu. Vui lòng thử lại.";
+            return RedirectToAction(nameof(Index));
+        }
         catch
         {
             if (transaction is not null)
                 await transaction.RollbackAsync();
+            _context.ChangeTracker.Clear();
             throw;
         }
 
@@ -197,6 +262,40 @@ public class BomController : Controller
             ? $"Đã kích hoạt BOM {bom.Version}."
             : $"Đã ngừng kích hoạt BOM {bom.Version}.";
         return RedirectToAction(nameof(Index));
+    }
+
+    private static bool HasReachableCycle(
+        int rootProductId,
+        IReadOnlyDictionary<int, int[]> dependencyGraph)
+    {
+        var visited = new HashSet<int>();
+        var currentPath = new HashSet<int>();
+
+        return Visit(rootProductId);
+
+        bool Visit(int productId)
+        {
+            if (!currentPath.Add(productId))
+                return true;
+            if (visited.Contains(productId))
+            {
+                currentPath.Remove(productId);
+                return false;
+            }
+
+            if (dependencyGraph.TryGetValue(productId, out var componentIds))
+            {
+                foreach (var componentId in componentIds)
+                {
+                    if (Visit(componentId))
+                        return true;
+                }
+            }
+
+            currentPath.Remove(productId);
+            visited.Add(productId);
+            return false;
+        }
     }
 
     private async Task LoadProductChoicesAsync()

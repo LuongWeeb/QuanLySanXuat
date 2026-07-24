@@ -317,6 +317,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasForeignKey(i => i.BomId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.Entity<BOM>()
+            .HasIndex(bom => new { bom.ProductId, bom.Version })
+            .IsUnique()
+            .HasDatabaseName("UX_BOMs_ProductId_Version");
+
+        builder.Entity<BOM>()
+            .HasIndex(bom => bom.ProductId)
+            .IsUnique()
+            .HasFilter("[IsActive] = 1")
+            .HasDatabaseName("UX_BOMs_OneActivePerProduct");
+
         builder.Entity<BOMItem>()
             .HasOne(i => i.ComponentProduct)
             .WithMany()
