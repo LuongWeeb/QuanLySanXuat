@@ -31,10 +31,14 @@
             <a asp-controller="Warehouse" asp-action="Index">Kho & Vị trí</a>
 
             <div class="nav-section-title">Quản lý Sản xuất (MES)</div>
-            <a asp-controller="WorkOrder" asp-action="Index">Lệnh sản xuất</a>
+            @if (User.IsInRole("Admin") || User.IsInRole("Planner") || User.IsInRole("Manager"))
+            {
+                <a asp-controller="WorkOrder" asp-action="Index">Lệnh sản xuất</a>
+                <a asp-controller="Mrp" asp-action="Index">Lập kế hoạch MRP</a>
+                <a asp-controller="Product" asp-action="Index">Sản phẩm (SKU)</a>
+                <a asp-controller="Bom" asp-action="Index">Định mức vật tư (BOM)</a>
+            }
             <a asp-controller="Worker" asp-action="Index">Trạm vận hành</a>
-            <a asp-controller="Mrp" asp-action="Index">Lập kế hoạch MRP</a>
-            <a asp-controller="Product" asp-action="Index">Sản phẩm (SKU)</a>
 
             <div class="nav-section-title">Kiểm soát Chất lượng & Truy vết</div>
             <a asp-controller="Qc" asp-action="Index">Kiểm định chất lượng</a>

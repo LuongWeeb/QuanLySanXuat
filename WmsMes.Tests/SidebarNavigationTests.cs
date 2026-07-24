@@ -24,8 +24,27 @@ public class SidebarNavigationTests
         AssertLink(layout, "Worker", "Index", "Trạm vận hành");
         AssertLink(layout, "Mrp", "Index", "Lập kế hoạch MRP");
         AssertLink(layout, "Product", "Index", "Sản phẩm (SKU)");
+        AssertLink(layout, "Bom", "Index", "Định mức vật tư (BOM)");
         AssertLink(layout, "Qc", "Index", "Kiểm định chất lượng");
         AssertLink(layout, "Traceability", "Index", "Truy vết lô hàng");
+    }
+
+    [Fact]
+    public void Layout_RestrictsProductionPlanningLinksToProductionManagementRoles()
+    {
+        var layoutPath = Path.Combine(FindRepositoryRoot(), "Views", "Shared", "_Layout.cshtml");
+        var layout = File.ReadAllText(layoutPath);
+        var roleBoundary = new Regex(
+            """@if\s*\(User\.IsInRole\("Admin"\)\s*\|\|\s*User\.IsInRole\("Planner"\)\s*\|\|\s*User\.IsInRole\("Manager"\)\)\s*\{(?<links>[\s\S]*?)\}""",
+            RegexOptions.IgnoreCase);
+
+        var match = roleBoundary.Match(layout);
+        Assert.True(match.Success, "Production-management role boundary was not found.");
+        var links = match.Groups["links"].Value;
+        AssertLink(links, "WorkOrder", "Index", "Lệnh sản xuất");
+        AssertLink(links, "Mrp", "Index", "Lập kế hoạch MRP");
+        AssertLink(links, "Product", "Index", "Sản phẩm (SKU)");
+        AssertLink(links, "Bom", "Index", "Định mức vật tư (BOM)");
     }
 
     private static void AssertSection(string layout, string title)

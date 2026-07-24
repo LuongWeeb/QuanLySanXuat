@@ -1,0 +1,253 @@
+@model WmsMes.Web.ViewModels.BomCreateInputModel
+@using WmsMes.Web.Domain.Entities
+@{
+    ViewData["Title"] = "Tạo định mức vật tư";
+    var parentProducts = ViewData["ParentProducts"] as IEnumerable<Product> ?? Enumerable.Empty<Product>();
+    var componentProducts = ViewData["ComponentProducts"] as IEnumerable<Product> ?? Enumerable.Empty<Product>();
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Bill of Materials</p>
+        <h2>Tạo Định mức vật tư</h2>
+    </div>
+</section>
+
+<div class="ops-panel mt-3">
+    <form asp-action="Create" method="post" id="bom-create-form">
+        <div asp-validation-summary="ModelOnly" class="text-danger mb-3" role="alert"></div>
+
+        <div class="row">
+            <div class="col-lg-5 mb-3">
+                <label asp-for="ProductId" class="form-label">Thành phẩm / Bán thành phẩm</label>
+                <select asp-for="ProductId" class="form-select" required>
+                    <option value="">-- Chọn sản phẩm --</option>
+                    @foreach (var product in parentProducts)
+                    {
+                        <option value="@product.Id">@product.Code - @product.Name</option>
+                    }
+                </select>
+                <span asp-validation-for="ProductId" class="text-danger"></span>
+            </div>
+            <div class="col-md-6 col-lg-4 mb-3">
+                <label asp-for="Version" class="form-label">Phiên bản</label>
+                <input asp-for="Version" class="form-control" maxlength="50" required />
+                <span asp-validation-for="Version" class="text-danger"></span>
+            </div>
+            <div class="col-md-6 col-lg-3 mb-3">
+                <label asp-for="EffectiveDate" class="form-label">Ngày hiệu lực</label>
+                <input asp-for="EffectiveDate" type="date" class="form-control" required />
+                <span asp-validation-for="EffectiveDate" class="text-danger"></span>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center gap-3 mt-2 mb-2">
+            <h3 class="h5 mb-0">Vật tư thành phần</h3>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="add-bom-item">
+                Thêm vật tư
+            </button>
+        </div>
+        <span asp-validation-for="Items" class="text-danger d-block mb-2"></span>
+
+        <div class="table-responsive">
+            <table class="table data-table align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th style="min-width: 260px">Vật tư</th>
+                        <th style="min-width: 150px">Định mức</th>
+                        <th style="min-width: 150px">Hao hụt (%)</th>
+                        <th class="text-end">Thao tác</th>
+                    </tr>
+                </thead>
+                <tbody id="bom-items">
+                @for (var index = 0; index < Model.Items.Count; index++)
+                {
+                    <tr class="bom-item-row">
+                        <td>
+                            <label asp-for="Items[index].ComponentProductId" class="visually-hidden">
+                                Vật tư thành phần
+                            </label>
+                            <select asp-for="Items[index].ComponentProductId" class="form-select" required>
+                                <option value="">-- Chọn vật tư --</option>
+                                @foreach (var component in componentProducts)
+                                {
+                                    <option value="@component.Id">@component.Code - @component.Name</option>
+                                }
+                            </select>
+                            <span asp-validation-for="Items[index].ComponentProductId" class="text-danger"></span>
+                        </td>
+                        <td>
+                            <label asp-for="Items[index].QtyPer" class="visually-hidden">Định mức</label>
+                            <input asp-for="Items[index].QtyPer"
+                                   type="number"
+                                   class="form-control"
+                                   min="0.0001"
+                                   step="0.0001"
+                                   required />
+                            <span asp-validation-for="Items[index].QtyPer" class="text-danger"></span>
+                        </td>
+                        <td>
+                            <label asp-for="Items[index].ScrapPercent" class="visually-hidden">Hao hụt phần trăm</label>
+                            <input asp-for="Items[index].ScrapPercent"
+                                   type="number"
+                                   class="form-control"
+                                   min="0"
+                                   max="100"
+                                   step="0.01"
+                                   required />
+                            <span asp-validation-for="Items[index].ScrapPercent" class="text-danger"></span>
+                        </td>
+                        <td class="text-end">
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-danger remove-bom-item"
+                                    aria-label="Xóa vật tư">
+                                Xóa
+                            </button>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary">Lưu BOM chưa kích hoạt</button>
+            <a class="btn btn-outline-secondary" asp-action="Index">Hủy</a>
+        </div>
+    </form>
+</div>
+
+<template id="bom-item-template">
+    <tr class="bom-item-row">
+        <td>
+            <label for="Items___index____ComponentProductId" class="visually-hidden">Vật tư thành phần</label>
+            <select name="Items[__index__].ComponentProductId"
+                    id="Items___index____ComponentProductId"
+                    class="form-select"
+                    data-val="true"
+                    data-val-range="Vật tư thành phần là bắt buộc."
+                    data-val-range-min="1"
+                    data-val-range-max="2147483647"
+                    required>
+                <option value="">-- Chọn vật tư --</option>
+                @foreach (var component in componentProducts)
+                {
+                    <option value="@component.Id">@component.Code - @component.Name</option>
+                }
+            </select>
+            <span class="text-danger field-validation-valid"
+                  data-valmsg-for="Items[__index__].ComponentProductId"
+                  data-valmsg-replace="true"></span>
+        </td>
+        <td>
+            <label for="Items___index____QtyPer" class="visually-hidden">Định mức</label>
+            <input name="Items[__index__].QtyPer"
+                   id="Items___index____QtyPer"
+                   type="number"
+                   class="form-control"
+                   data-val="true"
+                   data-val-number="Định mức phải là một số."
+                   data-val-range="Định mức phải lớn hơn 0."
+                   data-val-range-min="0.0001"
+                   data-val-range-max="79228162514264337593543950335"
+                   min="0.0001"
+                   step="0.0001"
+                   required />
+            <span class="text-danger field-validation-valid"
+                  data-valmsg-for="Items[__index__].QtyPer"
+                  data-valmsg-replace="true"></span>
+        </td>
+        <td>
+            <label for="Items___index____ScrapPercent" class="visually-hidden">Hao hụt phần trăm</label>
+            <input name="Items[__index__].ScrapPercent"
+                   id="Items___index____ScrapPercent"
+                   type="number"
+                   class="form-control"
+                   data-val="true"
+                   data-val-number="Tỷ lệ hao hụt phải là một số."
+                   data-val-range="Tỷ lệ hao hụt phải từ 0 đến 100%."
+                   data-val-range-min="0"
+                   data-val-range-max="100"
+                   value="0"
+                   min="0"
+                   max="100"
+                   step="0.01"
+                   required />
+            <span class="text-danger field-validation-valid"
+                  data-valmsg-for="Items[__index__].ScrapPercent"
+                  data-valmsg-replace="true"></span>
+        </td>
+        <td class="text-end">
+            <button type="button"
+                    class="btn btn-sm btn-outline-danger remove-bom-item"
+                    aria-label="Xóa vật tư">
+                Xóa
+            </button>
+        </td>
+    </tr>
+</template>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script>
+        (() => {
+            const body = document.getElementById('bom-items');
+            const template = document.getElementById('bom-item-template');
+            const form = document.getElementById('bom-create-form');
+            const rows = () => Array.from(body.querySelectorAll('.bom-item-row'));
+
+            function reindexItems() {
+                rows().forEach((row, index) => {
+                    row.querySelectorAll('[name]').forEach(element => {
+                        element.name = element.name.replace(
+                            /Items\[(?:\d+|__index__)\]/g,
+                            `Items[${index}]`);
+                    });
+                    row.querySelectorAll('[id]').forEach(element => {
+                        element.id = element.id.replace(
+                            /Items_(?:\d+|__index__)__/g,
+                            `Items_${index}__`);
+                    });
+                    row.querySelectorAll('label[for]').forEach(label => {
+                        label.htmlFor = label.htmlFor.replace(
+                            /Items_(?:\d+|__index__)__/g,
+                            `Items_${index}__`);
+                    });
+                    row.querySelectorAll('[data-valmsg-for]').forEach(message => {
+                        message.dataset.valmsgFor = message.dataset.valmsgFor.replace(
+                            /Items\[(?:\d+|__index__)\]/g,
+                            `Items[${index}]`);
+                    });
+                });
+            }
+
+            document.getElementById('add-bom-item').addEventListener('click', () => {
+                body.insertAdjacentHTML(
+                    'beforeend',
+                    template.innerHTML.replaceAll('__index__', rows().length.toString()));
+                reindexItems();
+                if (window.jQuery?.validator?.unobtrusive) {
+                    window.jQuery.validator.unobtrusive.parse(form);
+                }
+            });
+
+            body.addEventListener('click', event => {
+                const button = event.target.closest('.remove-bom-item');
+                if (!button) return;
+
+                const currentRows = rows();
+                if (rows().length === 1) {
+                    currentRows[0].querySelectorAll('select').forEach(select => select.selectedIndex = 0);
+                    currentRows[0].querySelectorAll('input').forEach(input => {
+                        input.value = input.name.endsWith('.ScrapPercent') ? '0' : '';
+                    });
+                } else {
+                    button.closest('.bom-item-row').remove();
+                }
+                reindexItems();
+            });
+
+            reindexItems();
+        })();
+    </script>
+}
