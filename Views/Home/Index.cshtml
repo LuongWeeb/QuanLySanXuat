@@ -129,7 +129,21 @@
                             { type: "line", label: "Thực tế", data: initialMetrics.dailyActualOutput, borderColor: "#198754", backgroundColor: "#198754", tension: 0.25, fill: false }
                         ]
                     },
-                    options: { responsive: true, maintainAspectRatio: false }
+                    options: {
+                        locale: "vi-VN",
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { ticks: { callback: value => decimalNumber.format(value) } }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: context => `${context.dataset.label}: ${decimalNumber.format(context.parsed.y)}`
+                                }
+                            }
+                        }
+                    }
                 });
                 inventoryZoneChart = new window.Chart(document.getElementById("inventoryZoneChart"), {
                     type: "doughnut",
@@ -137,7 +151,18 @@
                         labels: initialMetrics.zoneLabels,
                         datasets: [{ data: initialMetrics.zoneQuantities, backgroundColor: ["#0d6efd", "#20c997", "#ffc107", "#6f42c1", "#fd7e14"] }]
                     },
-                    options: { responsive: true, maintainAspectRatio: false }
+                    options: {
+                        locale: "vi-VN",
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: context => `${context.label}: ${decimalNumber.format(context.parsed)}`
+                                }
+                            }
+                        }
+                    }
                 });
                 qualityChart = new window.Chart(document.getElementById("qualityChart"), {
                     type: "doughnut",
@@ -145,7 +170,18 @@
                         labels: ["Đạt", "Tạm giữ", "Cách ly"],
                         datasets: [{ data: initialMetrics.qualityCounts, backgroundColor: ["#198754", "#ffc107", "#dc3545"] }]
                     },
-                    options: { responsive: true, maintainAspectRatio: false }
+                    options: {
+                        locale: "vi-VN",
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: context => `${context.label}: ${integerNumber.format(context.parsed)}`
+                                }
+                            }
+                        }
+                    }
                 });
             };
             initializeCharts();

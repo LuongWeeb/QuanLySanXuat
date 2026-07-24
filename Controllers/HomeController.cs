@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using WmsMes.Web.Data;
+using WmsMes.Web.Domain.Common;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Models;
@@ -262,7 +263,7 @@ public class HomeController : Controller
         var dailyActualOutput = new List<decimal>();
         for (var date = startDate; date <= today; date = date.AddDays(1))
         {
-            dailyLabels.Add(date.ToString("dd/MM"));
+            dailyLabels.Add(date.ToVietnameseDate());
             dailyPlannedOutput.Add(plannedRows
                 .Where(workOrder => workOrder.DueDate.Date == date)
                 .Sum(workOrder => workOrder.TargetQuantity));

@@ -254,6 +254,18 @@ public class HomeControllerTests
     }
 
     [Fact]
+    public void DashboardView_WiresVietnameseNumberFormattingIntoChartOptions()
+    {
+        var view = File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Home", "Index.cshtml"));
+
+        Assert.Equal(3, view.Split("locale: \"vi-VN\"", StringSplitOptions.None).Length - 1);
+        Assert.Contains("ticks: { callback: value => decimalNumber.format(value) }", view);
+        Assert.Contains("label: context => `${context.dataset.label}: ${decimalNumber.format(context.parsed.y)}`", view);
+        Assert.Contains("label: context => `${context.label}: ${decimalNumber.format(context.parsed)}`", view);
+        Assert.Contains("label: context => `${context.label}: ${integerNumber.format(context.parsed)}`", view);
+    }
+
+    [Fact]
     public void DashboardView_ContinuesRealtimeSetupWhenChartJsIsUnavailable()
     {
         var view = File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Home", "Index.cshtml"));
