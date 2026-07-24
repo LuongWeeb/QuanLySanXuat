@@ -43,6 +43,10 @@ public class DailyProductionLogViewTests
         Assert.Contains("name=\"Notes\"", view);
         Assert.Contains("type=\"date\"", view);
         Assert.Contains("maxlength=\"250\"", view);
+        Assert.Contains(
+            "businessDate.ToString(\"yyyy-MM-dd\", CultureInfo.InvariantCulture)",
+            view);
+        Assert.Contains("max=\"@maxDateValue\"", view);
     }
 
     [Fact]
@@ -59,7 +63,21 @@ public class DailyProductionLogViewTests
         Assert.Contains("order.DueDate.Date - businessDate", index);
         Assert.Contains("businessDate > Model.DueDate.Date", details);
         Assert.Contains("Model.DueDate.Date - businessDate", details);
-        Assert.Contains("businessDate.ToString(\"yyyy-MM-dd\")", details);
+        Assert.Contains(
+            "businessDate.ToString(\"yyyy-MM-dd\", CultureInfo.InvariantCulture)",
+            details);
+    }
+
+    [Fact]
+    public void WorkOrderViews_SuppressScheduleWarningsWhenTargetQuantityIsInvalid()
+    {
+        var index = ReadView("Index.cshtml");
+        var details = ReadView("Details.cshtml");
+
+        Assert.Contains("var hasValidTarget = order.Qty > 0", index);
+        Assert.Contains("hasValidTarget && !targetReached", index);
+        Assert.Contains("var hasValidTarget = Model.Qty > 0", details);
+        Assert.Contains("hasValidTarget && !targetReached", details);
     }
 
     private static string ReadView(string fileName) =>

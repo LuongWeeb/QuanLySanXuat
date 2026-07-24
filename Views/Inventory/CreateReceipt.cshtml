@@ -42,6 +42,14 @@
                     @for (var index = 0; index < Model.Lines.Count; index++)
                     {
                         var line = Model.Lines[index];
+                        var qtyKey = $"Lines[{index}].Qty";
+                        var qtyValue = ViewData.ModelState.TryGetValue(qtyKey, out var qtyEntry)
+                            ? qtyEntry.AttemptedValue
+                            : line.Qty.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        var unitPriceKey = $"Lines[{index}].UnitPrice";
+                        var unitPriceValue = ViewData.ModelState.TryGetValue(unitPriceKey, out var unitPriceEntry)
+                            ? unitPriceEntry.AttemptedValue
+                            : line.UnitPrice.ToString(System.Globalization.CultureInfo.InvariantCulture);
                         <tr data-line-row>
                             <td>
                                 <label class="visually-hidden" data-label-for="ProductId">Sản phẩm</label>
@@ -61,12 +69,12 @@
                             </td>
                             <td>
                                 <label class="visually-hidden" data-label-for="Qty">Số lượng</label>
-                                <input name="Lines[@index].Qty" value="@line.Qty.ToString(System.Globalization.CultureInfo.InvariantCulture)" data-field="Qty" type="number" class="form-control" min="0.01" step="0.01" required />
+                                <input name="Lines[@index].Qty" value="@qtyValue" data-field="Qty" type="number" class="form-control" min="0.01" step="0.01" required />
                                 @Html.ValidationMessage($"Lines[{index}].Qty", null, new { @class = "text-danger", data_validation_for = "Qty" })
                             </td>
                             <td>
                                 <label class="visually-hidden" data-label-for="UnitPrice">Đơn giá</label>
-                                <input name="Lines[@index].UnitPrice" value="@line.UnitPrice.ToString(System.Globalization.CultureInfo.InvariantCulture)" data-field="UnitPrice" type="number" class="form-control" min="0" step="0.01" required />
+                                <input name="Lines[@index].UnitPrice" value="@unitPriceValue" data-field="UnitPrice" type="number" class="form-control" min="0" step="0.01" required />
                                 @Html.ValidationMessage($"Lines[{index}].UnitPrice", null, new { @class = "text-danger", data_validation_for = "UnitPrice" })
                             </td>
                             <td>

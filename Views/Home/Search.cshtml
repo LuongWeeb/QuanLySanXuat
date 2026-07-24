@@ -27,7 +27,7 @@ else
                 <h3>Sản phẩm</h3>
                 <div class="table-responsive">
                     <table class="table data-table align-middle mb-0">
-                        <thead><tr><th>Mã SKU</th><th>Tên sản phẩm</th><th></th></tr></thead>
+                        <thead><tr><th>Mã SKU</th><th>Tên sản phẩm</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead>
                         <tbody>
                         @foreach (var product in Model.Products)
                         {
@@ -49,7 +49,7 @@ else
                 <h3>Lệnh sản xuất</h3>
                 <div class="table-responsive">
                     <table class="table data-table align-middle mb-0">
-                        <thead><tr><th>Mã lệnh</th><th>Trạng thái</th><th></th></tr></thead>
+                        <thead><tr><th>Mã lệnh</th><th>Trạng thái</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead>
                         <tbody>
                         @foreach (var workOrder in Model.WorkOrders)
                         {
@@ -71,7 +71,7 @@ else
                 <h3>Lô</h3>
                 <div class="table-responsive">
                     <table class="table data-table align-middle mb-0">
-                        <thead><tr><th>Số lô</th><th>Sản phẩm</th><th></th></tr></thead>
+                        <thead><tr><th>Số lô</th><th>Sản phẩm</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead>
                         <tbody>
                         @foreach (var lot in Model.Lots)
                         {
@@ -93,7 +93,7 @@ else
                 <h3>Vị trí</h3>
                 <div class="table-responsive">
                     <table class="table data-table align-middle mb-0">
-                        <thead><tr><th>Mã vị trí</th><th>Tên vị trí</th><th></th></tr></thead>
+                        <thead><tr><th>Mã vị trí</th><th>Tên vị trí</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead>
                         <tbody>
                         @foreach (var location in Model.Locations)
                         {

@@ -1,4 +1,5 @@
 @model IEnumerable<WmsMes.Web.Domain.Entities.GoodsIssue>
+@inject TimeZoneInfo BusinessTimeZone
 @{
     ViewData["Title"] = "Xuất kho";
 }
@@ -25,7 +26,7 @@
                     <tr>
                         <td><code>@issue.IssueNo</code></td><td>@issue.Customer?.Code - @issue.Customer?.Name</td><td>@line.Product?.Name</td><td><code>@line.Lot?.LotNo</code></td>
                         <td><code>@line.Location?.Code</code></td><td class="text-end fw-semibold text-danger">-@line.Qty.ToVietnameseNumber()</td>
-                        <td>@issue.IssueDate.ToVietnameseDateTime()</td>
+                        <td>@issue.IssueDate.ToVietnameseBusinessDateTime(BusinessTimeZone)</td>
                     </tr>
                 }
             }

@@ -25,6 +25,41 @@ public class InventoryViewTests
         Assert.Contains("Xóa dòng", view);
     }
 
+    [Fact]
+    public void ManualNumericInputs_PreserveRawModelStateAttemptedValuesWithInvariantFallbacks()
+    {
+        var receipt = File.ReadAllText(Path.Combine(
+            ProjectRoot(),
+            "Views",
+            "Inventory",
+            "CreateReceipt.cshtml"));
+        var issue = File.ReadAllText(Path.Combine(
+            ProjectRoot(),
+            "Views",
+            "Inventory",
+            "CreateIssue.cshtml"));
+
+        Assert.Contains("ViewData.ModelState.TryGetValue(qtyKey", receipt);
+        Assert.Contains("qtyEntry.AttemptedValue", receipt);
+        Assert.Contains("value=\"@qtyValue\"", receipt);
+        Assert.Contains("ViewData.ModelState.TryGetValue(unitPriceKey", receipt);
+        Assert.Contains("unitPriceEntry.AttemptedValue", receipt);
+        Assert.Contains("value=\"@unitPriceValue\"", receipt);
+        Assert.Contains(
+            "line.Qty.ToString(System.Globalization.CultureInfo.InvariantCulture)",
+            receipt);
+        Assert.Contains(
+            "line.UnitPrice.ToString(System.Globalization.CultureInfo.InvariantCulture)",
+            receipt);
+
+        Assert.Contains("ViewData.ModelState.TryGetValue(qtyKey", issue);
+        Assert.Contains("qtyEntry.AttemptedValue", issue);
+        Assert.Contains("value=\"@qtyValue\"", issue);
+        Assert.Contains(
+            "line.Qty.ToString(System.Globalization.CultureInfo.InvariantCulture)",
+            issue);
+    }
+
     private static string ProjectRoot() => Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 }

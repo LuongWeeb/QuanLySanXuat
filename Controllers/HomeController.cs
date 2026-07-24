@@ -53,12 +53,16 @@ public class HomeController : Controller
             Products = await _context.Products
                 .AsNoTracking()
                 .Where(product => product.Code.Contains(query) || product.Name.Contains(query))
+                .OrderBy(product => product.Code)
+                .ThenBy(product => product.Id)
                 .Take(10)
                 .ToListAsync(),
             WorkOrders = canViewWorkOrders
                 ? await _context.WorkOrders
                     .AsNoTracking()
                     .Where(workOrder => workOrder.Code.Contains(query))
+                    .OrderBy(workOrder => workOrder.Code)
+                    .ThenBy(workOrder => workOrder.Id)
                     .Take(10)
                     .ToListAsync()
                 : new List<WorkOrder>(),
@@ -66,11 +70,15 @@ public class HomeController : Controller
                 .AsNoTracking()
                 .Include(lot => lot.Product)
                 .Where(lot => lot.LotNo.Contains(query))
+                .OrderBy(lot => lot.LotNo)
+                .ThenBy(lot => lot.Id)
                 .Take(10)
                 .ToListAsync(),
             Locations = await _context.Locations
                 .AsNoTracking()
                 .Where(location => location.Code.Contains(query))
+                .OrderBy(location => location.Code)
+                .ThenBy(location => location.Id)
                 .Take(10)
                 .ToListAsync()
         };

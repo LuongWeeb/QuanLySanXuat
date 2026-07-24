@@ -29,12 +29,13 @@
             @foreach (var order in Model)
             {
                 var totalProduced = order.DailyProductionLogs.Sum(log => log.QtyProduced);
-                var progressPercentage = order.Qty > 0
+                var hasValidTarget = order.Qty > 0;
+                var progressPercentage = hasValidTarget
                     ? totalProduced / order.Qty * 100
                     : 0;
                 var progressWidth = Math.Clamp(progressPercentage, 0, 100);
-                var targetReached = order.Qty > 0 && totalProduced >= order.Qty;
-                var isOverdue = !targetReached && businessDate > order.DueDate.Date;
+                var targetReached = hasValidTarget && totalProduced >= order.Qty;
+                var isOverdue = hasValidTarget && !targetReached && businessDate > order.DueDate.Date;
                 var daysRemaining = (order.DueDate.Date - businessDate).Days;
                 <tr>
                     <td><code>@order.Code</code></td>
@@ -56,7 +57,7 @@
                         {
                             <div class="small text-danger fw-semibold mt-1">Trễ hạn sản xuất!</div>
                         }
-                        else if (!targetReached)
+                        else if (hasValidTarget && !targetReached)
                         {
                             <div class="small text-muted mt-1">Còn @daysRemaining.ToVietnameseNumber() ngày</div>
                         }

@@ -27,8 +27,16 @@ public class LocalizationViewTests
 
         Assert.Contains("@item.MinStock.ToVietnameseNumber()", ReadView("Product", "Index.cshtml"));
         Assert.Contains("item.Lot?.ExpiryDate?.ToVietnameseDate()", ReadView("Inventory", "Index.cshtml"));
-        Assert.Contains("@receipt.ReceiptDate.ToVietnameseDateTime()", ReadView("Inventory", "Receipts.cshtml"));
-        Assert.Contains("@issue.IssueDate.ToVietnameseDateTime()", ReadView("Inventory", "Issues.cshtml"));
+        var receipts = ReadView("Inventory", "Receipts.cshtml");
+        var issues = ReadView("Inventory", "Issues.cshtml");
+        Assert.Contains("@inject TimeZoneInfo BusinessTimeZone", receipts);
+        Assert.Contains(
+            "@receipt.ReceiptDate.ToVietnameseBusinessDateTime(BusinessTimeZone)",
+            receipts);
+        Assert.Contains("@inject TimeZoneInfo BusinessTimeZone", issues);
+        Assert.Contains(
+            "@issue.IssueDate.ToVietnameseBusinessDateTime(BusinessTimeZone)",
+            issues);
         Assert.Contains("@order.DueDate.ToVietnameseDate()", ReadView("WorkOrder", "Index.cshtml"));
         Assert.Contains("@log.Date.ToVietnameseDate()", ReadView("WorkOrder", "Details.cshtml"));
         Assert.Contains("@bom.EffectiveDate.ToVietnameseDate()", ReadView("Bom", "Index.cshtml"));
@@ -63,7 +71,9 @@ public class LocalizationViewTests
         Assert.Contains("line.Qty.ToString(System.Globalization.CultureInfo.InvariantCulture)", createIssue);
         Assert.Contains("progressWidth.ToString(\"0.##\", CultureInfo.InvariantCulture)", workOrderIndex);
         Assert.Contains("progressWidth.ToString(\"0.##\", CultureInfo.InvariantCulture)", workOrderDetails);
-        Assert.Contains("businessDate.ToString(\"yyyy-MM-dd\")", workOrderDetails);
+        Assert.Contains(
+            "businessDate.ToString(\"yyyy-MM-dd\", CultureInfo.InvariantCulture)",
+            workOrderDetails);
         Assert.Contains("type=\"date\"", workOrderDetails);
         Assert.Contains("type=\"number\"", workOrderDetails);
 

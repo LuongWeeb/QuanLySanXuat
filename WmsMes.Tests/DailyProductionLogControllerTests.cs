@@ -143,6 +143,33 @@ public class DailyProductionLogControllerTests
     }
 
     [Fact]
+    public async Task AddDailyLog_WhenDateIsAfterVietnamBusinessDate_RejectsWithoutInflatingProgress()
+    {
+        await using var context = InMemoryContext();
+        var order = await AddOrderAsync(context, WorkOrderStatus.InProgress);
+        var controller = Controller(
+            context,
+            new FixedTimeProvider(
+                new DateTimeOffset(2026, 7, 23, 18, 30, 0, TimeSpan.Zero)),
+            VietnamTimeZone());
+
+        var result = await InvokeAddDailyLogAsync(
+            controller,
+            order.Id,
+            new DateTime(2026, 7, 25),
+            9m,
+            "Không được ghi trước");
+
+        var view = Assert.IsType<ViewResult>(result);
+        Assert.Equal(nameof(WorkOrderController.Details), view.ViewName);
+        var returnedOrder = Assert.IsType<WorkOrder>(view.Model);
+        Assert.Equal(0m, returnedOrder.DailyProductionLogs.Sum(log => log.QtyProduced));
+        var error = Assert.Single(controller.ModelState["Date"]!.Errors);
+        Assert.Contains("tương lai", error.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(context.DailyProductionLogs);
+    }
+
+    [Fact]
     public async Task AddDailyLog_WhenSaveFails_RollsBackRelationalInsert()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -226,15 +253,18 @@ public class DailyProductionLogControllerTests
         return order;
     }
 
-    private static WorkOrderController Controller(ApplicationDbContext context)
+    private static WorkOrderController Controller(
+        ApplicationDbContext context,
+        TimeProvider? timeProvider = null,
+        TimeZoneInfo? businessTimeZone = null)
     {
         var controller = new WorkOrderController(
             context,
             Mock.Of<IWorkOrderService>(),
             Mock.Of<ILogger<WorkOrderController>>(),
             Mock.Of<IReportExportService>(),
-            TimeProvider.System,
-            TimeZoneInfo.Utc)
+            timeProvider ?? TimeProvider.System,
+            businessTimeZone ?? TimeZoneInfo.Utc)
         {
             ControllerContext = new ControllerContext
             {
@@ -245,6 +275,18 @@ public class DailyProductionLogControllerTests
             controller.HttpContext,
             Mock.Of<ITempDataProvider>());
         return controller;
+    }
+
+    private static TimeZoneInfo VietnamTimeZone() =>
+        TimeZoneInfo.CreateCustomTimeZone(
+            "Asia/Ho_Chi_Minh",
+            TimeSpan.FromHours(7),
+            "Vietnam",
+            "Vietnam");
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
     private sealed class FailAfterSaveDbContext(

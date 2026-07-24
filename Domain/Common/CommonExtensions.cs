@@ -82,4 +82,20 @@ public static class CommonExtensions
 
     public static string ToVietnameseDateTime(this DateTime value) =>
         value.ToString("dd/MM/yyyy HH:mm", VietnameseCulture);
+
+    public static string ToVietnameseBusinessDateTime(
+        this DateTime storedUtc,
+        TimeZoneInfo businessTimeZone)
+    {
+        ArgumentNullException.ThrowIfNull(businessTimeZone);
+        var utc = storedUtc.Kind switch
+        {
+            DateTimeKind.Utc => storedUtc,
+            DateTimeKind.Unspecified => DateTime.SpecifyKind(storedUtc, DateTimeKind.Utc),
+            _ => storedUtc.ToUniversalTime()
+        };
+
+        return TimeZoneInfo.ConvertTimeFromUtc(utc, businessTimeZone)
+            .ToVietnameseDateTime();
+    }
 }

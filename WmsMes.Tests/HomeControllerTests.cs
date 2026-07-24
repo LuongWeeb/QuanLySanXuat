@@ -95,16 +95,16 @@ public class HomeControllerTests
     public async Task Search_LimitsEachResultGroupToTenRecords()
     {
         await using var context = CreateContext();
-        for (var index = 1; index <= 11; index++)
+        for (var index = 11; index >= 1; index--)
         {
-            context.Products.Add(new Product { Id = index, Code = $"SKU-MATCH-{index}", Name = "Sản phẩm" });
+            context.Products.Add(new Product { Id = index, Code = $"SKU-MATCH-{index:D2}", Name = "Sản phẩm" });
             context.WorkOrders.Add(new WorkOrder
             {
-                Id = index, Code = $"WO-MATCH-{index}", ProductId = index, Qty = 1, DueDate = DateTime.UtcNow,
+                Id = index, Code = $"WO-MATCH-{index:D2}", ProductId = index, Qty = 1, DueDate = DateTime.UtcNow,
                 BomVersion = "1", RoutingVersion = "1"
             });
-            context.Lots.Add(new Lot { Id = index, LotNo = $"LOT-MATCH-{index}", ProductId = index });
-            context.Locations.Add(new Location { Id = index, Code = $"LOC-MATCH-{index}", Name = "Vị trí", ZoneId = 1 });
+            context.Lots.Add(new Lot { Id = index, LotNo = $"LOT-MATCH-{index:D2}", ProductId = index });
+            context.Locations.Add(new Location { Id = index, Code = $"LOC-MATCH-{index:D2}", Name = "Vị trí", ZoneId = 1 });
         }
         await context.SaveChangesAsync();
 
@@ -125,6 +125,18 @@ public class HomeControllerTests
         Assert.Equal(10, model.WorkOrders.Count);
         Assert.Equal(10, model.Lots.Count);
         Assert.Equal(10, model.Locations.Count);
+        Assert.Equal(
+            Enumerable.Range(1, 10).Select(index => $"SKU-MATCH-{index:D2}"),
+            model.Products.Select(product => product.Code));
+        Assert.Equal(
+            Enumerable.Range(1, 10).Select(index => $"WO-MATCH-{index:D2}"),
+            model.WorkOrders.Select(order => order.Code));
+        Assert.Equal(
+            Enumerable.Range(1, 10).Select(index => $"LOT-MATCH-{index:D2}"),
+            model.Lots.Select(lot => lot.LotNo));
+        Assert.Equal(
+            Enumerable.Range(1, 10).Select(index => $"LOC-MATCH-{index:D2}"),
+            model.Locations.Select(location => location.Code));
     }
 
     [Fact]
@@ -167,6 +179,11 @@ public class HomeControllerTests
         Assert.Contains("asp-controller=\"Traceability\"", view);
         Assert.Contains("asp-controller=\"Warehouse\"", view);
         Assert.Contains("Không tìm thấy kết quả", view);
+        Assert.Equal(
+            4,
+            CountOccurrences(
+                view,
+                "<span class=\"visually-hidden\">Thao tác</span>"));
     }
 
     [Fact]
@@ -176,11 +193,18 @@ public class HomeControllerTests
 
         Assert.Contains("asp-controller=\"Home\" asp-action=\"Search\"", layout);
         Assert.Contains("name=\"q\"", layout);
+        Assert.Contains("id=\"global-search\"", layout);
+        Assert.Contains(
+            "<label class=\"visually-hidden\" for=\"global-search\">Tìm kiếm toàn hệ thống</label>",
+            layout);
         Assert.Contains("placeholder=\"Tìm SKU, lệnh SX, số lô...\"", layout);
         Assert.Contains("required", layout);
         Assert.Contains("Tìm", layout);
         Assert.Contains("max-width: 250px", layout);
     }
+
+    private static int CountOccurrences(string source, string value) =>
+        source.Split(value, StringSplitOptions.None).Length - 1;
 
     [Fact]
     public void DashboardView_UsesExactHubRoutesAndEventsWithMetricsRefresh()

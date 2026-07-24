@@ -9,14 +9,16 @@
     var reservations = ViewData["Reservations"] as IEnumerable<MaterialReservation> ?? Enumerable.Empty<MaterialReservation>();
     var canManage = User.IsInRole("Admin") || User.IsInRole("Manager");
     var totalProduced = Model.DailyProductionLogs.Sum(log => log.QtyProduced);
-    var progressPercentage = Model.Qty > 0 ? totalProduced / Model.Qty * 100 : 0;
+    var hasValidTarget = Model.Qty > 0;
+    var progressPercentage = hasValidTarget ? totalProduced / Model.Qty * 100 : 0;
     var progressWidth = Math.Clamp(progressPercentage, 0, 100);
-    var targetReached = Model.Qty > 0 && totalProduced >= Model.Qty;
-    var isOverdue = !targetReached && businessDate > Model.DueDate.Date;
+    var targetReached = hasValidTarget && totalProduced >= Model.Qty;
+    var isOverdue = hasValidTarget && !targetReached && businessDate > Model.DueDate.Date;
     var daysRemaining = (Model.DueDate.Date - businessDate).Days;
+    var maxDateValue = businessDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     var dateValue = ViewData.ModelState.TryGetValue(nameof(DailyProductionLogInputModel.Date), out var dateEntry)
         ? dateEntry.AttemptedValue
-        : businessDate.ToString("yyyy-MM-dd");
+        : businessDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     var quantityValue = ViewData.ModelState.TryGetValue(nameof(DailyProductionLogInputModel.QtyProduced), out var quantityEntry)
         ? quantityEntry.AttemptedValue
         : string.Empty;
@@ -75,7 +77,7 @@
     {
         <div class="text-danger fw-semibold mt-2">Trễ hạn sản xuất!</div>
     }
-    else if (!targetReached)
+    else if (hasValidTarget && !targetReached)
     {
         <div class="text-muted mt-2">Còn @daysRemaining.ToVietnameseNumber() ngày</div>
     }
@@ -91,7 +93,8 @@
                 <div class="col-12 col-md-3">
                     <label class="form-label" for="daily-log-date">Ngày sản xuất</label>
                     <input class="form-control" id="daily-log-date" name="Date" type="date"
-                           value="@dateValue" aria-describedby="daily-log-date-error" required />
+                           value="@dateValue" max="@maxDateValue"
+                           aria-describedby="daily-log-date-error" required />
                     @Html.ValidationMessage(nameof(DailyProductionLogInputModel.Date), null,
                         new { @class = "text-danger", id = "daily-log-date-error" })
                 </div>

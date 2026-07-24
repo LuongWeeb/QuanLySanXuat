@@ -231,6 +231,14 @@ public class WorkOrderController : Controller
     {
         if (input.Date is null && !HasModelError(nameof(input.Date)))
             ModelState.AddModelError(nameof(input.Date), "Ngày sản xuất là bắt buộc.");
+        else if (input.Date is not null &&
+                 input.Date.Value.Date > GetBusinessDate() &&
+                 !HasModelError(nameof(input.Date)))
+        {
+            ModelState.AddModelError(
+                nameof(input.Date),
+                "Ngày sản xuất không được ở tương lai.");
+        }
         if (input.QtyProduced <= 0 && !HasModelError(nameof(input.QtyProduced)))
             ModelState.AddModelError(nameof(input.QtyProduced), "Số lượng sản xuất phải lớn hơn 0.");
         if (input.Notes?.Length > 250 && !HasModelError(nameof(input.Notes)))

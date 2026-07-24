@@ -119,4 +119,24 @@ public class CommonExtensionsTests
             CultureInfo.CurrentUICulture = originalUiCulture;
         }
     }
+
+    [Theory]
+    [InlineData(DateTimeKind.Utc)]
+    [InlineData(DateTimeKind.Unspecified)]
+    public void ToVietnameseBusinessDateTime_ConvertsStoredUtcKindsAcrossBusinessDateBoundary(
+        DateTimeKind kind)
+    {
+        var storedTimestamp = DateTime.SpecifyKind(
+            new DateTime(2026, 7, 23, 18, 30, 0),
+            kind);
+        var businessTimeZone = TimeZoneInfo.CreateCustomTimeZone(
+            "Asia/Ho_Chi_Minh",
+            TimeSpan.FromHours(7),
+            "Vietnam",
+            "Vietnam");
+
+        var display = storedTimestamp.ToVietnameseBusinessDateTime(businessTimeZone);
+
+        Assert.Equal("24/07/2026 01:30", display);
+    }
 }
