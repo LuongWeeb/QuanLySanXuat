@@ -18,17 +18,23 @@ public class WorkOrderController : Controller
     private readonly IWorkOrderService _workOrderService;
     private readonly ILogger<WorkOrderController> _logger;
     private readonly IReportExportService _reportExportService;
+    private readonly TimeProvider _timeProvider;
+    private readonly TimeZoneInfo _businessTimeZone;
 
     public WorkOrderController(
         ApplicationDbContext context,
         IWorkOrderService workOrderService,
         ILogger<WorkOrderController> logger,
-        IReportExportService reportExportService)
+        IReportExportService reportExportService,
+        TimeProvider timeProvider,
+        TimeZoneInfo businessTimeZone)
     {
         _context = context;
         _workOrderService = workOrderService;
         _logger = logger;
         _reportExportService = reportExportService ?? throw new ArgumentNullException(nameof(reportExportService));
+        _timeProvider = timeProvider;
+        _businessTimeZone = businessTimeZone;
     }
 
     public async Task<IActionResult> Index()
@@ -38,6 +44,7 @@ public class WorkOrderController : Controller
             .Include(x => x.DailyProductionLogs)
             .OrderByDescending(x => x.DueDate)
             .ToListAsync();
+        ViewData["BusinessDate"] = GetBusinessDate();
         return View(orders);
     }
 
@@ -50,6 +57,7 @@ public class WorkOrderController : Controller
             .SingleOrDefaultAsync(x => x.Id == id);
         if (order is null) return NotFound();
 
+        ViewData["BusinessDate"] = GetBusinessDate();
         ViewData["Reservations"] = await _context.MaterialReservations.AsNoTracking()
             .Include(x => x.Product)
             .Include(x => x.Lot)
@@ -215,6 +223,9 @@ public class WorkOrderController : Controller
     }
 
     private string CurrentUserId() => User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "system";
+
+    private DateTime GetBusinessDate() =>
+        TimeZoneInfo.ConvertTime(_timeProvider.GetUtcNow(), _businessTimeZone).Date;
 
     private void ValidateDailyLogInput(DailyProductionLogInputModel input)
     {

@@ -3,6 +3,7 @@
 @using System.Globalization
 @{
     ViewData["Title"] = "Lệnh sản xuất";
+    var businessDate = (DateTime)ViewData["BusinessDate"]!;
 }
 
 <section class="toolbar-row">
@@ -33,8 +34,8 @@
                     : 0;
                 var progressWidth = Math.Clamp(progressPercentage, 0, 100);
                 var targetReached = order.Qty > 0 && totalProduced >= order.Qty;
-                var isOverdue = !targetReached && DateTime.Today > order.DueDate.Date;
-                var daysRemaining = (order.DueDate.Date - DateTime.Today).Days;
+                var isOverdue = !targetReached && businessDate > order.DueDate.Date;
+                var daysRemaining = (order.DueDate.Date - businessDate).Days;
                 <tr>
                     <td><code>@order.Code</code></td>
                     <td>@order.Product?.Code - @order.Product?.Name</td>

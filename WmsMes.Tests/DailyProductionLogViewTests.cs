@@ -45,6 +45,23 @@ public class DailyProductionLogViewTests
         Assert.Contains("maxlength=\"250\"", view);
     }
 
+    [Fact]
+    public void WorkOrderViews_UseControllerSuppliedBusinessDateInsteadOfHostDate()
+    {
+        var index = ReadView("Index.cshtml");
+        var details = ReadView("Details.cshtml");
+
+        Assert.DoesNotContain("DateTime.Today", index);
+        Assert.DoesNotContain("DateTime.Today", details);
+        Assert.Contains("ViewData[\"BusinessDate\"]", index);
+        Assert.Contains("ViewData[\"BusinessDate\"]", details);
+        Assert.Contains("businessDate > order.DueDate.Date", index);
+        Assert.Contains("order.DueDate.Date - businessDate", index);
+        Assert.Contains("businessDate > Model.DueDate.Date", details);
+        Assert.Contains("Model.DueDate.Date - businessDate", details);
+        Assert.Contains("businessDate.ToString(\"yyyy-MM-dd\")", details);
+    }
+
     private static string ReadView(string fileName) =>
         File.ReadAllText(Path.Combine(FindRepositoryRoot(), "Views", "WorkOrder", fileName));
 

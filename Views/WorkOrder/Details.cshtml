@@ -5,17 +5,18 @@
 @using System.Globalization
 @{
     ViewData["Title"] = $"Lệnh {Model.Code}";
+    var businessDate = (DateTime)ViewData["BusinessDate"]!;
     var reservations = ViewData["Reservations"] as IEnumerable<MaterialReservation> ?? Enumerable.Empty<MaterialReservation>();
     var canManage = User.IsInRole("Admin") || User.IsInRole("Manager");
     var totalProduced = Model.DailyProductionLogs.Sum(log => log.QtyProduced);
     var progressPercentage = Model.Qty > 0 ? totalProduced / Model.Qty * 100 : 0;
     var progressWidth = Math.Clamp(progressPercentage, 0, 100);
     var targetReached = Model.Qty > 0 && totalProduced >= Model.Qty;
-    var isOverdue = !targetReached && DateTime.Today > Model.DueDate.Date;
-    var daysRemaining = (Model.DueDate.Date - DateTime.Today).Days;
+    var isOverdue = !targetReached && businessDate > Model.DueDate.Date;
+    var daysRemaining = (Model.DueDate.Date - businessDate).Days;
     var dateValue = ViewData.ModelState.TryGetValue(nameof(DailyProductionLogInputModel.Date), out var dateEntry)
         ? dateEntry.AttemptedValue
-        : DateTime.Today.ToString("yyyy-MM-dd");
+        : businessDate.ToString("yyyy-MM-dd");
     var quantityValue = ViewData.ModelState.TryGetValue(nameof(DailyProductionLogInputModel.QtyProduced), out var quantityEntry)
         ? quantityEntry.AttemptedValue
         : string.Empty;

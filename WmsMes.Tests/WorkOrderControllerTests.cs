@@ -47,6 +47,21 @@ public class WorkOrderControllerTests
     }
 
     [Fact]
+    public async Task Index_SuppliesVietnamBusinessDateAcrossUtcDateBoundary()
+    {
+        await using var context = new ApplicationDbContext(Options($"WO_IndexBusinessDate_{Guid.NewGuid()}"));
+        var controller = Controller(
+            context,
+            timeProvider: new FixedTimeProvider(
+                new DateTimeOffset(2026, 7, 23, 18, 30, 0, TimeSpan.Zero)),
+            businessTimeZone: VietnamTimeZone());
+
+        var result = Assert.IsType<ViewResult>(await controller.Index());
+
+        Assert.Equal(new DateTime(2026, 7, 24), result.ViewData["BusinessDate"]);
+    }
+
+    [Fact]
     public async Task Details_WhenMissing_ReturnsNotFound()
     {
         await using var context = new ApplicationDbContext(Options($"WO_Missing_{Guid.NewGuid()}"));
@@ -85,6 +100,24 @@ public class WorkOrderControllerTests
         Assert.Equal("Ca sáng", Assert.Single(model.DailyProductionLogs).Notes);
         var reservations = Assert.IsAssignableFrom<IEnumerable<MaterialReservation>>(view.ViewData["Reservations"]);
         Assert.Equal("LOT-1", Assert.Single(reservations).Lot!.LotNo);
+    }
+
+    [Fact]
+    public async Task Details_SuppliesVietnamBusinessDateAcrossUtcDateBoundary()
+    {
+        await using var context = new ApplicationDbContext(Options($"WO_DetailsBusinessDate_{Guid.NewGuid()}"));
+        var order = Order(Product("FG-DATE"), "WO-DATE", new DateTime(2026, 7, 24));
+        context.WorkOrders.Add(order);
+        await context.SaveChangesAsync();
+        var controller = Controller(
+            context,
+            timeProvider: new FixedTimeProvider(
+                new DateTimeOffset(2026, 7, 23, 18, 30, 0, TimeSpan.Zero)),
+            businessTimeZone: VietnamTimeZone());
+
+        var result = Assert.IsType<ViewResult>(await controller.Details(order.Id));
+
+        Assert.Equal(new DateTime(2026, 7, 24), result.ViewData["BusinessDate"]);
     }
 
     [Fact]
@@ -271,13 +304,21 @@ public class WorkOrderControllerTests
         logger.Verify(x => x.Log(LogLevel.Error, It.IsAny<EventId>(), It.Is<It.IsAnyType>((_, _) => true), It.IsAny<Exception>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
     }
 
-    private static WorkOrderController Controller(ApplicationDbContext context, IWorkOrderService? service = null, string? userId = null, ILogger<WorkOrderController>? logger = null)
+    private static WorkOrderController Controller(
+        ApplicationDbContext context,
+        IWorkOrderService? service = null,
+        string? userId = null,
+        ILogger<WorkOrderController>? logger = null,
+        TimeProvider? timeProvider = null,
+        TimeZoneInfo? businessTimeZone = null)
     {
         var controller = new WorkOrderController(
             context,
             service ?? Mock.Of<IWorkOrderService>(),
             logger ?? Mock.Of<ILogger<WorkOrderController>>(),
-            Mock.Of<IReportExportService>())
+            Mock.Of<IReportExportService>(),
+            timeProvider ?? TimeProvider.System,
+            businessTimeZone ?? TimeZoneInfo.Utc)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -285,6 +326,18 @@ public class WorkOrderControllerTests
         if (userId != null)
             controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, userId) }, "test"));
         return controller;
+    }
+
+    private static TimeZoneInfo VietnamTimeZone() =>
+        TimeZoneInfo.CreateCustomTimeZone(
+            "Asia/Ho_Chi_Minh",
+            TimeSpan.FromHours(7),
+            "Vietnam",
+            "Vietnam");
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
     private static Product Product(string code, bool manufactured = true, bool active = true) =>

@@ -232,7 +232,9 @@ public class DailyProductionLogControllerTests
             context,
             Mock.Of<IWorkOrderService>(),
             Mock.Of<ILogger<WorkOrderController>>(),
-            Mock.Of<IReportExportService>())
+            Mock.Of<IReportExportService>(),
+            TimeProvider.System,
+            TimeZoneInfo.Utc)
         {
             ControllerContext = new ControllerContext
             {

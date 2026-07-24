@@ -205,7 +205,9 @@ public class ReportExportTests
             context,
             Mock.Of<IWorkOrderService>(),
             Mock.Of<ILogger<WorkOrderController>>(),
-            reports.Object);
+            reports.Object,
+            TimeProvider.System,
+            TimeZoneInfo.Utc);
 
         var result = await controller.ExportPdf(23);
 
@@ -228,7 +230,9 @@ public class ReportExportTests
             context,
             Mock.Of<IWorkOrderService>(),
             Mock.Of<ILogger<WorkOrderController>>(),
-            reports.Object);
+            reports.Object,
+            TimeProvider.System,
+            TimeZoneInfo.Utc);
 
         var result = await controller.ExportPdf(404);
 
