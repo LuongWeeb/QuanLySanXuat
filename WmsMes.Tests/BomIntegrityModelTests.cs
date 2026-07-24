@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -182,6 +184,20 @@ public class BomIntegrityModelTests
         var migration = File.ReadAllText(migrationPath);
 
         Assert.Contains("UX_BOMItems_BomId_ComponentProductId", migration);
+        Assert.Contains(
+            "ActiveProvider == \"Microsoft.EntityFrameworkCore.SqlServer\"",
+            migration);
+        Assert.Contains("SUM([QtyPer] * [ScrapPercent])", migration);
+        Assert.Contains("NULLIF(SUM([QtyPer]), 0)", migration);
+        Assert.Contains("ROW_NUMBER() OVER", migration);
+        var sqliteBranchStart = migration.IndexOf(
+            "else if (ActiveProvider == \"Microsoft.EntityFrameworkCore.Sqlite\")",
+            StringComparison.Ordinal);
+        Assert.True(sqliteBranchStart > 0);
+        Assert.DoesNotContain(
+            "AS REAL",
+            migration[..sqliteBranchStart],
+            StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("CycleCount", migration, StringComparison.OrdinalIgnoreCase);
 
         var designer = File.ReadAllText(Path.ChangeExtension(migrationPath, ".Designer.cs"));
@@ -195,6 +211,78 @@ public class BomIntegrityModelTests
             "ApplicationDbContextModelSnapshot.cs"));
         Assert.Contains("UX_BOMItems_BomId_ComponentProductId", snapshot);
         Assert.DoesNotContain("CycleCount", snapshot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task EnforceUniqueBomComponentsMigration_ReconcilesLegacyDuplicatesAndPreservesDemand()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        var migrator = context.Database.GetService<IMigrator>();
+        await context.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE "__EFMigrationsHistory" (
+                "MigrationId" TEXT NOT NULL CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY,
+                "ProductVersion" TEXT NOT NULL
+            );
+            CREATE TABLE "BOMItems" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_BOMItems" PRIMARY KEY AUTOINCREMENT,
+                "BomId" INTEGER NOT NULL,
+                "ComponentProductId" INTEGER NOT NULL,
+                "QtyPer" decimal(18,2) NOT NULL,
+                "ScrapPercent" decimal(18,2) NOT NULL
+            );
+            CREATE INDEX "IX_BOMItems_BomId" ON "BOMItems" ("BomId");
+            INSERT INTO "BOMItems"
+                ("BomId", "ComponentProductId", "QtyPer", "ScrapPercent")
+            VALUES
+                (10, 20, 5, 10),
+                (10, 20, 3, 20);
+            """);
+        const string migrationName = "20260724112000_EnforceUniqueBomComponents";
+        foreach (var appliedMigration in context.Database.GetMigrations()
+            .Where(migration => migration != migrationName))
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+                VALUES ({0}, '8.0.0');
+                """,
+                appliedMigration);
+        }
+        var originalItems = await context.BOMItems
+            .AsNoTracking()
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        var keptId = originalItems[0].Id;
+        var grossDemandBefore = originalItems.Sum(
+            item => item.QtyPer * (1 + item.ScrapPercent / 100));
+        context.ChangeTracker.Clear();
+
+        await migrator.MigrateAsync();
+
+        var reconciled = Assert.Single(await context.BOMItems
+            .AsNoTracking()
+            .ToListAsync());
+        Assert.Equal(keptId, reconciled.Id);
+        Assert.Equal(8m, reconciled.QtyPer);
+        Assert.Equal(13.75m, reconciled.ScrapPercent);
+        Assert.Equal(
+            grossDemandBefore,
+            reconciled.QtyPer * (1 + reconciled.ScrapPercent / 100));
+
+        context.BOMItems.Add(new BOMItem
+        {
+            BomId = reconciled.BomId,
+            ComponentProductId = reconciled.ComponentProductId,
+            QtyPer = 1,
+            ScrapPercent = 0
+        });
+        await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
     }
 
     private static Product Product(string code) =>
