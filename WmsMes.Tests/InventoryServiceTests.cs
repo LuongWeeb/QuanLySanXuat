@@ -242,6 +242,195 @@ public class InventoryServiceTests
     }
 
     [Fact]
+    public async Task CompleteGoodsReceiptAsync_ProcessesLinesInDeterministicTupleOrder()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.Products.Add(new Product
+        {
+            Id = 2,
+            Code = "P02",
+            Name = "Product 02",
+            BaseUomId = 1
+        });
+        context.Locations.Add(new Location
+        {
+            Id = 2,
+            Code = "LOC02",
+            Name = "Location 02",
+            ZoneId = 1
+        });
+        context.GoodsReceipts.Add(new GoodsReceipt
+        {
+            Id = 1,
+            ReceiptNo = "GR-ORDER",
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsReceiptLine
+                {
+                    ProductId = 2,
+                    LotNo = "LOT-Z",
+                    LocationId = 2,
+                    Qty = 1
+                },
+                new GoodsReceiptLine
+                {
+                    ProductId = 1,
+                    LotNo = "LOT-B",
+                    LocationId = 1,
+                    Qty = 1
+                },
+                new GoodsReceiptLine
+                {
+                    ProductId = 1,
+                    LotNo = "LOT-A",
+                    LocationId = 2,
+                    Qty = 1
+                }
+            }
+        });
+        await context.SaveChangesAsync();
+
+        Assert.True(await new InventoryService(context)
+            .CompleteGoodsReceiptAsync(1, "warehouse"));
+
+        context.ChangeTracker.Clear();
+        var processed = await context.StockTransactions
+            .Include(transaction => transaction.Lot)
+            .OrderBy(transaction => transaction.Id)
+            .Select(transaction => new
+            {
+                transaction.ProductId,
+                transaction.Lot!.LotNo,
+                transaction.LocationId
+            })
+            .ToListAsync();
+        Assert.Equal(
+            new[] { "1:LOT-A:2", "1:LOT-B:1", "2:LOT-Z:2" },
+            processed.Select(item => $"{item.ProductId}:{item.LotNo}:{item.LocationId}"));
+    }
+
+    [Fact]
+    public async Task CompleteGoodsIssueAsync_ProcessesLinesInDeterministicTupleOrder()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.Customers.Add(new Customer { Id = 1, Code = "C", Name = "Customer" });
+        context.Products.Add(new Product
+        {
+            Id = 2,
+            Code = "P02",
+            Name = "Product 02",
+            BaseUomId = 1
+        });
+        context.Locations.Add(new Location
+        {
+            Id = 2,
+            Code = "LOC02",
+            Name = "Location 02",
+            ZoneId = 1
+        });
+        context.Lots.AddRange(
+            new Lot { Id = 1, ProductId = 1, LotNo = "LOT-1", Qty = 5 },
+            new Lot { Id = 2, ProductId = 1, LotNo = "LOT-2", Qty = 5 },
+            new Lot { Id = 3, ProductId = 2, LotNo = "LOT-3", Qty = 5 });
+        context.StockBalances.AddRange(
+            new StockBalance { ProductId = 1, LotId = 1, LocationId = 2, QtyAvailable = 5 },
+            new StockBalance { ProductId = 1, LotId = 2, LocationId = 1, QtyAvailable = 5 },
+            new StockBalance { ProductId = 2, LotId = 3, LocationId = 2, QtyAvailable = 5 });
+        context.GoodsIssues.Add(new GoodsIssue
+        {
+            Id = 1,
+            IssueNo = "GI-ORDER",
+            CustomerId = 1,
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsIssueLine { ProductId = 2, LotId = 3, LocationId = 2, Qty = 1 },
+                new GoodsIssueLine { ProductId = 1, LotId = 2, LocationId = 1, Qty = 1 },
+                new GoodsIssueLine { ProductId = 1, LotId = 1, LocationId = 2, Qty = 1 }
+            }
+        });
+        await context.SaveChangesAsync();
+
+        Assert.True(await new InventoryService(context)
+            .CompleteGoodsIssueAsync(1, "warehouse"));
+
+        context.ChangeTracker.Clear();
+        var processed = await context.StockTransactions
+            .OrderBy(transaction => transaction.Id)
+            .Select(transaction =>
+                $"{transaction.ProductId}:{transaction.LotId}:{transaction.LocationId}")
+            .ToListAsync();
+        Assert.Equal(
+            new[] { "1:1:2", "1:2:1", "2:3:2" },
+            processed);
+    }
+
+    [Fact]
+    public async Task CompleteGoodsIssueAsync_RejectsQuarantineBalanceAtomically()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.Customers.Add(new Customer { Id = 1, Code = "C", Name = "Customer" });
+        var quarantine = await context.Locations.FindAsync(1);
+        quarantine!.Code = QcService.QuarantineLocationCode;
+        context.Lots.Add(new Lot { Id = 1, ProductId = 1, LotNo = "LOT-Q", Qty = 5 });
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            QtyAvailable = 5
+        });
+        context.GoodsIssues.Add(new GoodsIssue
+        {
+            Id = 1,
+            IssueNo = "GI-Q",
+            CustomerId = 1,
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsIssueLine
+                {
+                    ProductId = 1,
+                    LotId = 1,
+                    LocationId = 1,
+                    Qty = 2
+                }
+            }
+        });
+        await context.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new InventoryService(context).CompleteGoodsIssueAsync(1, "warehouse"));
+
+        context.ChangeTracker.Clear();
+        Assert.Equal(5, (await context.StockBalances.SingleAsync()).QtyAvailable);
+        Assert.Equal(DocumentStatus.Draft, (await context.GoodsIssues.SingleAsync()).Status);
+        Assert.Empty(await context.StockTransactions.ToListAsync());
+    }
+
+    [Fact]
     public async Task StartStocktakeAsync_FreezesLocationBalancesAndCreatesCountingLines()
     {
         await using var context = CreateContext();

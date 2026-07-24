@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -158,7 +159,10 @@ public class InventoryController : Controller
 
             var locationIsActive = await _context.Locations
                 .AsNoTracking()
-                .AnyAsync(location => location.Id == line.LocationId && location.IsActive);
+                .AnyAsync(location =>
+                    location.Id == line.LocationId &&
+                    location.IsActive &&
+                    location.Code != QcService.QuarantineLocationCode);
             if (!locationIsActive)
             {
                 ModelState.AddModelError($"{keyPrefix}.{nameof(line.LocationId)}", "Vị trí không hợp lệ hoặc đã ngừng hoạt động.");
@@ -185,6 +189,56 @@ public class InventoryController : Controller
                         $"{keyPrefix}.{nameof(line.Qty)}",
                         $"Lô hàng tại vị trí đã chọn không đủ số lượng khả dụng để xuất (Chỉ còn {available:N2}). Số lượng giữ chỗ đang được bảo vệ.");
                 }
+            }
+        }
+
+        var indexedIssueLines = model.Lines
+            .Select((line, index) => new { Line = line, Index = index });
+        foreach (var group in indexedIssueLines
+            .GroupBy(item => new
+            {
+                item.Line.ProductId,
+                item.Line.LotId,
+                item.Line.LocationId
+            })
+            .Where(group => group.Count() > 1))
+        {
+            if (group.Any(item =>
+                HasFieldError(item.Index, nameof(item.Line.ProductId)) ||
+                HasFieldError(item.Index, nameof(item.Line.LotId)) ||
+                HasFieldError(item.Index, nameof(item.Line.LocationId)) ||
+                HasFieldError(item.Index, nameof(item.Line.Qty))))
+            {
+                continue;
+            }
+
+            var requestedQty = group.Sum(item => item.Line.Qty);
+            var qtyAvailable = await _context.StockBalances
+                .AsNoTracking()
+                .Where(balance =>
+                    balance.ProductId == group.Key.ProductId &&
+                    balance.LotId == group.Key.LotId &&
+                    balance.LocationId == group.Key.LocationId &&
+                    balance.Location!.Code != QcService.QuarantineLocationCode)
+                .Select(balance => (decimal?)balance.QtyAvailable)
+                .FirstOrDefaultAsync() ?? 0m;
+            if (requestedQty <= qtyAvailable)
+            {
+                continue;
+            }
+
+            var cumulativeQty = 0m;
+            foreach (var item in group.OrderBy(item => item.Index))
+            {
+                cumulativeQty += item.Line.Qty;
+                if (cumulativeQty <= qtyAvailable)
+                {
+                    continue;
+                }
+
+                ModelState.AddModelError(
+                    $"Lines[{item.Index}].{nameof(item.Line.Qty)}",
+                    $"Tổng số lượng yêu cầu cho cùng lô và vị trí là {requestedQty:N2}, vượt quá số lượng khả dụng {qtyAvailable:N2}.");
             }
         }
 
@@ -219,7 +273,7 @@ public class InventoryController : Controller
         };
 
         await using var transaction = _context.Database.IsRelational()
-            ? await _context.Database.BeginTransactionAsync()
+            ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable)
             : null;
 
         try
@@ -246,6 +300,12 @@ public class InventoryController : Controller
         {
             await RollbackIssueAsync(issue, transaction);
             return await IssueCompletionErrorAsync(model, "Có lỗi khi hoàn tất phiếu xuất kho. Vui lòng thử lại.");
+        }
+
+        bool HasFieldError(int index, string fieldName)
+        {
+            var key = $"Lines[{index}].{fieldName}";
+            return ModelState.TryGetValue(key, out var entry) && entry.Errors.Count > 0;
         }
     }
 
@@ -277,7 +337,10 @@ public class InventoryController : Controller
             var keyPrefix = $"Lines[{index}]";
             if (!await _context.Products.AsNoTracking().AnyAsync(x => x.Id == line.ProductId && x.IsActive))
                 ModelState.AddModelError($"{keyPrefix}.{nameof(line.ProductId)}", "Sản phẩm không hợp lệ hoặc đã ngừng hoạt động.");
-            if (!await _context.Locations.AsNoTracking().AnyAsync(x => x.Id == line.LocationId && x.IsActive))
+            if (!await _context.Locations.AsNoTracking().AnyAsync(x =>
+                x.Id == line.LocationId &&
+                x.IsActive &&
+                x.Code != QcService.QuarantineLocationCode))
                 ModelState.AddModelError($"{keyPrefix}.{nameof(line.LocationId)}", "Vị trí không hợp lệ hoặc đã ngừng hoạt động.");
             if (string.IsNullOrWhiteSpace(line.LotNo))
                 ModelState.AddModelError($"{keyPrefix}.{nameof(line.LotNo)}", "Số lô là bắt buộc.");
@@ -285,6 +348,25 @@ public class InventoryController : Controller
                 ModelState.AddModelError($"{keyPrefix}.{nameof(line.Qty)}", "Số lượng phải lớn hơn 0.");
             if (line.UnitPrice < 0)
                 ModelState.AddModelError($"{keyPrefix}.{nameof(line.UnitPrice)}", "Đơn giá không được âm.");
+        }
+
+        foreach (var duplicateGroup in model.Lines
+            .Select((line, index) => new { Line = line, Index = index })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Line.LotNo))
+            .GroupBy(item => new
+            {
+                item.Line.ProductId,
+                LotNo = item.Line.LotNo.Trim().ToUpperInvariant(),
+                item.Line.LocationId
+            })
+            .Where(group => group.Count() > 1))
+        {
+            foreach (var item in duplicateGroup)
+            {
+                ModelState.AddModelError(
+                    $"Lines[{item.Index}].{nameof(item.Line.LotNo)}",
+                    "Sản phẩm, số lô và vị trí bị trùng trong phiếu nhập kho.");
+            }
         }
 
         if (!ModelState.IsValid)
@@ -319,7 +401,7 @@ public class InventoryController : Controller
         }
 
         await using var transaction = _context.Database.IsRelational()
-            ? await _context.Database.BeginTransactionAsync()
+            ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable)
             : null;
 
         try
@@ -364,7 +446,9 @@ public class InventoryController : Controller
             .AsNoTracking()
             .ToListAsync();
         ViewBag.Locations = await _context.Locations
-            .Where(location => location.IsActive)
+            .Where(location =>
+                location.IsActive &&
+                location.Code != QcService.QuarantineLocationCode)
             .OrderBy(location => location.Code)
             .AsNoTracking()
             .ToListAsync();
@@ -376,7 +460,11 @@ public class InventoryController : Controller
             .Include(balance => balance.Product)
             .Include(balance => balance.Lot)
             .Include(balance => balance.Location)
-            .Where(balance => balance.QtyAvailable > 0 && balance.Product!.IsActive && balance.Location!.IsActive)
+            .Where(balance =>
+                balance.QtyAvailable > 0 &&
+                balance.Product!.IsActive &&
+                balance.Location!.IsActive &&
+                balance.Location.Code != QcService.QuarantineLocationCode)
             .OrderBy(balance => balance.Product!.Code)
             .ThenBy(balance => balance.Product!.ShelfLifeDays.HasValue
                 ? balance.Lot!.ExpiryDate ?? DateTime.MaxValue

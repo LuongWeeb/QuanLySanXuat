@@ -165,7 +165,11 @@ public class InventoryService : IInventoryService
                 return false;
             }
 
-            foreach (var line in receipt.Lines)
+            foreach (var line in receipt.Lines
+                .OrderBy(line => line.ProductId)
+                .ThenBy(line => line.LotNo.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(line => line.LocationId)
+                .ThenBy(line => line.Id))
             {
                 var lot = await _context.Lots
                     .FirstOrDefaultAsync(l => l.LotNo == line.LotNo && l.ProductId == line.ProductId);
@@ -263,7 +267,11 @@ public class InventoryService : IInventoryService
                 return false;
             }
 
-            foreach (var line in issue.Lines)
+            foreach (var line in issue.Lines
+                .OrderBy(line => line.ProductId)
+                .ThenBy(line => line.LotId)
+                .ThenBy(line => line.LocationId)
+                .ThenBy(line => line.Id))
             {
                 if (_context.Database.IsRelational())
                 {
@@ -272,6 +280,7 @@ public class InventoryService : IInventoryService
                             sb.ProductId == line.ProductId &&
                             sb.LotId == line.LotId &&
                             sb.LocationId == line.LocationId &&
+                            sb.Location!.Code != QcService.QuarantineLocationCode &&
                             sb.QtyAvailable >= line.Qty)
                         .ExecuteUpdateAsync(setters => setters
                             .SetProperty(sb => sb.QtyAvailable, sb => sb.QtyAvailable - line.Qty));
@@ -286,7 +295,8 @@ public class InventoryService : IInventoryService
                         .FirstOrDefaultAsync(sb =>
                             sb.ProductId == line.ProductId &&
                             sb.LotId == line.LotId &&
-                            sb.LocationId == line.LocationId);
+                            sb.LocationId == line.LocationId &&
+                            sb.Location!.Code != QcService.QuarantineLocationCode);
 
                     if (balance is null || balance.QtyAvailable < line.Qty)
                     {
