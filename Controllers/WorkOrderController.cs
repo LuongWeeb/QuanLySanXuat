@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -34,6 +35,7 @@ public class WorkOrderController : Controller
     {
         var orders = await _context.WorkOrders.AsNoTracking()
             .Include(x => x.Product)
+            .Include(x => x.DailyProductionLogs)
             .OrderByDescending(x => x.DueDate)
             .ToListAsync();
         return View(orders);
@@ -44,6 +46,7 @@ public class WorkOrderController : Controller
         var order = await _context.WorkOrders.AsNoTracking()
             .Include(x => x.Product)
             .Include(x => x.Steps).ThenInclude(x => x.WorkCenter)
+            .Include(x => x.DailyProductionLogs)
             .SingleOrDefaultAsync(x => x.Id == id);
         if (order is null) return NotFound();
 
@@ -54,6 +57,65 @@ public class WorkOrderController : Controller
             .Where(x => x.WorkOrderId == id)
             .ToListAsync();
         return View(order);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> AddDailyLog(int id, DailyProductionLogInputModel input)
+    {
+        ValidateDailyLogInput(input);
+        if (!ModelState.IsValid)
+            return await DetailsWithValidationAsync(id);
+
+        if (!_context.Database.IsRelational())
+        {
+            try
+            {
+                return DailyLogResult(await SaveDailyLogAsync(id), id);
+            }
+            catch (Exception ex)
+            {
+                return DailyLogFailure(ex, id);
+            }
+        }
+
+        await using var transaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable);
+        try
+        {
+            var result = await SaveDailyLogAsync(id);
+            if (result == DailyLogSaveResult.Saved)
+                await transaction.CommitAsync();
+            else
+                await transaction.RollbackAsync();
+
+            return DailyLogResult(result, id);
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return DailyLogFailure(ex, id);
+        }
+
+        async Task<DailyLogSaveResult> SaveDailyLogAsync(int workOrderId)
+        {
+            var order = await _context.WorkOrders
+                .SingleOrDefaultAsync(x => x.Id == workOrderId);
+            if (order is null)
+                return DailyLogSaveResult.Missing;
+            if (order.Status != WorkOrderStatus.InProgress)
+                return DailyLogSaveResult.WrongStatus;
+
+            _context.DailyProductionLogs.Add(new DailyProductionLog
+            {
+                WorkOrderId = order.Id,
+                Date = input.Date!.Value.Date,
+                QtyProduced = input.QtyProduced,
+                Notes = input.Notes?.Trim() ?? string.Empty
+            });
+            await _context.SaveChangesAsync();
+            return DailyLogSaveResult.Saved;
+        }
     }
 
     [HttpGet("[controller]/[action]/{id:int}")]
@@ -154,9 +216,55 @@ public class WorkOrderController : Controller
 
     private string CurrentUserId() => User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "system";
 
+    private void ValidateDailyLogInput(DailyProductionLogInputModel input)
+    {
+        if (input.Date is null && !HasModelError(nameof(input.Date)))
+            ModelState.AddModelError(nameof(input.Date), "Ngày sản xuất là bắt buộc.");
+        if (input.QtyProduced <= 0 && !HasModelError(nameof(input.QtyProduced)))
+            ModelState.AddModelError(nameof(input.QtyProduced), "Số lượng sản xuất phải lớn hơn 0.");
+        if (input.Notes?.Length > 250 && !HasModelError(nameof(input.Notes)))
+            ModelState.AddModelError(nameof(input.Notes), "Ghi chú không được vượt quá 250 ký tự.");
+
+        bool HasModelError(string key) =>
+            ModelState.TryGetValue(key, out var entry) && entry.Errors.Count > 0;
+    }
+
+    private async Task<IActionResult> DetailsWithValidationAsync(int id)
+    {
+        var result = await Details(id);
+        if (result is ViewResult view)
+            view.ViewName = nameof(Details);
+        return result;
+    }
+
+    private IActionResult DailyLogResult(DailyLogSaveResult result, int id)
+    {
+        if (result == DailyLogSaveResult.Missing)
+            return NotFound();
+
+        TempData["StatusMessage"] = result == DailyLogSaveResult.Saved
+            ? "Đã ghi nhận sản lượng sản xuất hàng ngày."
+            : "Chỉ có thể ghi sản lượng khi lệnh đang sản xuất.";
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    private IActionResult DailyLogFailure(Exception exception, int id)
+    {
+        _logger.LogError(exception, "Failed to add daily production log for work order {WorkOrderId}.", id);
+        TempData["StatusMessage"] = "Không thể ghi nhận sản lượng sản xuất. Vui lòng thử lại.";
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
     private async Task LoadProductsAsync() =>
         ViewData["Products"] = await _context.Products.AsNoTracking()
             .Where(x => x.IsManufactured && x.IsActive)
             .OrderBy(x => x.Code)
             .ToListAsync();
+
+    private enum DailyLogSaveResult
+    {
+        Missing,
+        WrongStatus,
+        Saved
+    }
 }

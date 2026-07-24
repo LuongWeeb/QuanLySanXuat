@@ -65,6 +65,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<WorkOrderStep> WorkOrderSteps { get; set; }
 
+    public DbSet<DailyProductionLog> DailyProductionLogs { get; set; }
+
     public DbSet<MaterialReservation> MaterialReservations { get; set; }
 
     public DbSet<LotGenealogy> LotGenealogies { get; set; }
@@ -337,6 +339,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasMany(w => w.Steps)
             .WithOne(s => s.WorkOrder)
             .HasForeignKey(s => s.WorkOrderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<WorkOrder>()
+            .HasMany(w => w.DailyProductionLogs)
+            .WithOne(log => log.WorkOrder)
+            .HasForeignKey(log => log.WorkOrderId)
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.Entity<WorkOrderStep>()

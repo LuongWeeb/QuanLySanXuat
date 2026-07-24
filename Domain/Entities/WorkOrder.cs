@@ -36,4 +36,6 @@ public class WorkOrder
     public string RoutingVersion { get; set; } = string.Empty;
 
     public virtual ICollection<WorkOrderStep> Steps { get; set; } = new List<WorkOrderStep>();
+
+    public virtual ICollection<DailyProductionLog> DailyProductionLogs { get; set; } = new List<DailyProductionLog>();
 }

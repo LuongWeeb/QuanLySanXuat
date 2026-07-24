@@ -1,5 +1,6 @@
 @model IEnumerable<WmsMes.Web.Domain.Entities.WorkOrder>
 @using WmsMes.Web.Domain.Enums
+@using System.Globalization
 @{
     ViewData["Title"] = "Lệnh sản xuất";
 }
@@ -21,15 +22,44 @@
     <div class="table-responsive">
         <table class="table data-table align-middle">
             <thead>
-                <tr><th>Mã lệnh</th><th>Thành phẩm</th><th class="text-end">Số lượng</th><th>Hạn hoàn thành</th><th>Trạng thái</th><th></th></tr>
+                <tr><th>Mã lệnh</th><th>Thành phẩm</th><th class="text-end">Số lượng</th><th>Tiến độ</th><th>Hạn hoàn thành</th><th>Trạng thái</th><th></th></tr>
             </thead>
             <tbody>
             @foreach (var order in Model)
             {
+                var totalProduced = order.DailyProductionLogs.Sum(log => log.QtyProduced);
+                var progressPercentage = order.Qty > 0
+                    ? totalProduced / order.Qty * 100
+                    : 0;
+                var progressWidth = Math.Clamp(progressPercentage, 0, 100);
+                var targetReached = order.Qty > 0 && totalProduced >= order.Qty;
+                var isOverdue = !targetReached && DateTime.Today > order.DueDate.Date;
+                var daysRemaining = (order.DueDate.Date - DateTime.Today).Days;
                 <tr>
                     <td><code>@order.Code</code></td>
                     <td>@order.Product?.Code - @order.Product?.Name</td>
                     <td class="text-end fw-semibold">@order.Qty.ToString("N2")</td>
+                    <td style="min-width: 14rem;">
+                        <div class="d-flex justify-content-between gap-2 small mb-1">
+                            <span>@totalProduced.ToString("N2") / @order.Qty.ToString("N2")</span>
+                            <span>@progressPercentage.ToString("N1")%</span>
+                        </div>
+                        <div class="progress" role="progressbar"
+                             aria-label="Tiến độ lệnh @order.Code"
+                             aria-valuenow="@progressWidth.ToString("0.##", CultureInfo.InvariantCulture)"
+                             aria-valuemin="0" aria-valuemax="100">
+                            <div class="progress-bar @(isOverdue ? "bg-danger" : targetReached ? "bg-success" : "bg-primary")"
+                                 style="width: @progressWidth.ToString("0.##", CultureInfo.InvariantCulture)%"></div>
+                        </div>
+                        @if (isOverdue)
+                        {
+                            <div class="small text-danger fw-semibold mt-1">Trễ hạn sản xuất!</div>
+                        }
+                        else if (!targetReached)
+                        {
+                            <div class="small text-muted mt-1">Còn @daysRemaining ngày</div>
+                        }
+                    </td>
                     <td>@order.DueDate.ToString("yyyy-MM-dd")</td>
                     <td><span class="status-pill">@order.Status</span></td>
                     <td class="text-end"><a class="btn btn-sm btn-outline-primary" asp-action="Details" asp-route-id="@order.Id">Chi tiết</a></td>
@@ -37,7 +67,7 @@
             }
             @if (!Model.Any())
             {
-                <tr><td colspan="6" class="text-center text-muted py-4">Chưa có lệnh sản xuất.</td></tr>
+                <tr><td colspan="7" class="text-center text-muted py-4">Chưa có lệnh sản xuất.</td></tr>
             }
             </tbody>
         </table>

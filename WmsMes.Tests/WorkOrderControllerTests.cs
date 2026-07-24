@@ -27,14 +27,23 @@ public class WorkOrderControllerTests
     {
         await using var context = new ApplicationDbContext(Options($"WO_Index_{Guid.NewGuid()}"));
         var product = Product("FG");
-        context.WorkOrders.AddRange(Order(product, "WO-1", new DateTime(2026, 7, 20)), Order(product, "WO-2", new DateTime(2026, 7, 25)));
+        var older = Order(product, "WO-1", new DateTime(2026, 7, 20));
+        var newer = Order(product, "WO-2", new DateTime(2026, 7, 25));
+        newer.DailyProductionLogs.Add(new DailyProductionLog
+        {
+            Date = new DateTime(2026, 7, 22),
+            QtyProduced = 2
+        });
+        context.WorkOrders.AddRange(older, newer);
         await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
 
         var result = await Controller(context).Index();
 
         var model = Assert.IsAssignableFrom<IEnumerable<WorkOrder>>(Assert.IsType<ViewResult>(result).Model).ToList();
         Assert.Equal(new[] { "WO-2", "WO-1" }, model.Select(x => x.Code));
         Assert.All(model, x => Assert.NotNull(x.Product));
+        Assert.Equal(2m, Assert.Single(model[0].DailyProductionLogs).QtyProduced);
     }
 
     [Fact]
@@ -53,6 +62,12 @@ public class WorkOrderControllerTests
         var material = Product("RM", false);
         var order = Order(product, "WO-DETAIL", DateTime.UtcNow);
         order.Steps.Add(new WorkOrderStep { StepNumber = 1, StepName = "Mix", WorkCenter = new WorkCenter { Code = "WC", Name = "Mixer" } });
+        order.DailyProductionLogs.Add(new DailyProductionLog
+        {
+            Date = new DateTime(2026, 7, 23),
+            QtyProduced = 4,
+            Notes = "Ca sáng"
+        });
         context.WorkOrders.Add(order);
         context.MaterialReservations.Add(new MaterialReservation
         {
@@ -60,12 +75,14 @@ public class WorkOrderControllerTests
             Location = new Location { Code = "A-01", Name = "A-01", Zone = new Zone { Code = "Z", Name = "Zone" } }, QtyReserved = 3
         });
         await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
 
         var result = await Controller(context).Details(order.Id);
 
         var view = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<WorkOrder>(view.Model);
         Assert.Equal("Mixer", Assert.Single(model.Steps).WorkCenter!.Name);
+        Assert.Equal("Ca sáng", Assert.Single(model.DailyProductionLogs).Notes);
         var reservations = Assert.IsAssignableFrom<IEnumerable<MaterialReservation>>(view.ViewData["Reservations"]);
         Assert.Equal("LOT-1", Assert.Single(reservations).Lot!.LotNo);
     }
