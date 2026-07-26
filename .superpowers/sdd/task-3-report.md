@@ -159,7 +159,9 @@ concerns.
 
 ### Ambient transaction atomicity
 
-- Cancellation-owned relational work now starts at `IsolationLevel.Serializable`.
+- Cancellation-owned relational work now starts a normal provider transaction
+  (SQL Server defaults to `ReadCommitted`), avoiding whole-operation conversion
+  deadlocks.
 - When a cancellation joins an existing relational transaction, it creates a
   method-specific savepoint.
 - Success and precondition-false paths release the savepoint.
@@ -187,8 +189,9 @@ The issue reversal path now acquires each exact balance key once, in determinist
   `UPDLOCK` retains update ownership until transaction completion.
 - The model's unique composite index on
   `(ProductId, LotId, LocationId)` supplies the ordered key range used by that lock.
-- Service-owned transactions are also `Serializable`; an ambient SQL Server
-  transaction receives the same key-range behavior from the query hint.
+- Service-owned SQL Server transactions use normal `ReadCommitted`; both owned
+  and supported ambient transactions receive the required exact-key range
+  behavior from the query hint.
 - SQLite uses its serializable transaction/writer serialization, with the document
   status claim occurring before balance access.
 
@@ -284,5 +287,106 @@ Important findings.
 
 - No live SQL Server concurrency integration test was executed. Concurrency safety
   is supported by the generated production SQL lock hints, exact predicates,
-  unique composite index, serializable transaction boundary, deterministic lock
-  order, and relational stale/repeated-key behavior tests described above.
+  unique composite index, deterministic lock order, and relational
+  stale/repeated-key behavior tests described above.
+
+---
+
+## Final concurrency hardening
+
+This section supersedes the earlier final counts and completes the second
+independent review cycle.
+
+### Cancellation transaction policy
+
+- SQL Server cancellation accepts ambient transactions only at
+  `ReadCommitted` or `Snapshot`; `ReadUncommitted`, `RepeatableRead`,
+  `Serializable`, `Chaos`, and `Unspecified` are rejected before savepoint,
+  document claim, or inventory reads.
+- Owned cancellation transactions use the provider's normal isolation.
+- Ambient calls use a unique 32-character GUID savepoint name, preventing
+  collisions with caller-created or nested cancellation savepoints.
+- The relational document compare-and-set claim remains the first document,
+  line, lot, or balance access in a cancellation.
+
+The isolation allowlist regression was RED because `ReadUncommitted`, `Chaos`,
+and `Unspecified` were accepted. It passed after the explicit allowlist replaced
+the earlier partial denylist.
+
+### Cross-flow SQL Server lock order
+
+- Issue completion preloads valuation lots in `ProductId`, `LotId` order.
+  SQL Server uses the production `UPDLOCK, HOLDLOCK` lot-by-id query before any
+  balance mutation.
+- Receipt completion first resolves lot identities with
+  `READCOMMITTEDLOCK`, preventing ambient `Serializable` reads from retaining
+  shared locks. It then acquires existing lots in canonical
+  `ProductId`, `LotId`, `LocationId` order with `UPDLOCK, HOLDLOCK`.
+- A missing receipt lot is rechecked with `UPDLOCK, HOLDLOCK` on its natural key.
+  The model's unique `LotNo` index backs the missing-key range lock.
+- Receipt completion acquires each exact balance tuple once with the existing
+  SQL Server `UPDLOCK, HOLDLOCK` query, after acquiring its lot.
+
+The first completion-lock RED run had three expected failures:
+
+- existing receipt lots emitted `[2,1]` instead of canonical `[1,2]`;
+- issue valuation lots were read `[1,2]` instead of product-first `[2,1]`;
+- the SQL Server lot lock query builders did not exist.
+
+All three passed after targeted lock acquisition and canonical ordering.
+
+### Fresh tracked state and repeated keys
+
+Independent review found that SQL locks alone were insufficient when EF already
+tracked stale entities. Receipt completion now:
+
+- reads locked lots and balances with `AsNoTracking`;
+- explicitly refreshes or attaches the locked database values;
+- caches each acquired lot and balance for the operation;
+- promotes a lot discovered during the missing-key locked recheck into both
+  caches immediately.
+
+Three focused RED/GREEN regressions prove the fixes:
+
+- stale tracked lot/balance: expected lot quantity `12`, actual `7` before the
+  refresh fix;
+- repeated existing balance tuple: expected `13`, actual `11` before the
+  operation-scoped balance cache;
+- lot inserted between initial missing resolution and locked recheck: expected
+  `15`, actual `13` before the mid-race lot was cached.
+
+The mid-race test uses a SQLite command interceptor to insert the lot after the
+initial resolution reader has opened, so the initial query returns missing while
+the later recheck sees the inserted row.
+
+### Final review verdict
+
+Independent final review: **Approved**, with no remaining Critical or Important
+findings. The reviewer confirmed that the lot and balance caches preserve running
+quantities and that Lot-to-Balance lock order remains intact.
+
+### Verification
+
+Focused `InventoryServiceTests`:
+
+```text
+Passed! - Failed: 0, Passed: 51, Skipped: 0, Total: 51
+```
+
+Full solution:
+
+```text
+Passed! - Failed: 0, Passed: 356, Skipped: 0, Total: 356
+```
+
+The output includes the expected existing JWT signing-key startup validation
+logs; the assertions pass and the test process exits successfully.
+
+### Provider evidence boundary
+
+No live SQL Server stress test was available. SQL Server evidence consists of
+generated production SQL (`ToQueryString`) verifying the exact predicates and
+lock hints, model verification of the supporting unique indexes, plus SQLite
+relational tests for document idempotency, savepoint rollback, stale tracked
+state, deterministic order, repeated tuples, and the missing-to-found lot
+transition.
