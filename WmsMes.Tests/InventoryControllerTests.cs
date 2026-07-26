@@ -1094,7 +1094,7 @@ public class InventoryControllerTests
     }
 
     [Fact]
-    public async Task Transactions_ReturnsNewestFirstWithDisplayRelationships()
+    public async Task Transactions_UsesStableKeysetPagesWithoutOverlap()
     {
         await using var context = new ApplicationDbContext(
             new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -1108,43 +1108,67 @@ public class InventoryControllerTests
             Name = "Location",
             Zone = new Zone { Code = "Z", Name = "Zone" }
         };
-        context.StockTransactions.AddRange(
-            new StockTransaction
+        var timestamp = new DateTime(2026, 2, 1, 8, 30, 0, DateTimeKind.Utc);
+        for (var id = 1; id <= 53; id++)
+        {
+            context.StockTransactions.Add(new StockTransaction
             {
+                Id = id,
                 Type = WmsMes.Web.Domain.Enums.TransactionType.Receipt,
                 Product = product,
                 Lot = lot,
                 Location = location,
-                Qty = 3,
-                TransactionDate = new DateTime(2026, 1, 1),
-                UserId = "old",
-                ReferenceNo = "OLD"
-            },
-            new StockTransaction
-            {
-                Type = WmsMes.Web.Domain.Enums.TransactionType.Issue,
-                Product = product,
-                Lot = lot,
-                Location = location,
-                Qty = -1,
-                TransactionDate = new DateTime(2026, 2, 1),
-                UserId = "new",
-                ReferenceNo = "NEW"
+                Qty = id,
+                QtyAfter = id,
+                ValuationRate = 2,
+                TransactionDate = timestamp,
+                UserId = $"user-{id}",
+                ReferenceNo = $"REF-{id:00}"
             });
+        }
         await context.SaveChangesAsync();
         var controller = new InventoryController(context, Mock.Of<IReportExportService>());
 
-        var result = await controller.Transactions();
+        var firstResult = await controller.Transactions();
+        var firstPage = Assert.IsType<StockTransactionPageViewModel>(
+            Assert.IsType<ViewResult>(firstResult).Model);
+        var secondResult = await controller.Transactions(
+            firstPage.NextBeforeDate,
+            firstPage.NextBeforeId);
+        var secondPage = Assert.IsType<StockTransactionPageViewModel>(
+            Assert.IsType<ViewResult>(secondResult).Model);
 
-        var model = Assert.IsAssignableFrom<IEnumerable<StockTransaction>>(
-            Assert.IsType<ViewResult>(result).Model).ToList();
-        Assert.Equal(new[] { "NEW", "OLD" }, model.Select(item => item.ReferenceNo));
-        Assert.All(model, item =>
+        Assert.Equal(50, firstPage.Items.Count);
+        Assert.Equal(Enumerable.Range(4, 50).Reverse(), firstPage.Items.Select(item => item.Id));
+        Assert.True(firstPage.HasNextPage);
+        Assert.Equal(timestamp, firstPage.NextBeforeDate);
+        Assert.Equal(4, firstPage.NextBeforeId);
+        Assert.Equal(new[] { 3, 2, 1 }, secondPage.Items.Select(item => item.Id));
+        Assert.False(secondPage.HasNextPage);
+        Assert.Empty(firstPage.Items.Select(item => item.Id)
+            .Intersect(secondPage.Items.Select(item => item.Id)));
+        Assert.All(firstPage.Items.Concat(secondPage.Items), item =>
         {
-            Assert.NotNull(item.Product);
-            Assert.NotNull(item.Lot);
-            Assert.NotNull(item.Location);
+            Assert.Equal("P", item.ProductCode);
+            Assert.Equal("Product", item.ProductName);
+            Assert.Equal("LOT", item.LotNo);
+            Assert.Equal("LOC", item.LocationCode);
         });
+    }
+
+    [Fact]
+    public void Transactions_RequiresExplicitGetAndWarehouseAuthorization()
+    {
+        var action = typeof(InventoryController).GetMethod(
+            nameof(InventoryController.Transactions),
+            new[] { typeof(DateTime?), typeof(int?) });
+
+        Assert.NotNull(action);
+        Assert.Single(action!.GetCustomAttributes(typeof(HttpGetAttribute), true));
+        Assert.Equal(
+            "Admin,Warehouse,Manager",
+            Assert.Single(action.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+                .Cast<AuthorizeAttribute>()).Roles);
     }
 
     private static InventoryController CancellationController(

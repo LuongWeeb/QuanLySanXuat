@@ -101,7 +101,8 @@ public class InventoryViewTests
     {
         var view = ReadInventoryView("Transactions.cshtml");
 
-        Assert.Contains("@model IEnumerable<WmsMes.Web.Domain.Entities.StockTransaction>", view);
+        Assert.Contains("@model WmsMes.Web.ViewModels.StockTransactionPageViewModel", view);
+        Assert.Contains("@foreach (var transaction in Model.Items)", view);
         Assert.Contains("Số dư sau GD", view);
         Assert.Contains("@transaction.QtyAfter.ToVietnameseNumber()", view);
         Assert.Contains("Đơn giá vốn", view);
@@ -111,6 +112,10 @@ public class InventoryViewTests
         Assert.Contains("Đã hủy", view);
         Assert.Contains("badge bg-success", view);
         Assert.Contains("Hợp lệ", view);
+        Assert.Contains("aria-label=\"Phân trang sổ cái kho\"", view);
+        Assert.Contains("asp-route-beforeDate", view);
+        Assert.Contains("asp-route-beforeId", view);
+        Assert.Contains(">Cũ hơn</a>", view);
     }
 
     private static string ReadInventoryView(string fileName) =>

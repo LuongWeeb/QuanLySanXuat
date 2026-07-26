@@ -1,3 +1,5 @@
+using WmsMes.Web.Domain.Enums;
+
 namespace WmsMes.Web.ViewModels;
 
 public class CreateReceiptViewModel
@@ -27,4 +29,45 @@ public class IssueLineInput
     public int LotId { get; set; }
     public decimal Qty { get; set; }
     public int LocationId { get; set; }
+}
+
+public sealed class StockTransactionPageViewModel
+{
+    public IReadOnlyList<StockTransactionListItemViewModel> Items { get; init; } =
+        Array.Empty<StockTransactionListItemViewModel>();
+
+    public bool HasNextPage { get; init; }
+
+    public bool IsFirstPage { get; init; }
+
+    public DateTime? NextBeforeDate { get; init; }
+
+    public int? NextBeforeId { get; init; }
+}
+
+public sealed class StockTransactionListItemViewModel
+{
+    public int Id { get; init; }
+
+    public TransactionType Type { get; init; }
+
+    public string ProductCode { get; init; } = string.Empty;
+
+    public string ProductName { get; init; } = string.Empty;
+
+    public string LotNo { get; init; } = string.Empty;
+
+    public string LocationCode { get; init; } = string.Empty;
+
+    public decimal Qty { get; init; }
+
+    public decimal QtyAfter { get; init; }
+
+    public decimal ValuationRate { get; init; }
+
+    public bool IsCancelled { get; init; }
+
+    public DateTime TransactionDate { get; init; }
+
+    public string ReferenceNo { get; init; } = string.Empty;
 }

@@ -1,4 +1,4 @@
-@model IEnumerable<WmsMes.Web.Domain.Entities.StockTransaction>
+@model WmsMes.Web.ViewModels.StockTransactionPageViewModel
 @inject TimeZoneInfo BusinessTimeZone
 @{
     ViewData["Title"] = "Sổ cái kho";
@@ -33,18 +33,18 @@
                 </tr>
             </thead>
             <tbody>
-            @foreach (var transaction in Model)
+            @foreach (var transaction in Model.Items)
             {
                 <tr class="@(transaction.IsCancelled ? "text-muted text-decoration-line-through" : "")">
                     <td>@transaction.TransactionDate.ToVietnameseBusinessDateTime(BusinessTimeZone)</td>
                     <td>@transaction.Type.ToVietnameseString()</td>
                     <td><code>@transaction.ReferenceNo</code></td>
                     <td>
-                        <code>@transaction.Product?.Code</code>
-                        <span class="table-subtext">@transaction.Product?.Name</span>
+                        <code>@transaction.ProductCode</code>
+                        <span class="table-subtext">@transaction.ProductName</span>
                     </td>
-                    <td><code>@transaction.Lot?.LotNo</code></td>
-                    <td><code>@transaction.Location?.Code</code></td>
+                    <td><code>@transaction.LotNo</code></td>
+                    <td><code>@transaction.LocationCode</code></td>
                     <td class="text-end fw-semibold">
                         @(transaction.Qty > 0 ? "+" : "")@transaction.Qty.ToVietnameseNumber()
                     </td>
@@ -65,11 +65,33 @@
             </tbody>
         </table>
     </div>
-    @if (!Model.Any())
+    @if (!Model.Items.Any())
     {
         <div class="empty-state compact">
             <h3>Chưa có giao dịch kho</h3>
             <p>Giao dịch sẽ xuất hiện sau khi hoàn tất nghiệp vụ nhập, xuất hoặc điều chỉnh kho.</p>
         </div>
+    }
+    else if (Model.HasNextPage || !Model.IsFirstPage)
+    {
+        <nav class="d-flex justify-content-between align-items-center p-3"
+             aria-label="Phân trang sổ cái kho">
+            @if (!Model.IsFirstPage)
+            {
+                <a class="btn btn-sm btn-outline-secondary"
+                   asp-action="Transactions">Mới nhất</a>
+            }
+            else
+            {
+                <span></span>
+            }
+            @if (Model.HasNextPage)
+            {
+                <a class="btn btn-sm btn-outline-secondary"
+                   asp-action="Transactions"
+                   asp-route-beforeDate="@Model.NextBeforeDate?.ToString("O", System.Globalization.CultureInfo.InvariantCulture)"
+                   asp-route-beforeId="@Model.NextBeforeId">Cũ hơn</a>
+            }
+        </nav>
     }
 </section>

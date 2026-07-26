@@ -107,19 +107,58 @@ public class InventoryController : Controller
         return View(issues);
     }
 
+    [HttpGet]
     [Authorize(Roles = "Admin,Warehouse,Manager")]
-    public async Task<IActionResult> Transactions()
+    public async Task<IActionResult> Transactions(
+        DateTime? beforeDate = null,
+        int? beforeId = null)
     {
-        var transactions = await _context.StockTransactions
-            .Include(transaction => transaction.Product)
-            .Include(transaction => transaction.Lot)
-            .Include(transaction => transaction.Location)
+        const int pageSize = 50;
+        var hasCursor = beforeDate.HasValue && beforeId.HasValue;
+        var query = _context.StockTransactions.AsNoTracking();
+        if (hasCursor)
+        {
+            query = query.Where(transaction =>
+                transaction.TransactionDate < beforeDate!.Value ||
+                (transaction.TransactionDate == beforeDate.Value &&
+                 transaction.Id < beforeId!.Value));
+        }
+
+        var items = await query
             .OrderByDescending(transaction => transaction.TransactionDate)
             .ThenByDescending(transaction => transaction.Id)
-            .AsNoTracking()
+            .Select(transaction => new StockTransactionListItemViewModel
+            {
+                Id = transaction.Id,
+                Type = transaction.Type,
+                ProductCode = transaction.Product!.Code,
+                ProductName = transaction.Product.Name,
+                LotNo = transaction.Lot!.LotNo,
+                LocationCode = transaction.Location!.Code,
+                Qty = transaction.Qty,
+                QtyAfter = transaction.QtyAfter,
+                ValuationRate = transaction.ValuationRate,
+                IsCancelled = transaction.IsCancelled,
+                TransactionDate = transaction.TransactionDate,
+                ReferenceNo = transaction.ReferenceNo
+            })
+            .Take(pageSize + 1)
             .ToListAsync();
+        var hasNextPage = items.Count > pageSize;
+        if (hasNextPage)
+        {
+            items.RemoveAt(pageSize);
+        }
 
-        return View(transactions);
+        var lastItem = hasNextPage ? items[^1] : null;
+        return View(new StockTransactionPageViewModel
+        {
+            Items = items,
+            HasNextPage = hasNextPage,
+            IsFirstPage = !hasCursor,
+            NextBeforeDate = lastItem?.TransactionDate,
+            NextBeforeId = lastItem?.Id
+        });
     }
 
     [HttpPost]

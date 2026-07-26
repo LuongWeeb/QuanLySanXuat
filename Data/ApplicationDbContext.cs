@@ -119,6 +119,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasIndex(sb => new { sb.ProductId, sb.LotId, sb.LocationId })
             .IsUnique();
 
+        builder.Entity<StockTransaction>()
+            .HasIndex(transaction => new { transaction.TransactionDate, transaction.Id })
+            .IsDescending()
+            .HasDatabaseName("IX_StockTransactions_TransactionDate_Id");
+
         builder.Entity<StockBalance>()
             .HasOne(sb => sb.Product)
             .WithMany()

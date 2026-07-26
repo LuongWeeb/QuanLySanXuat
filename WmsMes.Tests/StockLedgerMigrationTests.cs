@@ -1,3 +1,9 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
+using WmsMes.Web.Data;
+using WmsMes.Web.Domain.Entities;
+
 namespace WmsMes.Tests;
 
 public class StockLedgerMigrationTests
@@ -33,6 +39,44 @@ public class StockLedgerMigrationTests
         Assert.DoesNotContain("CycleCount", migration);
         Assert.DoesNotContain("DropTable(", migration);
         Assert.Contains("DropColumn(", migration);
+    }
+
+    [Fact]
+    public void StockTransactionModel_HasDescendingLedgerPagingIndex()
+    {
+        using var context = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=LedgerIndexShape")
+                .Options);
+
+        var entity = context.GetService<IDesignTimeModel>().Model
+            .FindEntityType(typeof(StockTransaction));
+        var index = Assert.Single(entity!.GetIndexes().Where(candidate =>
+            candidate.Properties.Select(property => property.Name)
+                .SequenceEqual(new[]
+                {
+                    nameof(StockTransaction.TransactionDate),
+                    nameof(StockTransaction.Id)
+                })));
+
+        Assert.Equal("IX_StockTransactions_TransactionDate_Id", index.GetDatabaseName());
+        Assert.Empty(index.IsDescending!);
+    }
+
+    [Fact]
+    public void AddStockLedgerPagingIndexMigration_ContainsOnlyDescendingCompositeIndex()
+    {
+        var migration = ReadMigration("AddStockLedgerPagingIndex");
+
+        Assert.Contains("CreateIndex(", migration);
+        Assert.Contains("name: \"IX_StockTransactions_TransactionDate_Id\"", migration);
+        Assert.Contains("columns: new[] { \"TransactionDate\", \"Id\" }", migration);
+        Assert.Contains("descending: new bool[0]", migration);
+        Assert.Contains("DropIndex(", migration);
+        Assert.DoesNotContain("AddColumn(", migration);
+        Assert.DoesNotContain("DropColumn(", migration);
+        Assert.DoesNotContain("CreateTable(", migration);
+        Assert.DoesNotContain("DropTable(", migration);
     }
 
     private static string ReadMigration(string migrationName)
