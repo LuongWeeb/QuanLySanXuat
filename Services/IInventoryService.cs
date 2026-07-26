@@ -17,6 +17,10 @@ public interface IInventoryService
 
     Task<bool> CompleteGoodsIssueWithoutNotificationAsync(int issueId, string userId);
 
+    Task<bool> CancelGoodsReceiptAsync(int receiptId, string userId);
+
+    Task<bool> CancelGoodsIssueAsync(int issueId, string userId);
+
     Task NotifyStockChangedAsync();
 
     Task<bool> StartStocktakeAsync(int stocktakeId);

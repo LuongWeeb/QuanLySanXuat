@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -360,6 +361,398 @@ public class InventoryService : IInventoryService
         if (notify && !hasAmbientTransaction) await NotifyStockChangedSafelyAsync();
         return true;
     }
+
+    public async Task<bool> CancelGoodsReceiptAsync(int receiptId, string userId)
+    {
+        var changeTrackerSnapshot = CaptureChangeTracker();
+        await using var transaction = await BeginTransactionIfRelationalAsync();
+        try
+        {
+            var receipt = await _context.GoodsReceipts
+                .Include(receipt => receipt.Lines)
+                .FirstOrDefaultAsync(receipt => receipt.Id == receiptId);
+
+            if (receipt is null || receipt.Status != DocumentStatus.Completed)
+            {
+                return false;
+            }
+
+            if (receipt.Lines.Any(line => line.Qty <= 0))
+            {
+                throw new InvalidOperationException("Quantity must be greater than zero.");
+            }
+
+            if (_context.Database.IsRelational())
+            {
+                var claimed = await _context.GoodsReceipts
+                    .Where(candidate =>
+                        candidate.Id == receiptId &&
+                        candidate.Status == DocumentStatus.Completed)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(candidate => candidate.Status, DocumentStatus.Cancelled));
+                if (claimed != 1)
+                {
+                    return false;
+                }
+            }
+
+            foreach (var line in receipt.Lines
+                .OrderBy(line => line.ProductId)
+                .ThenBy(line => line.LotNo.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(line => line.LocationId)
+                .ThenBy(line => line.Id))
+            {
+                var lot = await _context.Lots
+                    .FirstOrDefaultAsync(candidate =>
+                        candidate.LotNo == line.LotNo &&
+                        candidate.ProductId == line.ProductId);
+
+                decimal qtyAfter;
+                if (_context.Database.IsRelational())
+                {
+                    var updated = lot is null
+                        ? 0
+                        : await _context.StockBalances
+                            .Where(balance =>
+                                balance.ProductId == line.ProductId &&
+                                balance.LotId == lot.Id &&
+                                balance.LocationId == line.LocationId &&
+                                balance.QtyAvailable >= line.Qty)
+                            .ExecuteUpdateAsync(setters => setters
+                                .SetProperty(balance => balance.QtyAvailable,
+                                    balance => balance.QtyAvailable - line.Qty));
+                    if (updated != 1)
+                    {
+                        var availableQty = lot is null
+                            ? null
+                            : await _context.StockBalances
+                                .Where(balance =>
+                                    balance.ProductId == line.ProductId &&
+                                    balance.LotId == lot.Id &&
+                                    balance.LocationId == line.LocationId)
+                                .Select(balance => (decimal?)balance.QtyAvailable)
+                                .SingleOrDefaultAsync();
+                        throw CreateReceiptCancellationInsufficientStockException(line.Qty, availableQty);
+                    }
+
+                    qtyAfter = await _context.StockBalances
+                        .Where(balance =>
+                            balance.ProductId == line.ProductId &&
+                            balance.LotId == lot!.Id &&
+                            balance.LocationId == line.LocationId)
+                        .Select(balance => balance.QtyAvailable)
+                        .SingleAsync();
+                    SynchronizeTrackedBalance(
+                        line.ProductId,
+                        lot!.Id,
+                        line.LocationId,
+                        qtyAfter);
+
+                    var updatedLot = await _context.Lots
+                        .Where(candidate => candidate.Id == lot!.Id && candidate.Qty >= line.Qty)
+                        .ExecuteUpdateAsync(setters => setters
+                            .SetProperty(candidate => candidate.Qty, candidate => candidate.Qty - line.Qty));
+                    if (updatedLot != 1)
+                    {
+                        throw CreateReceiptCancellationInsufficientStockException(line.Qty, qtyAfter + line.Qty);
+                    }
+
+                    var lotQtyAfter = await _context.Lots
+                        .Where(candidate => candidate.Id == lot.Id)
+                        .Select(candidate => candidate.Qty)
+                        .SingleAsync();
+                    SynchronizeTrackedLot(lot.Id, lotQtyAfter);
+                }
+                else
+                {
+                    var balance = lot is null
+                        ? null
+                        : await _context.StockBalances
+                            .FirstOrDefaultAsync(candidate =>
+                                candidate.ProductId == line.ProductId &&
+                                candidate.LotId == lot.Id &&
+                                candidate.LocationId == line.LocationId);
+                    if (balance is null || balance.QtyAvailable < line.Qty || lot!.Qty < line.Qty)
+                    {
+                        throw CreateReceiptCancellationInsufficientStockException(
+                            line.Qty,
+                            balance?.QtyAvailable);
+                    }
+
+                    balance.QtyAvailable -= line.Qty;
+                    lot.Qty -= line.Qty;
+                    qtyAfter = balance.QtyAvailable;
+                }
+
+                await _context.StockTransactions.AddAsync(new StockTransaction
+                {
+                    Type = TransactionType.Receipt,
+                    ProductId = line.ProductId,
+                    LotId = lot!.Id,
+                    LocationId = line.LocationId,
+                    Qty = -line.Qty,
+                    QtyAfter = qtyAfter,
+                    ValuationRate = lot.UnitPrice,
+                    IsCancelled = true,
+                    TransactionDate = DateTime.UtcNow,
+                    UserId = userId,
+                    ReferenceNo = receipt.ReceiptNo
+                });
+            }
+
+            receipt.Status = DocumentStatus.Cancelled;
+            await _context.SaveChangesAsync();
+            await CommitIfRelationalAsync(transaction);
+            return true;
+        }
+        catch
+        {
+            await RollbackIfRelationalAsync(transaction);
+            RestoreChangeTracker(changeTrackerSnapshot);
+            throw;
+        }
+    }
+
+    public async Task<bool> CancelGoodsIssueAsync(int issueId, string userId)
+    {
+        var changeTrackerSnapshot = CaptureChangeTracker();
+        await using var transaction = await BeginTransactionIfRelationalAsync();
+        try
+        {
+            var issue = await _context.GoodsIssues
+                .Include(issue => issue.Lines)
+                .FirstOrDefaultAsync(issue => issue.Id == issueId);
+
+            if (issue is null || issue.Status != DocumentStatus.Completed)
+            {
+                return false;
+            }
+
+            if (issue.Lines.Any(line => line.Qty <= 0))
+            {
+                throw new InvalidOperationException("Quantity must be greater than zero.");
+            }
+
+            if (_context.Database.IsRelational())
+            {
+                var claimed = await _context.GoodsIssues
+                    .Where(candidate =>
+                        candidate.Id == issueId &&
+                        candidate.Status == DocumentStatus.Completed)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(candidate => candidate.Status, DocumentStatus.Cancelled));
+                if (claimed != 1)
+                {
+                    return false;
+                }
+            }
+
+            foreach (var line in issue.Lines
+                .OrderBy(line => line.ProductId)
+                .ThenBy(line => line.LotId)
+                .ThenBy(line => line.LocationId)
+                .ThenBy(line => line.Id))
+            {
+                decimal qtyAfter;
+                if (_context.Database.IsRelational())
+                {
+                    var pendingBalance = _context.ChangeTracker
+                        .Entries<StockBalance>()
+                        .FirstOrDefault(entry =>
+                            entry.State == EntityState.Added &&
+                            entry.Entity.ProductId == line.ProductId &&
+                            entry.Entity.LotId == line.LotId &&
+                            entry.Entity.LocationId == line.LocationId)
+                        ?.Entity;
+                    if (pendingBalance is not null)
+                    {
+                        pendingBalance.QtyAvailable += line.Qty;
+                        qtyAfter = pendingBalance.QtyAvailable;
+                    }
+                    else
+                    {
+                        var updated = await _context.StockBalances
+                            .Where(balance =>
+                                balance.ProductId == line.ProductId &&
+                                balance.LotId == line.LotId &&
+                                balance.LocationId == line.LocationId)
+                            .ExecuteUpdateAsync(setters => setters
+                                .SetProperty(balance => balance.QtyAvailable,
+                                    balance => balance.QtyAvailable + line.Qty));
+
+                        if (updated == 1)
+                        {
+                            qtyAfter = await _context.StockBalances
+                                .Where(balance =>
+                                    balance.ProductId == line.ProductId &&
+                                    balance.LotId == line.LotId &&
+                                    balance.LocationId == line.LocationId)
+                                .Select(balance => balance.QtyAvailable)
+                                .SingleAsync();
+                            SynchronizeTrackedBalance(
+                                line.ProductId,
+                                line.LotId,
+                                line.LocationId,
+                                qtyAfter);
+                        }
+                        else
+                        {
+                            var balance = new StockBalance
+                            {
+                                ProductId = line.ProductId,
+                                LotId = line.LotId,
+                                LocationId = line.LocationId,
+                                QtyAvailable = line.Qty,
+                                QtyReserved = 0,
+                                QtyOnHold = 0
+                            };
+                            await _context.StockBalances.AddAsync(balance);
+                            qtyAfter = line.Qty;
+                        }
+                    }
+                }
+                else
+                {
+                    var balance = await _context.StockBalances
+                        .FirstOrDefaultAsync(candidate =>
+                            candidate.ProductId == line.ProductId &&
+                            candidate.LotId == line.LotId &&
+                            candidate.LocationId == line.LocationId);
+                    if (balance is null)
+                    {
+                        balance = new StockBalance
+                        {
+                            ProductId = line.ProductId,
+                            LotId = line.LotId,
+                            LocationId = line.LocationId,
+                            QtyAvailable = 0,
+                            QtyReserved = 0,
+                            QtyOnHold = 0
+                        };
+                        await _context.StockBalances.AddAsync(balance);
+                    }
+
+                    balance.QtyAvailable += line.Qty;
+                    qtyAfter = balance.QtyAvailable;
+                }
+
+                var lot = await _context.Lots.FindAsync(line.LotId);
+                await _context.StockTransactions.AddAsync(new StockTransaction
+                {
+                    Type = TransactionType.Issue,
+                    ProductId = line.ProductId,
+                    LotId = line.LotId,
+                    LocationId = line.LocationId,
+                    Qty = line.Qty,
+                    QtyAfter = qtyAfter,
+                    ValuationRate = lot?.UnitPrice ?? 0m,
+                    IsCancelled = true,
+                    TransactionDate = DateTime.UtcNow,
+                    UserId = userId,
+                    ReferenceNo = issue.IssueNo
+                });
+            }
+
+            issue.Status = DocumentStatus.Cancelled;
+            await _context.SaveChangesAsync();
+            await CommitIfRelationalAsync(transaction);
+            return true;
+        }
+        catch
+        {
+            await RollbackIfRelationalAsync(transaction);
+            RestoreChangeTracker(changeTrackerSnapshot);
+            throw;
+        }
+    }
+
+    private static InvalidOperationException CreateReceiptCancellationInsufficientStockException(
+        decimal requiredQty,
+        decimal? availableQty) =>
+        new($"Không thể hủy phiếu nhập. Số lượng khả dụng hiện tại ở vị trí đã chọn không đủ để trừ hoàn lại (Cần {requiredQty}, Hiện có {availableQty ?? 0m}).");
+
+    private List<TrackedEntitySnapshot> CaptureChangeTracker() =>
+        _context.ChangeTracker.Entries()
+            .Select(entry => new TrackedEntitySnapshot(
+                entry.Entity,
+                entry.State,
+                entry.CurrentValues.Clone(),
+                entry.OriginalValues.Clone(),
+                entry.Properties.ToDictionary(
+                    property => property.Metadata.Name,
+                    property => property.IsModified)))
+            .ToList();
+
+    private void RestoreChangeTracker(IEnumerable<TrackedEntitySnapshot> snapshots)
+    {
+        var snapshotByEntity = snapshots.ToDictionary(
+            snapshot => snapshot.Entity,
+            ReferenceEqualityComparer.Instance);
+
+        foreach (var entry in _context.ChangeTracker.Entries().ToList())
+        {
+            if (!snapshotByEntity.TryGetValue(entry.Entity, out var snapshot))
+            {
+                entry.State = EntityState.Detached;
+                continue;
+            }
+
+            entry.CurrentValues.SetValues(snapshot.CurrentValues);
+            entry.OriginalValues.SetValues(snapshot.OriginalValues);
+            entry.State = snapshot.State;
+            if (snapshot.State is EntityState.Modified or EntityState.Unchanged)
+            {
+                foreach (var property in entry.Properties)
+                {
+                    property.IsModified = snapshot.ModifiedProperties[property.Metadata.Name];
+                }
+            }
+        }
+    }
+
+    private void SynchronizeTrackedBalance(
+        int productId,
+        int lotId,
+        int locationId,
+        decimal qtyAvailable)
+    {
+        var entry = _context.ChangeTracker.Entries<StockBalance>()
+            .FirstOrDefault(candidate =>
+                candidate.Entity.ProductId == productId &&
+                candidate.Entity.LotId == lotId &&
+                candidate.Entity.LocationId == locationId);
+        if (entry is null)
+        {
+            return;
+        }
+
+        var property = entry.Property(balance => balance.QtyAvailable);
+        property.CurrentValue = qtyAvailable;
+        property.OriginalValue = qtyAvailable;
+        property.IsModified = false;
+    }
+
+    private void SynchronizeTrackedLot(int lotId, decimal qty)
+    {
+        var entry = _context.ChangeTracker.Entries<Lot>()
+            .FirstOrDefault(candidate => candidate.Entity.Id == lotId);
+        if (entry is null)
+        {
+            return;
+        }
+
+        var property = entry.Property(lot => lot.Qty);
+        property.CurrentValue = qty;
+        property.OriginalValue = qty;
+        property.IsModified = false;
+    }
+
+    private sealed record TrackedEntitySnapshot(
+        object Entity,
+        EntityState State,
+        PropertyValues CurrentValues,
+        PropertyValues OriginalValues,
+        IReadOnlyDictionary<string, bool> ModifiedProperties);
 
     public async Task<bool> StartStocktakeAsync(int stocktakeId)
     {
