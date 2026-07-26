@@ -1461,6 +1461,46 @@ public class InventoryServiceTests
     }
 
     [Fact]
+    public async Task CancelGoodsReceiptAsync_Success_ReversesStockAndWritesSecondLedgerRow()
+    {
+        await using var context = CreateContext();
+        await SeedRequiredMasterDataAsync(context);
+        context.GoodsReceipts.Add(new GoodsReceipt
+        {
+            Id = 1,
+            ReceiptNo = "GR-CANCEL-SUCCESS",
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsReceiptLine
+                {
+                    ProductId = 1,
+                    LocationId = 1,
+                    LotNo = "LOT-CANCEL-SUCCESS",
+                    Qty = 50,
+                    UnitPrice = 10m
+                }
+            }
+        });
+        await context.SaveChangesAsync();
+
+        var service = new InventoryService(context);
+        Assert.True(await service.CompleteGoodsReceiptAsync(1, "user-1"));
+
+        Assert.True(await service.CancelGoodsReceiptAsync(1, "user-1"));
+        context.ChangeTracker.Clear();
+
+        Assert.Equal(DocumentStatus.Cancelled, (await context.GoodsReceipts.FindAsync(1))!.Status);
+        Assert.Equal(0m, (await context.StockBalances.SingleAsync()).QtyAvailable);
+        var transactions = await context.StockTransactions.OrderBy(transaction => transaction.Id).ToListAsync();
+        Assert.Equal(2, transactions.Count);
+        Assert.False(transactions[0].IsCancelled);
+        Assert.True(transactions[1].IsCancelled);
+        Assert.Equal(-50m, transactions[1].Qty);
+        Assert.Equal(0m, transactions[1].QtyAfter);
+    }
+
+    [Fact]
     public async Task CancelGoodsReceiptAsync_UsesExactReceiptLotAndWritesReversalLedger()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
