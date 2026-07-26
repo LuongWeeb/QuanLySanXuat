@@ -83,6 +83,74 @@ public class InventoryCancellationRuntimeTests :
         Assert.Contains("href=\"/Inventory/Transactions\"", issueHtml);
     }
 
+    [Fact]
+    public async Task WarehouseUser_CanRoundTripFromOlderLedgerPageBackToNewest()
+    {
+        using var client = _factory.CreateInventoryClient("Warehouse");
+
+        var newestResponse = await client.GetAsync("/Inventory/Transactions");
+        var newestHtml = await newestResponse.Content.ReadAsStringAsync();
+        var olderMatch = Regex.Match(
+            newestHtml,
+            """href="([^"]+)"[^>]*>Cũ hơn</a>""",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        Assert.Equal(HttpStatusCode.OK, newestResponse.StatusCode);
+        Assert.True(olderMatch.Success);
+        var olderUrl = WebUtility.HtmlDecode(olderMatch.Groups[1].Value);
+        var olderResponse = await client.GetAsync(olderUrl);
+        var olderHtml = await olderResponse.Content.ReadAsStringAsync();
+        var newestMatch = Regex.Match(
+            olderHtml,
+            """href="([^"]+)"[^>]*>Mới nhất</a>""",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        Assert.Equal(HttpStatusCode.OK, olderResponse.StatusCode);
+        Assert.Contains("REF-001", olderHtml);
+        Assert.True(newestMatch.Success);
+        var newestUrl = WebUtility.HtmlDecode(newestMatch.Groups[1].Value);
+        var roundTripResponse = await client.GetAsync(newestUrl);
+        var roundTripHtml = await roundTripResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, roundTripResponse.StatusCode);
+        Assert.Contains("REF-051", roundTripHtml);
+        Assert.Contains(">Cũ hơn</a>", roundTripHtml);
+    }
+
+    [Fact]
+    public async Task EmptyCursorLedgerPage_KeepsNewestEscapeLinkVisible()
+    {
+        using var client = _factory.CreateInventoryClient("Warehouse");
+        var beforeDate = Uri.EscapeDataString(
+            new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc).ToString("O"));
+
+        var response = await client.GetAsync(
+            $"/Inventory/Transactions?beforeDate={beforeDate}&beforeId=1");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("Chưa có giao dịch kho", html);
+        Assert.Contains(">Mới nhất</a>", html);
+    }
+
+    [Theory]
+    [InlineData("/Inventory/Transactions?beforeId=1")]
+    [InlineData("/Inventory/Transactions?beforeDate=2026-07-26T00%3A00%3A00.0000000Z")]
+    [InlineData("/Inventory/Transactions?beforeDate=not-a-date&beforeId=1")]
+    [InlineData("/Inventory/Transactions?beforeDate=")]
+    [InlineData("/Inventory/Transactions?beforeDate=&beforeId=")]
+    [InlineData("/Inventory/Transactions?beforeDate=%20&beforeId=%20")]
+    [InlineData("/Inventory/Transactions?beforeDate=&beforeId=1")]
+    [InlineData("/Inventory/Transactions?beforeDate=2026-07-26T00%3A00%3A00.0000000Z&beforeId=")]
+    public async Task LedgerCursor_RejectsPartialOrMalformedPairs(string route)
+    {
+        using var client = _factory.CreateInventoryClient("Warehouse");
+
+        var response = await client.GetAsync(route);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Theory]
     [InlineData("/Inventory/CancelReceipt/101")]
     [InlineData("/Inventory/CancelIssue/201")]
@@ -323,6 +391,24 @@ public sealed class InventoryCancellationWebApplicationFactory :
                     }
                 }
             });
+        var ledgerTime = new DateTime(2026, 7, 26, 1, 0, 0, DateTimeKind.Utc);
+        for (var index = 1; index <= 51; index++)
+        {
+            context.StockTransactions.Add(new StockTransaction
+            {
+                Id = 300 + index,
+                Type = TransactionType.Receipt,
+                Product = product,
+                Lot = lot,
+                Location = location,
+                Qty = 1m,
+                QtyAfter = index,
+                ValuationRate = 2m,
+                TransactionDate = ledgerTime.AddMinutes(index),
+                UserId = "ledger-user",
+                ReferenceNo = $"REF-{index:000}"
+            });
+        }
         context.SaveChanges();
     }
 }

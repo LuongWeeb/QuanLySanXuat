@@ -154,15 +154,39 @@ public class InventoryService : IInventoryService
     private async Task<bool> CompleteGoodsReceiptCoreAsync(int receiptId, string userId, bool notify)
     {
         var hasAmbientTransaction = _context.Database.CurrentTransaction is not null;
-        await using var transaction = await BeginTransactionIfRelationalAsync();
+        EnsureTrackedCompletionDocumentIsClean<GoodsReceipt>(
+            receipt => receipt.Id == receiptId);
+        var changeTrackerSnapshot = CaptureChangeTracker();
+        var transactionScope = await BeginCompletionTransactionAsync(
+            CreateCompletionSavepointName());
+        await using var ownedTransaction = transactionScope.OwnedTransaction;
         try
         {
+            if (_context.Database.IsRelational())
+            {
+                var claimed = await _context.GoodsReceipts
+                    .Where(candidate =>
+                        candidate.Id == receiptId &&
+                        candidate.Status == DocumentStatus.Draft)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(candidate => candidate.Status, DocumentStatus.Completed));
+                if (claimed != 1)
+                {
+                    await CompleteCompletionTransactionAsync(transactionScope);
+                    return false;
+                }
+            }
+
             var receipt = await _context.GoodsReceipts
+                .AsNoTracking()
                 .Include(r => r.Lines)
                 .FirstOrDefaultAsync(r => r.Id == receiptId);
 
-            if (receipt is null || receipt.Status != DocumentStatus.Draft)
+            if (receipt is null ||
+                (!_context.Database.IsRelational() &&
+                 receipt.Status != DocumentStatus.Draft))
             {
+                await CompleteCompletionTransactionAsync(transactionScope);
                 return false;
             }
 
@@ -294,13 +318,18 @@ public class InventoryService : IInventoryService
                 });
             }
 
-            receipt.Status = DocumentStatus.Completed;
+            if (!_context.Database.IsRelational())
+            {
+                await SetGoodsReceiptStatusAsync(receipt.Id, DocumentStatus.Completed);
+            }
             await _context.SaveChangesAsync();
-            await CommitIfRelationalAsync(transaction);
+            await CompleteCompletionTransactionAsync(transactionScope);
+            SynchronizeTrackedGoodsReceiptStatus(receipt.Id, DocumentStatus.Completed);
         }
         catch
         {
-            await RollbackIfRelationalAsync(transaction);
+            await RollbackCompletionTransactionAsync(transactionScope);
+            RestoreChangeTracker(changeTrackerSnapshot);
             throw;
         }
 
@@ -317,15 +346,39 @@ public class InventoryService : IInventoryService
     private async Task<bool> CompleteGoodsIssueCoreAsync(int issueId, string userId, bool notify)
     {
         var hasAmbientTransaction = _context.Database.CurrentTransaction is not null;
-        await using var transaction = await BeginTransactionIfRelationalAsync();
+        EnsureTrackedCompletionDocumentIsClean<GoodsIssue>(
+            issue => issue.Id == issueId);
+        var changeTrackerSnapshot = CaptureChangeTracker();
+        var transactionScope = await BeginCompletionTransactionAsync(
+            CreateCompletionSavepointName());
+        await using var ownedTransaction = transactionScope.OwnedTransaction;
         try
         {
+            if (_context.Database.IsRelational())
+            {
+                var claimed = await _context.GoodsIssues
+                    .Where(candidate =>
+                        candidate.Id == issueId &&
+                        candidate.Status == DocumentStatus.Draft)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(candidate => candidate.Status, DocumentStatus.Completed));
+                if (claimed != 1)
+                {
+                    await CompleteCompletionTransactionAsync(transactionScope);
+                    return false;
+                }
+            }
+
             var issue = await _context.GoodsIssues
+                .AsNoTracking()
                 .Include(i => i.Lines)
                 .FirstOrDefaultAsync(i => i.Id == issueId);
 
-            if (issue is null || issue.Status != DocumentStatus.Draft)
+            if (issue is null ||
+                (!_context.Database.IsRelational() &&
+                 issue.Status != DocumentStatus.Draft))
             {
+                await CompleteCompletionTransactionAsync(transactionScope);
                 return false;
             }
 
@@ -370,12 +423,14 @@ public class InventoryService : IInventoryService
                         lotKey.Lot.ProductId,
                         lotKey.Lot.LotNo)
                     : _context.Lots;
-                valuationRates[lotKey.Lot.Id] = await lotQuery
+                var valuationRate = await lotQuery
                     .AsNoTracking()
                     .Where(lot => lot.Id == lotKey.Lot.Id)
                     .Select(lot => (decimal?)lot.UnitPrice)
-                    .SingleOrDefaultAsync()
-                    ?? 0m;
+                    .SingleOrDefaultAsync();
+                valuationRates[lotKey.Lot.Id] = valuationRate
+                    ?? throw new InvalidOperationException(
+                        "The issue valuation lot no longer exists.");
             }
 
             foreach (var line in issue.Lines
@@ -443,13 +498,18 @@ public class InventoryService : IInventoryService
                 });
             }
 
-            issue.Status = DocumentStatus.Completed;
+            if (!_context.Database.IsRelational())
+            {
+                await SetGoodsIssueStatusAsync(issue.Id, DocumentStatus.Completed);
+            }
             await _context.SaveChangesAsync();
-            await CommitIfRelationalAsync(transaction);
+            await CompleteCompletionTransactionAsync(transactionScope);
+            SynchronizeTrackedGoodsIssueStatus(issue.Id, DocumentStatus.Completed);
         }
         catch
         {
-            await RollbackIfRelationalAsync(transaction);
+            await RollbackCompletionTransactionAsync(transactionScope);
+            RestoreChangeTracker(changeTrackerSnapshot);
             throw;
         }
 
@@ -677,6 +737,11 @@ public class InventoryService : IInventoryService
             }
 
             var resolvedLines = await ResolveIssueCancellationLinesAsync(issue.Lines);
+            if (resolvedLines.Any(resolved => resolved.Lot is null))
+            {
+                throw new InvalidOperationException(
+                    "The issue cancellation valuation lot no longer exists.");
+            }
             EnsureIssueCancellationTargetsAreClean(resolvedLines);
 
             var lockedBalances =
@@ -748,7 +813,7 @@ public class InventoryService : IInventoryService
                     LocationId = line.LocationId,
                     Qty = line.Qty,
                     QtyAfter = qtyAfter,
-                    ValuationRate = resolvedLine.Lot?.UnitPrice ?? 0m,
+                    ValuationRate = resolvedLine.Lot!.UnitPrice,
                     IsCancelled = true,
                     TransactionDate = DateTime.UtcNow,
                     UserId = userId,
@@ -902,6 +967,21 @@ public class InventoryService : IInventoryService
         {
             throw new InvalidOperationException(
                 "Cannot cancel an inventory document while that document has unsaved changes.");
+        }
+    }
+
+    private void EnsureTrackedCompletionDocumentIsClean<TEntity>(
+        Func<TEntity, bool> predicate)
+        where TEntity : class
+    {
+        _context.ChangeTracker.DetectChanges();
+        var trackedDocument = _context.ChangeTracker.Entries<TEntity>()
+            .FirstOrDefault(entry => predicate(entry.Entity));
+        if (trackedDocument is not null &&
+            trackedDocument.State != EntityState.Unchanged)
+        {
+            throw new InvalidOperationException(
+                "Cannot complete an inventory document while that document has unsaved changes.");
         }
     }
 
@@ -1169,6 +1249,37 @@ public class InventoryService : IInventoryService
         return new CancellationTransactionScope(null, ambientTransaction, savepointName);
     }
 
+    private async Task<CompletionTransactionScope> BeginCompletionTransactionAsync(
+        string savepointName)
+    {
+        if (!_context.Database.IsRelational())
+        {
+            return new CompletionTransactionScope(null, null, null);
+        }
+
+        var ambientTransaction = _context.Database.CurrentTransaction;
+        if (ambientTransaction is null)
+        {
+            var ownedTransaction = await _context.Database.BeginTransactionAsync();
+            return new CompletionTransactionScope(ownedTransaction, null, null);
+        }
+
+        if (!ambientTransaction.SupportsSavepoints)
+        {
+            throw new InvalidOperationException(
+                "Completion inside an ambient transaction requires savepoint support.");
+        }
+
+        await ambientTransaction.CreateSavepointAsync(savepointName);
+        return new CompletionTransactionScope(
+            null,
+            ambientTransaction,
+            savepointName);
+    }
+
+    private static string CreateCompletionSavepointName() =>
+        Guid.NewGuid().ToString("N");
+
     private static string CreateCancellationSavepointName() =>
         Guid.NewGuid().ToString("N");
 
@@ -1208,6 +1319,38 @@ public class InventoryService : IInventoryService
         }
     }
 
+    private static async Task CompleteCompletionTransactionAsync(
+        CompletionTransactionScope transactionScope)
+    {
+        if (transactionScope.OwnedTransaction is not null)
+        {
+            await transactionScope.OwnedTransaction.CommitAsync();
+        }
+        else if (transactionScope.AmbientTransaction is not null &&
+                 transactionScope.SavepointName is not null)
+        {
+            await transactionScope.AmbientTransaction
+                .ReleaseSavepointAsync(transactionScope.SavepointName);
+        }
+    }
+
+    private static async Task RollbackCompletionTransactionAsync(
+        CompletionTransactionScope transactionScope)
+    {
+        if (transactionScope.OwnedTransaction is not null)
+        {
+            await transactionScope.OwnedTransaction.RollbackAsync();
+        }
+        else if (transactionScope.AmbientTransaction is not null &&
+                 transactionScope.SavepointName is not null)
+        {
+            await transactionScope.AmbientTransaction
+                .RollbackToSavepointAsync(transactionScope.SavepointName);
+            await transactionScope.AmbientTransaction
+                .ReleaseSavepointAsync(transactionScope.SavepointName);
+        }
+    }
+
     private List<TrackedEntitySnapshot> CaptureChangeTracker() =>
         _context.ChangeTracker.Entries()
             .Select(entry => new TrackedEntitySnapshot(
@@ -1217,7 +1360,18 @@ public class InventoryService : IInventoryService
                 entry.OriginalValues.Clone(),
                 entry.Properties.ToDictionary(
                     property => property.Metadata.Name,
-                    property => property.IsModified)))
+                    property => property.IsModified),
+                entry.Properties.ToDictionary(
+                    property => property.Metadata.Name,
+                    property => property.IsTemporary))
+                with
+                {
+                    ClrPropertyValues = entry.Properties.ToDictionary(
+                        property => property.Metadata.Name,
+                        property => property.Metadata.PropertyInfo is not null
+                            ? property.Metadata.PropertyInfo.GetValue(entry.Entity)
+                            : property.Metadata.FieldInfo?.GetValue(entry.Entity))
+                })
             .ToList();
 
     private void RestoreChangeTracker(IEnumerable<TrackedEntitySnapshot> snapshots)
@@ -1231,17 +1385,94 @@ public class InventoryService : IInventoryService
             if (!snapshotByEntity.TryGetValue(entry.Entity, out var snapshot))
             {
                 entry.State = EntityState.Detached;
-                continue;
+            }
+        }
+
+        foreach (var snapshot in snapshotByEntity.Values)
+        {
+            var entry = _context.Entry(snapshot.Entity);
+            var restoredAcceptedAddedEntry = false;
+            if (snapshot.State == EntityState.Added &&
+                entry.State != EntityState.Added)
+            {
+                entry.State = EntityState.Detached;
+                foreach (var property in entry.Properties)
+                {
+                    var propertyName = property.Metadata.Name;
+                    if (!snapshot.TemporaryProperties[propertyName])
+                    {
+                        property.CurrentValue =
+                            snapshot.CurrentValues[propertyName];
+                        continue;
+                    }
+
+                    if (property.Metadata.PropertyInfo is not null)
+                    {
+                        property.Metadata.PropertyInfo.SetValue(
+                            snapshot.Entity,
+                            snapshot.ClrPropertyValues[propertyName]);
+                    }
+                    else if (property.Metadata.FieldInfo is not null)
+                    {
+                        property.Metadata.FieldInfo.SetValue(
+                            snapshot.Entity,
+                            snapshot.ClrPropertyValues[propertyName]);
+                    }
+                }
+
+                entry.State = EntityState.Added;
+                restoredAcceptedAddedEntry = true;
             }
 
-            entry.CurrentValues.SetValues(snapshot.CurrentValues);
+            if (!restoredAcceptedAddedEntry &&
+                entry.State == EntityState.Detached)
+            {
+                entry.CurrentValues.SetValues(snapshot.CurrentValues);
+                entry.State = snapshot.State == EntityState.Deleted
+                    ? EntityState.Unchanged
+                    : snapshot.State;
+            }
+            else if (!restoredAcceptedAddedEntry)
+            {
+                entry.CurrentValues.SetValues(snapshot.CurrentValues);
+                entry.State = snapshot.State;
+            }
+
             entry.OriginalValues.SetValues(snapshot.OriginalValues);
-            entry.State = snapshot.State;
+            if (snapshot.State == EntityState.Deleted)
+            {
+                entry.State = EntityState.Deleted;
+            }
+
+            foreach (var property in entry.Properties)
+            {
+                property.IsTemporary =
+                    snapshot.TemporaryProperties[property.Metadata.Name];
+            }
+
             if (snapshot.State is EntityState.Modified or EntityState.Unchanged)
             {
                 foreach (var property in entry.Properties)
                 {
                     property.IsModified = snapshot.ModifiedProperties[property.Metadata.Name];
+                }
+            }
+
+            foreach (var property in entry.Properties.Where(property =>
+                         snapshot.TemporaryProperties[property.Metadata.Name]))
+            {
+                var propertyName = property.Metadata.Name;
+                if (property.Metadata.PropertyInfo is not null)
+                {
+                    property.Metadata.PropertyInfo.SetValue(
+                        snapshot.Entity,
+                        snapshot.ClrPropertyValues[propertyName]);
+                }
+                else if (property.Metadata.FieldInfo is not null)
+                {
+                    property.Metadata.FieldInfo.SetValue(
+                        snapshot.Entity,
+                        snapshot.ClrPropertyValues[propertyName]);
                 }
             }
         }
@@ -1343,9 +1574,19 @@ public class InventoryService : IInventoryService
         EntityState State,
         PropertyValues CurrentValues,
         PropertyValues OriginalValues,
-        IReadOnlyDictionary<string, bool> ModifiedProperties);
+        IReadOnlyDictionary<string, bool> ModifiedProperties,
+        IReadOnlyDictionary<string, bool> TemporaryProperties)
+    {
+        public IReadOnlyDictionary<string, object?> ClrPropertyValues { get; init; } =
+            new Dictionary<string, object?>();
+    }
 
     private sealed record CancellationTransactionScope(
+        IDbContextTransaction? OwnedTransaction,
+        IDbContextTransaction? AmbientTransaction,
+        string? SavepointName);
+
+    private sealed record CompletionTransactionScope(
         IDbContextTransaction? OwnedTransaction,
         IDbContextTransaction? AmbientTransaction,
         string? SavepointName);
@@ -1411,6 +1652,7 @@ public class InventoryService : IInventoryService
         {
             var stocktake = await _context.Stocktakes
                 .Include(s => s.Lines)
+                    .ThenInclude(line => line.Lot)
                 .FirstOrDefaultAsync(s => s.Id == stocktakeId);
 
             if (stocktake is null || stocktake.Status != StocktakeStatus.AwaitingApproval)
@@ -1445,6 +1687,10 @@ public class InventoryService : IInventoryService
                         LotId = line.LotId,
                         LocationId = stocktake.LocationId,
                         Qty = discrepancy,
+                        QtyAfter = balance.QtyAvailable,
+                        ValuationRate = line.Lot?.UnitPrice
+                            ?? throw new InvalidOperationException(
+                                "The stocktake lot no longer exists."),
                         TransactionDate = DateTime.UtcNow,
                         UserId = userId,
                         ReferenceNo = stocktake.StocktakeNo
@@ -1476,6 +1722,7 @@ public class InventoryService : IInventoryService
         await using var transaction = await BeginTransactionIfRelationalAsync();
         try
         {
+            decimal qtyAfter;
             if (_context.Database.IsRelational())
             {
                 var updated = await _context.StockBalances
@@ -1493,6 +1740,13 @@ public class InventoryService : IInventoryService
                     return false;
                 }
 
+                qtyAfter = await _context.StockBalances
+                    .Where(stockBalance =>
+                        stockBalance.ProductId == productId &&
+                        stockBalance.LotId == lotId &&
+                        stockBalance.LocationId == locationId)
+                    .Select(stockBalance => stockBalance.QtyAvailable)
+                    .SingleAsync();
                 var trackedBalance = _context.ChangeTracker.Entries<StockBalance>()
                     .FirstOrDefault(entry =>
                         entry.Entity.ProductId == productId &&
@@ -1517,8 +1771,16 @@ public class InventoryService : IInventoryService
                 }
 
                 balance.QtyAvailable += adjustmentQty;
+                qtyAfter = balance.QtyAvailable;
             }
 
+            var valuationRate = await _context.Lots
+                .AsNoTracking()
+                .Where(lot => lot.Id == lotId)
+                .Select(lot => (decimal?)lot.UnitPrice)
+                .SingleOrDefaultAsync()
+                ?? throw new InvalidOperationException(
+                    "The adjustment valuation lot no longer exists.");
             await _context.StockTransactions.AddAsync(new StockTransaction
             {
                 Type = TransactionType.Adjust,
@@ -1526,6 +1788,8 @@ public class InventoryService : IInventoryService
                 LotId = lotId,
                 LocationId = locationId,
                 Qty = adjustmentQty,
+                QtyAfter = qtyAfter,
+                ValuationRate = valuationRate,
                 TransactionDate = DateTime.UtcNow,
                 UserId = userId,
                 ReferenceNo = referenceNo

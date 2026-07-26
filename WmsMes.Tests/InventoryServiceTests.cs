@@ -24,7 +24,14 @@ public class InventoryServiceTests
         {
             await seed.Database.EnsureCreatedAsync();
             await SeedRequiredMasterDataAsync(seed);
-            seed.Lots.Add(new Lot { Id = 1, ProductId = 1, LotNo = "LOT-ADJUST", Qty = 10 });
+            seed.Lots.Add(new Lot
+            {
+                Id = 1,
+                ProductId = 1,
+                LotNo = "LOT-ADJUST",
+                Qty = 10,
+                UnitPrice = 4.75m
+            });
             seed.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 10 });
             await seed.SaveChangesAsync();
         }
@@ -41,6 +48,123 @@ public class InventoryServiceTests
         Assert.False(stale);
         await using var verify = new ApplicationDbContext(options);
         Assert.Equal(3, (await verify.StockBalances.SingleAsync()).QtyAvailable);
+        var transaction = Assert.Single(await verify.StockTransactions.ToListAsync());
+        Assert.Equal(3m, transaction.QtyAfter);
+        Assert.Equal(4.75m, transaction.ValuationRate);
+    }
+
+    [Fact]
+    public async Task CompleteGoodsReceiptAsync_WhenSameDraftIsCompletedConcurrently_OneSucceedsAndOneReturnsFalse()
+    {
+        var database = $"file:complete-receipt-{Guid.NewGuid():N}?mode=memory&cache=shared";
+        var connectionString = $"Data Source={database};Default Timeout=10";
+        await using var keepAlive = new SqliteConnection(connectionString);
+        await keepAlive.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        await using (var seed = new ApplicationDbContext(options))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            await SeedRequiredMasterDataAsync(seed);
+            seed.GoodsReceipts.Add(new GoodsReceipt
+            {
+                Id = 1,
+                ReceiptNo = "GR-CONTENTION",
+                Status = DocumentStatus.Draft,
+                Lines =
+                {
+                    new GoodsReceiptLine
+                    {
+                        ProductId = 1,
+                        LocationId = 1,
+                        LotNo = "LOT-CONTENTION",
+                        Qty = 4m,
+                        UnitPrice = 2.5m
+                    }
+                }
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var firstContext = new ApplicationDbContext(options);
+        await using var secondContext = new ApplicationDbContext(options);
+        await firstContext.GoodsReceipts.Include(receipt => receipt.Lines).SingleAsync();
+        await secondContext.GoodsReceipts.Include(receipt => receipt.Lines).SingleAsync();
+        var results = await Task.WhenAll(
+            new InventoryService(firstContext).CompleteGoodsReceiptAsync(1, "first"),
+            new InventoryService(secondContext).CompleteGoodsReceiptAsync(1, "second"));
+
+        Assert.Equal(new[] { false, true }, results.OrderBy(result => result).ToArray());
+        await using var verify = new ApplicationDbContext(options);
+        Assert.Equal(DocumentStatus.Completed, (await verify.GoodsReceipts.SingleAsync()).Status);
+        Assert.Equal(4m, (await verify.Lots.SingleAsync()).Qty);
+        Assert.Equal(4m, (await verify.StockBalances.SingleAsync()).QtyAvailable);
+        Assert.Single(await verify.StockTransactions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CompleteGoodsIssueAsync_WhenSameDraftIsCompletedConcurrently_OneSucceedsAndOneReturnsFalse()
+    {
+        var database = $"file:complete-issue-{Guid.NewGuid():N}?mode=memory&cache=shared";
+        var connectionString = $"Data Source={database};Default Timeout=10";
+        await using var keepAlive = new SqliteConnection(connectionString);
+        await keepAlive.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        await using (var seed = new ApplicationDbContext(options))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            await SeedRequiredMasterDataAsync(seed);
+            seed.Customers.Add(new Customer { Id = 1, Code = "C", Name = "Customer" });
+            seed.Lots.Add(new Lot
+            {
+                Id = 1,
+                ProductId = 1,
+                LotNo = "LOT-CONTENTION",
+                Qty = 10m,
+                UnitPrice = 3m
+            });
+            seed.StockBalances.Add(new StockBalance
+            {
+                ProductId = 1,
+                LotId = 1,
+                LocationId = 1,
+                QtyAvailable = 10m
+            });
+            seed.GoodsIssues.Add(new GoodsIssue
+            {
+                Id = 1,
+                IssueNo = "GI-CONTENTION",
+                CustomerId = 1,
+                Status = DocumentStatus.Draft,
+                Lines =
+                {
+                    new GoodsIssueLine
+                    {
+                        ProductId = 1,
+                        LotId = 1,
+                        LocationId = 1,
+                        Qty = 3m
+                    }
+                }
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var firstContext = new ApplicationDbContext(options);
+        await using var secondContext = new ApplicationDbContext(options);
+        await firstContext.GoodsIssues.Include(issue => issue.Lines).SingleAsync();
+        await secondContext.GoodsIssues.Include(issue => issue.Lines).SingleAsync();
+        var results = await Task.WhenAll(
+            new InventoryService(firstContext).CompleteGoodsIssueAsync(1, "first"),
+            new InventoryService(secondContext).CompleteGoodsIssueAsync(1, "second"));
+
+        Assert.Equal(new[] { false, true }, results.OrderBy(result => result).ToArray());
+        await using var verify = new ApplicationDbContext(options);
+        Assert.Equal(DocumentStatus.Completed, (await verify.GoodsIssues.SingleAsync()).Status);
+        Assert.Equal(7m, (await verify.StockBalances.SingleAsync()).QtyAvailable);
         Assert.Single(await verify.StockTransactions.ToListAsync());
     }
 
@@ -434,6 +558,305 @@ public class InventoryServiceTests
             .Select(balance => balance.QtyAvailable).ToListAsync());
         Assert.Empty(await context.StockTransactions.ToListAsync());
         Assert.Equal(DocumentStatus.Draft, (await context.GoodsIssues.FindAsync(1))!.Status);
+    }
+
+    [Fact]
+    public async Task CompleteGoodsReceiptAsync_WhenPostingFails_RestoresExactTrackerStateBeforeLaterSave()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var interceptor = new ThrowOnLedgerInsertInterceptor();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.GoodsReceipts.Add(new GoodsReceipt
+        {
+            Id = 1,
+            ReceiptNo = "GR-TRACKER-ROLLBACK",
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsReceiptLine
+                {
+                    ProductId = 1,
+                    LocationId = 1,
+                    LotNo = "LOT-VALID",
+                    Qty = 2m
+                },
+                new GoodsReceiptLine
+                {
+                    ProductId = 1,
+                    LocationId = 1,
+                    LotNo = "LOT-SECOND",
+                    Qty = 3m
+                }
+            }
+        });
+        context.Suppliers.Add(new Supplier
+        {
+            Id = 10,
+            Code = "SUP-DELETE",
+            Name = "Delete later"
+        });
+        await context.SaveChangesAsync();
+        var product = await context.Products.SingleAsync();
+        product.Name = "Caller change survives";
+        var deletedSupplier = await context.Suppliers.SingleAsync();
+        context.Suppliers.Remove(deletedSupplier);
+        var addedSupplier = new Supplier
+        {
+            Code = "SUP-ADD",
+            Name = "Add later"
+        };
+        context.Suppliers.Add(addedSupplier);
+        var addedSupplierEntry = context.Entry(addedSupplier);
+        var originalTemporaryId = addedSupplier.Id;
+        Assert.True(addedSupplierEntry.Property(supplier => supplier.Id).IsTemporary);
+        interceptor.Enabled = true;
+
+        await Assert.ThrowsAsync<DbUpdateException>(() =>
+            new InventoryService(context).CompleteGoodsReceiptAsync(1, "warehouse"));
+
+        Assert.Equal(EntityState.Modified, context.Entry(product).State);
+        Assert.Equal("Caller change survives", product.Name);
+        Assert.Equal(EntityState.Added, context.Entry(addedSupplier).State);
+        Assert.Equal(originalTemporaryId, addedSupplier.Id);
+        Assert.True(context.Entry(addedSupplier)
+            .Property(supplier => supplier.Id)
+            .IsTemporary);
+        Assert.Equal(EntityState.Deleted, context.Entry(deletedSupplier).State);
+        Assert.Equal(
+            DocumentStatus.Draft,
+            (await context.GoodsReceipts.FindAsync(1))!.Status);
+        Assert.Empty(context.ChangeTracker.Entries<Lot>()
+            .Where(entry => entry.Entity.LotNo.StartsWith("LOT-", StringComparison.Ordinal)));
+        Assert.Empty(context.ChangeTracker.Entries<StockBalance>());
+        Assert.Empty(context.ChangeTracker.Entries<StockTransaction>());
+
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+        Assert.Equal("Caller change survives", (await context.Products.SingleAsync()).Name);
+        Assert.Equal("SUP-ADD", (await context.Suppliers.SingleAsync()).Code);
+        Assert.Equal(DocumentStatus.Draft, (await context.GoodsReceipts.SingleAsync()).Status);
+        Assert.Empty(await context.Lots.ToListAsync());
+        Assert.Empty(await context.StockBalances.ToListAsync());
+        Assert.Empty(await context.StockTransactions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CompleteGoodsIssueAsync_WhenPostingFails_RestoresExactTrackerStateBeforeLaterSave()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.Customers.Add(new Customer { Id = 1, Code = "C", Name = "Customer" });
+        context.Locations.Add(new Location
+        {
+            Id = 2,
+            Code = "LOC02",
+            Name = "Second location",
+            ZoneId = 1
+        });
+        context.Lots.Add(new Lot
+        {
+            Id = 1,
+            ProductId = 1,
+            LotNo = "LOT-TRACKER",
+            Qty = 11m,
+            UnitPrice = 9m
+        });
+        context.StockBalances.AddRange(
+            new StockBalance
+            {
+                ProductId = 1,
+                LotId = 1,
+                LocationId = 1,
+                QtyAvailable = 10m
+            },
+            new StockBalance
+            {
+                ProductId = 1,
+                LotId = 1,
+                LocationId = 2,
+                QtyAvailable = 1m
+            });
+        context.GoodsIssues.Add(new GoodsIssue
+        {
+            Id = 1,
+            IssueNo = "GI-TRACKER-ROLLBACK",
+            CustomerId = 1,
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsIssueLine
+                {
+                    ProductId = 1,
+                    LotId = 1,
+                    LocationId = 1,
+                    Qty = 3m
+                },
+                new GoodsIssueLine
+                {
+                    ProductId = 1,
+                    LotId = 1,
+                    LocationId = 2,
+                    Qty = 2m
+                }
+            }
+        });
+        await context.SaveChangesAsync();
+        var product = await context.Products.SingleAsync();
+        product.Name = "Caller change survives";
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new InventoryService(context).CompleteGoodsIssueAsync(1, "warehouse"));
+
+        Assert.Equal(EntityState.Modified, context.Entry(product).State);
+        Assert.Equal("Caller change survives", product.Name);
+        Assert.Equal(DocumentStatus.Draft, (await context.GoodsIssues.FindAsync(1))!.Status);
+        Assert.Empty(context.ChangeTracker.Entries<StockTransaction>());
+
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+        Assert.Equal("Caller change survives", (await context.Products.SingleAsync()).Name);
+        Assert.Equal(DocumentStatus.Draft, (await context.GoodsIssues.SingleAsync()).Status);
+        Assert.Equal(
+            new[] { 10m, 1m },
+            await context.StockBalances.OrderBy(balance => balance.LocationId)
+                .Select(balance => balance.QtyAvailable)
+                .ToArrayAsync());
+        Assert.Empty(await context.StockTransactions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CompleteGoodsIssueAsync_WhenLockedValuationLotDisappears_FailsInsteadOfWritingZero()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var interceptor = new DeleteLotBeforeValuationInterceptor();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.Customers.Add(new Customer { Id = 1, Code = "C", Name = "Customer" });
+        context.Lots.Add(new Lot
+        {
+            Id = 1,
+            ProductId = 1,
+            LotNo = "LOT-VALUATION-RACE",
+            Qty = 5m,
+            UnitPrice = 8m
+        });
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            QtyAvailable = 5m
+        });
+        context.GoodsIssues.Add(new GoodsIssue
+        {
+            Id = 1,
+            IssueNo = "GI-VALUATION-RACE",
+            CustomerId = 1,
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsIssueLine
+                {
+                    ProductId = 1,
+                    LotId = 1,
+                    LocationId = 1,
+                    Qty = 1m
+                }
+            }
+        });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+        interceptor.Enabled = true;
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new InventoryService(context).CompleteGoodsIssueAsync(1, "warehouse"));
+
+        Assert.Equal("The issue valuation lot no longer exists.", exception.Message);
+        context.ChangeTracker.Clear();
+        Assert.Equal(DocumentStatus.Draft, (await context.GoodsIssues.SingleAsync()).Status);
+        Assert.Equal(5m, (await context.StockBalances.SingleAsync()).QtyAvailable);
+        Assert.Empty(await context.StockTransactions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CancelGoodsIssueAsync_WhenValuationLotDisappears_FailsInsteadOfWritingZero()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var interceptor = new DeleteLotBeforeValuationInterceptor(deleteOnLotRead: 1);
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.Customers.Add(new Customer { Id = 1, Code = "C", Name = "Customer" });
+        context.Lots.Add(new Lot
+        {
+            Id = 1,
+            ProductId = 1,
+            LotNo = "LOT-CANCEL-VALUATION-RACE",
+            Qty = 5m,
+            UnitPrice = 8m
+        });
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            QtyAvailable = 4m
+        });
+        context.GoodsIssues.Add(new GoodsIssue
+        {
+            Id = 1,
+            IssueNo = "GI-CANCEL-VALUATION-RACE",
+            CustomerId = 1,
+            Status = DocumentStatus.Completed,
+            Lines =
+            {
+                new GoodsIssueLine
+                {
+                    ProductId = 1,
+                    LotId = 1,
+                    LocationId = 1,
+                    Qty = 1m
+                }
+            }
+        });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+        interceptor.Enabled = true;
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new InventoryService(context).CancelGoodsIssueAsync(1, "warehouse"));
+
+        Assert.Equal(
+            "The issue cancellation valuation lot no longer exists.",
+            exception.Message);
+        context.ChangeTracker.Clear();
+        Assert.Equal(DocumentStatus.Completed, (await context.GoodsIssues.SingleAsync()).Status);
+        Assert.Equal(4m, (await context.StockBalances.SingleAsync()).QtyAvailable);
+        Assert.Empty(await context.StockTransactions.ToListAsync());
     }
 
     [Fact]
@@ -2764,7 +3187,14 @@ public class InventoryServiceTests
     {
         await using var context = CreateContext();
         await SeedRequiredMasterDataAsync(context);
-        context.Lots.Add(new Lot { Id = 1, ProductId = 1, LotNo = "LOT-001", Qty = 10 });
+        context.Lots.Add(new Lot
+        {
+            Id = 1,
+            ProductId = 1,
+            LotNo = "LOT-001",
+            Qty = 10,
+            UnitPrice = 6.25m
+        });
         context.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 0, QtyOnHold = 10 });
         context.Stocktakes.Add(new Stocktake
         {
@@ -2792,6 +3222,8 @@ public class InventoryServiceTests
         var transaction = await context.StockTransactions.SingleAsync();
         Assert.Equal(TransactionType.Adjust, transaction.Type);
         Assert.Equal(-2, transaction.Qty);
+        Assert.Equal(8m, transaction.QtyAfter);
+        Assert.Equal(6.25m, transaction.ValuationRate);
         Assert.Equal("ST-001", transaction.ReferenceNo);
         Assert.Equal(StocktakeStatus.Completed, (await context.Stocktakes.FindAsync(1))!.Status);
     }
@@ -2926,6 +3358,80 @@ public class InventoryServiceTests
                 """;
             await insert.ExecuteNonQueryAsync(cancellationToken);
             return result;
+        }
+    }
+
+    private sealed class DeleteLotBeforeValuationInterceptor :
+        Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        private readonly int _deleteOnLotRead;
+        private int _lotReads;
+
+        public DeleteLotBeforeValuationInterceptor(int deleteOnLotRead = 2)
+        {
+            _deleteOnLotRead = deleteOnLotRead;
+        }
+
+        public bool Enabled { get; set; }
+
+        public override async ValueTask<
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<
+                System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<
+                System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Enabled ||
+                !command.CommandText.Contains("FROM \"Lots\"", StringComparison.Ordinal) ||
+                ++_lotReads != _deleteOnLotRead)
+            {
+                return result;
+            }
+
+            Enabled = false;
+            await using (var defer = command.Connection!.CreateCommand())
+            {
+                defer.Transaction = command.Transaction;
+                defer.CommandText = "PRAGMA defer_foreign_keys = ON;";
+                await defer.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await using (var delete = command.Connection!.CreateCommand())
+            {
+                delete.Transaction = command.Transaction;
+                delete.CommandText = """DELETE FROM "Lots" WHERE "Id" = 1;""";
+                await delete.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            return result;
+        }
+    }
+
+    private sealed class ThrowOnLedgerInsertInterceptor :
+        Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        public bool Enabled { get; set; }
+
+        public override ValueTask<
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<
+                System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<
+                System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Enabled &&
+                command.CommandText.Contains(
+                    "INSERT INTO \"StockTransactions\"",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Simulated ledger insert failure.");
+            }
+
+            return ValueTask.FromResult(result);
         }
     }
 }

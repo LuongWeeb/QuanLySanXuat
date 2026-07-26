@@ -116,6 +116,8 @@ public class InventoryViewTests
         Assert.Contains("asp-route-beforeDate", view);
         Assert.Contains("asp-route-beforeId", view);
         Assert.Contains(">Cũ hơn</a>", view);
+        Assert.Contains(">Mới nhất</a>", view);
+        Assert.DoesNotContain("else if (Model.HasNextPage || !Model.IsFirstPage)", view);
     }
 
     private static string ReadInventoryView(string fileName) =>

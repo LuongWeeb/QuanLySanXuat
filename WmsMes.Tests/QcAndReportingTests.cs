@@ -149,6 +149,37 @@ public class QcAndReportingTests
     }
 
     [Fact]
+    public async Task SubmitQCInspectionAsync_WritesQuarantineBalanceAndLotValuationToTransferLedger()
+    {
+        await using var context = CreateContext();
+        await SeedQcDataAsync(context);
+        (await context.Lots.SingleAsync(lot => lot.Id == 20)).UnitPrice = 42.5m;
+        await context.SaveChangesAsync();
+        var inspection = new QCInspection
+        {
+            WorkOrderId = 100,
+            LotId = 20,
+            Result = QCResult.REJECT,
+            Lines =
+            {
+                new QCInspectionLine
+                {
+                    ParameterName = "Do am",
+                    ValueInspected = "20"
+                }
+            }
+        };
+
+        Assert.True(await new QcService(context, new CostingService(context))
+            .SubmitQCInspectionAsync(inspection, "qc-user"));
+
+        var transaction = await context.StockTransactions.SingleAsync();
+        Assert.Equal(TransactionType.Transfer, transaction.Type);
+        Assert.Equal(8m, transaction.QtyAfter);
+        Assert.Equal(42.5m, transaction.ValuationRate);
+    }
+
+    [Fact]
     public async Task SubmitQCInspectionAsync_AllowsHistoricalInspectionAfterLotIsPlacedOnHoldAgain()
     {
         await using var context = CreateContext(); await SeedQcDataAsync(context); var service = new QcService(context, new CostingService(context));

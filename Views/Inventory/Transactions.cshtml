@@ -72,7 +72,7 @@
             <p>Giao dịch sẽ xuất hiện sau khi hoàn tất nghiệp vụ nhập, xuất hoặc điều chỉnh kho.</p>
         </div>
     }
-    else if (Model.HasNextPage || !Model.IsFirstPage)
+    @if (Model.HasNextPage || !Model.IsFirstPage)
     {
         <nav class="d-flex justify-content-between align-items-center p-3"
              aria-label="Phân trang sổ cái kho">

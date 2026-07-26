@@ -287,14 +287,15 @@ public class WorkOrderService : IWorkOrderService
             _context.Lots.Add(finishedLot);
             await _context.SaveChangesAsync();
 
-            _context.StockBalances.Add(new StockBalance
+            var finishedBalance = new StockBalance
             {
                 ProductId = workOrder.ProductId,
                 LotId = finishedLot.Id,
                 LocationId = qcLocationId,
                 QtyAvailable = 0m,
                 QtyOnHold = finalQty
-            });
+            };
+            _context.StockBalances.Add(finishedBalance);
             _context.StockTransactions.Add(new StockTransaction
             {
                 Type = TransactionType.Receipt,
@@ -302,12 +303,15 @@ public class WorkOrderService : IWorkOrderService
                 LotId = finishedLot.Id,
                 LocationId = qcLocationId,
                 Qty = finalQty,
+                QtyAfter = GetOnHandQty(finishedBalance),
+                ValuationRate = finishedLot.UnitPrice,
                 TransactionDate = DateTime.UtcNow,
                 UserId = userId,
                 ReferenceNo = workOrder.Code
             });
 
             var reservations = await _context.MaterialReservations
+                .Include(reservation => reservation.Lot)
                 .Where(r => r.WorkOrderId == workOrder.Id)
                 .ToListAsync();
             foreach (var reservation in reservations)
@@ -317,11 +321,14 @@ public class WorkOrderService : IWorkOrderService
                     sb.LotId == reservation.LotId &&
                     sb.LocationId == reservation.LocationId);
 
-                if (balance != null)
+                if (balance is null ||
+                    balance.QtyReserved < reservation.QtyReserved)
                 {
-                    balance.QtyReserved = Math.Max(0, balance.QtyReserved - reservation.QtyReserved);
+                    throw new InvalidOperationException(
+                        "Reserved material is no longer sufficient for backflush. Negative stock is not allowed.");
                 }
 
+                balance.QtyReserved -= reservation.QtyReserved;
                 _context.StockTransactions.Add(new StockTransaction
                 {
                     Type = TransactionType.Backflush,
@@ -329,6 +336,10 @@ public class WorkOrderService : IWorkOrderService
                     LotId = reservation.LotId,
                     LocationId = reservation.LocationId,
                     Qty = -reservation.QtyReserved,
+                    QtyAfter = GetOnHandQty(balance),
+                    ValuationRate = reservation.Lot?.UnitPrice
+                        ?? throw new InvalidOperationException(
+                            "The backflush valuation lot no longer exists."),
                     TransactionDate = DateTime.UtcNow,
                     UserId = userId,
                     ReferenceNo = workOrder.Code
@@ -353,6 +364,9 @@ public class WorkOrderService : IWorkOrderService
             throw;
         }
     }
+
+    private static decimal GetOnHandQty(StockBalance balance) =>
+        balance.QtyAvailable + balance.QtyReserved + balance.QtyOnHold;
 
     private async Task<IDbContextTransaction?> BeginTransactionIfSupportedAsync()
     {

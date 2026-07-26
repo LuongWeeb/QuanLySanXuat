@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using WmsMes.Web.Data;
+using WmsMes.Web.Data.Migrations;
 using WmsMes.Web.Domain.Entities;
 
 namespace WmsMes.Tests;
@@ -39,6 +40,35 @@ public class StockLedgerMigrationTests
         Assert.DoesNotContain("CycleCount", migration);
         Assert.DoesNotContain("DropTable(", migration);
         Assert.Contains("DropColumn(", migration);
+    }
+
+    [Fact]
+    public void AddStockLedgerFieldsMigration_FailsBeforeSchemaMutationWhenHistoricalRowsExist()
+    {
+        var migration = new AddStockLedgerFields();
+        var migrationBuilder = new Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder(
+            "Microsoft.EntityFrameworkCore.SqlServer");
+        var up = typeof(AddStockLedgerFields).GetMethod(
+            "Up",
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic);
+
+        Assert.NotNull(up);
+        up!.Invoke(migration, new object[] { migrationBuilder });
+
+        var guard = Assert.IsType<
+            Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>(
+            migrationBuilder.Operations[0]);
+        Assert.Contains(
+            "IF EXISTS (SELECT 1 FROM [StockTransactions])",
+            guard.Sql,
+            StringComparison.Ordinal);
+        Assert.Contains("THROW", guard.Sql, StringComparison.Ordinal);
+        Assert.All(
+            migrationBuilder.Operations.Skip(1),
+            operation => Assert.IsType<
+                Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation>(
+                operation));
     }
 
     [Fact]

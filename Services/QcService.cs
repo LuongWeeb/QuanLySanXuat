@@ -82,7 +82,10 @@ public class QcService : IQcService
             }
             else if (inspection.Result == QCResult.REJECT)
             {
-                await ConsolidateHoldInQuarantineAsync(balances, userId);
+                await ConsolidateHoldInQuarantineAsync(
+                    balances,
+                    lot.UnitPrice,
+                    userId);
             }
 
             await _context.SaveChangesAsync();
@@ -181,7 +184,10 @@ public class QcService : IQcService
         }
     }
 
-    private async Task ConsolidateHoldInQuarantineAsync(IReadOnlyCollection<StockBalance> sources, string userId)
+    private async Task ConsolidateHoldInQuarantineAsync(
+        IReadOnlyCollection<StockBalance> sources,
+        decimal valuationRate,
+        string userId)
     {
         var quarantine = await _context.Locations
             .FirstOrDefaultAsync(l => l.Code == QuarantineLocationCode);
@@ -198,10 +204,9 @@ public class QcService : IQcService
             target = new StockBalance { ProductId = first.ProductId, LotId = first.LotId, LocationId = quarantine.Id };
             await _context.StockBalances.AddAsync(target);
         }
-        target.QtyOnHold += sources.Sum(x => x.QtyOnHold);
-
         foreach (var source in sources.Where(x => x.LocationId != quarantine.Id))
         {
+            target.QtyOnHold += source.QtyOnHold;
             var transfer = new StockTransfer
             {
                 TransferNo = $"QC-{Guid.NewGuid():N}",
@@ -213,7 +218,21 @@ public class QcService : IQcService
                 }
             };
             await _context.StockTransfers.AddAsync(transfer);
-            await _context.StockTransactions.AddAsync(new StockTransaction { Type=TransactionType.Transfer,ProductId=source.ProductId,LotId=source.LotId,LocationId=quarantine.Id,Qty=0m,TransactionDate=DateTime.UtcNow,UserId=userId,ReferenceNo=transfer.TransferNo });
+            await _context.StockTransactions.AddAsync(new StockTransaction
+            {
+                Type = TransactionType.Transfer,
+                ProductId = source.ProductId,
+                LotId = source.LotId,
+                LocationId = quarantine.Id,
+                Qty = 0m,
+                QtyAfter = target.QtyAvailable +
+                    target.QtyReserved +
+                    target.QtyOnHold,
+                ValuationRate = valuationRate,
+                TransactionDate = DateTime.UtcNow,
+                UserId = userId,
+                ReferenceNo = transfer.TransferNo
+            });
         }
     }
 

@@ -10,6 +10,11 @@ namespace WmsMes.Web.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql("""
+                IF EXISTS (SELECT 1 FROM [StockTransactions])
+                    THROW 51000, N'Cannot add stock-ledger fields while historical StockTransactions exist. Reconcile historical valuation data before retrying.', 1;
+                """);
+
             migrationBuilder.AddColumn<bool>(
                 name: "IsCancelled",
                 table: "StockTransactions",

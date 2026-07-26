@@ -114,6 +114,20 @@ public class InventoryController : Controller
         int? beforeId = null)
     {
         const int pageSize = 50;
+        var requestQuery = ControllerContext.HttpContext?.Request.Query;
+        var beforeDateSupplied = requestQuery?.ContainsKey(nameof(beforeDate))
+            ?? beforeDate.HasValue;
+        var beforeIdSupplied = requestQuery?.ContainsKey(nameof(beforeId))
+            ?? beforeId.HasValue;
+        if (!ModelState.IsValid ||
+            beforeDateSupplied != beforeIdSupplied ||
+            (beforeDateSupplied &&
+             (!beforeDate.HasValue || !beforeId.HasValue)) ||
+            (beforeId.HasValue && beforeId.Value <= 0))
+        {
+            return BadRequest();
+        }
+
         var hasCursor = beforeDate.HasValue && beforeId.HasValue;
         var query = _context.StockTransactions.AsNoTracking();
         if (hasCursor)

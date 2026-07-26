@@ -201,6 +201,7 @@ public class MesCoreServiceTests
         await SeedCommonDataAsync(context);
         await SeedBomRoutingAndWorkOrderAsync(context);
         context.WorkOrders.Single(w => w.Id == 100).Status = WorkOrderStatus.InProgress;
+        context.Lots.Single(lot => lot.Id == 10).UnitPrice = 6.5m;
         context.WorkOrderSteps.AddRange(
             new WorkOrderStep
             {
@@ -249,10 +250,18 @@ public class MesCoreServiceTests
         Assert.StartsWith("FG-01-" + DateTime.Today.ToString("yyyyMMdd"), outputLot.LotNo);
         Assert.Equal(8m, outputLot.Qty);
         Assert.Equal(77, (await context.StockBalances.SingleAsync(sb => sb.LotId == outputLot.Id)).LocationId);
-        Assert.Equal(77, (await context.StockTransactions.SingleAsync(tx => tx.LotId == outputLot.Id)).LocationId);
+        var manufacturedReceipt = await context.StockTransactions
+            .SingleAsync(tx => tx.LotId == outputLot.Id);
+        Assert.Equal(77, manufacturedReceipt.LocationId);
+        Assert.Equal(8m, manufacturedReceipt.QtyAfter);
+        Assert.Equal(outputLot.UnitPrice, manufacturedReceipt.ValuationRate);
 
         Assert.Equal(0m, (await context.StockBalances.SingleAsync(sb => sb.LotId == 10)).QtyReserved);
-        Assert.Contains(await context.StockTransactions.ToListAsync(), tx => tx.Type == TransactionType.Backflush && tx.Qty == -12m);
+        var backflush = await context.StockTransactions
+            .SingleAsync(tx => tx.Type == TransactionType.Backflush);
+        Assert.Equal(-12m, backflush.Qty);
+        Assert.Equal(0m, backflush.QtyAfter);
+        Assert.Equal(6.5m, backflush.ValuationRate);
         Assert.Contains(await context.LotGenealogies.ToListAsync(), g => g.OutputLotId == outputLot.Id && g.InputLotId == 10 && g.QtyConsumed == 12m);
     }
 
