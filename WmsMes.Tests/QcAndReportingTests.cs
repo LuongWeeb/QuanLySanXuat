@@ -1,5 +1,8 @@
-using Microsoft.EntityFrameworkCore;
+using System.Data;
+using System.Data.Common;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Moq;
 using WmsMes.Web.Data;
@@ -149,11 +152,41 @@ public class QcAndReportingTests
     }
 
     [Fact]
-    public async Task SubmitQCInspectionAsync_WritesQuarantineBalanceAndLotValuationToTransferLedger()
+    public async Task SubmitQCInspectionAsync_WritesPairedTransferLedgerEntriesForEverySourceAndExactAvailableBalances()
     {
         await using var context = CreateContext();
         await SeedQcDataAsync(context);
         (await context.Lots.SingleAsync(lot => lot.Id == 20)).UnitPrice = 42.5m;
+        var firstSource = await context.StockBalances
+            .SingleAsync(balance => balance.LotId == 20);
+        firstSource.QtyAvailable = 3m;
+        firstSource.QtyReserved = 2m;
+        context.Locations.Add(new Location
+        {
+            Id = 3,
+            ZoneId = 1,
+            Code = "FG-02",
+            Name = "Second source"
+        });
+        context.StockBalances.AddRange(
+            new StockBalance
+            {
+                ProductId = 1,
+                LotId = 20,
+                LocationId = 3,
+                QtyAvailable = 5m,
+                QtyReserved = 1m,
+                QtyOnHold = 2m
+            },
+            new StockBalance
+            {
+                ProductId = 1,
+                LotId = 20,
+                LocationId = 2,
+                QtyAvailable = 4m,
+                QtyReserved = 6m,
+                QtyOnHold = 1m
+            });
         await context.SaveChangesAsync();
         var inspection = new QCInspection
         {
@@ -173,10 +206,86 @@ public class QcAndReportingTests
         Assert.True(await new QcService(context, new CostingService(context))
             .SubmitQCInspectionAsync(inspection, "qc-user"));
 
-        var transaction = await context.StockTransactions.SingleAsync();
-        Assert.Equal(TransactionType.Transfer, transaction.Type);
-        Assert.Equal(8m, transaction.QtyAfter);
-        Assert.Equal(42.5m, transaction.ValuationRate);
+        var balances = await context.StockBalances
+            .Where(balance => balance.LotId == 20)
+            .ToDictionaryAsync(balance => balance.LocationId);
+        var transfers = await context.StockTransfers
+            .Include(transfer => transfer.Lines)
+            .ToListAsync();
+        var transactions = await context.StockTransactions
+            .OrderBy(transaction => transaction.Id)
+            .ToListAsync();
+
+        Assert.Equal(2, transfers.Count);
+        Assert.Equal(4, transactions.Count);
+        Assert.Equal(-10m, transactions.Where(transaction => transaction.Qty < 0)
+            .Sum(transaction => transaction.Qty));
+        Assert.Equal(10m, transactions.Where(transaction => transaction.Qty > 0)
+            .Sum(transaction => transaction.Qty));
+        Assert.All(
+            transactions,
+            transaction =>
+            {
+                Assert.Equal(TransactionType.Transfer, transaction.Type);
+                Assert.Equal(42.5m, transaction.ValuationRate);
+                Assert.Equal(
+                    balances[transaction.LocationId].QtyAvailable,
+                    transaction.QtyAfter);
+            });
+
+        foreach (var transfer in transfers)
+        {
+            var line = Assert.Single(transfer.Lines);
+            var pair = transactions
+                .Where(transaction => transaction.ReferenceNo == transfer.TransferNo)
+                .ToList();
+            Assert.Equal(2, pair.Count);
+            var source = Assert.Single(pair.Where(transaction =>
+                transaction.LocationId == line.FromLocationId));
+            var destination = Assert.Single(pair.Where(transaction =>
+                transaction.LocationId == line.ToLocationId));
+            Assert.Equal(-line.Qty, source.Qty);
+            Assert.Equal(line.Qty, destination.Qty);
+            Assert.Equal(source.ValuationRate, destination.ValuationRate);
+        }
+    }
+
+    [Fact]
+    public async Task SubmitQCInspectionAsync_OnRelationalStore_UsesSerializableTransactionForExactLedgerBalances()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+            "Data Source=:memory:");
+        await connection.OpenAsync();
+        var interceptor = new CaptureTransactionIsolationInterceptor();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedQcDataAsync(context);
+        interceptor.ObservedIsolationLevel = null;
+        var inspection = new QCInspection
+        {
+            WorkOrderId = 100,
+            LotId = 20,
+            Result = QCResult.REJECT,
+            Lines =
+            {
+                new QCInspectionLine
+                {
+                    ParameterName = "Do am",
+                    ValueInspected = "20"
+                }
+            }
+        };
+
+        Assert.True(await new QcService(context, new CostingService(context))
+            .SubmitQCInspectionAsync(inspection, "qc-user"));
+
+        Assert.Equal(
+            IsolationLevel.Serializable,
+            interceptor.ObservedIsolationLevel);
     }
 
     [Fact]
@@ -364,5 +473,22 @@ public class QcAndReportingTests
             new Location { Id = 2, ZoneId = 2, Code = QcService.QuarantineLocationCode, Name = "QC Quarantine" });
         context.WorkCenters.Add(new WorkCenter { Id = 1, Code = "WC-01", Name = "Line 1" });
         await context.SaveChangesAsync();
+    }
+
+    private sealed class CaptureTransactionIsolationInterceptor
+        : DbTransactionInterceptor
+    {
+        public IsolationLevel? ObservedIsolationLevel { get; set; }
+
+        public override ValueTask<InterceptionResult<DbTransaction>>
+            TransactionStartingAsync(
+                DbConnection connection,
+                TransactionStartingEventData eventData,
+                InterceptionResult<DbTransaction> result,
+                CancellationToken cancellationToken = default)
+        {
+            ObservedIsolationLevel = eventData.IsolationLevel;
+            return ValueTask.FromResult(result);
+        }
     }
 }

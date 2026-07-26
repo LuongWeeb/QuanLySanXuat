@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Data;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -207,10 +208,11 @@ public class QcService : IQcService
         foreach (var source in sources.Where(x => x.LocationId != quarantine.Id))
         {
             target.QtyOnHold += source.QtyOnHold;
+            var transactionDate = DateTime.UtcNow;
             var transfer = new StockTransfer
             {
                 TransferNo = $"QC-{Guid.NewGuid():N}",
-                TransferDate = DateTime.UtcNow,
+                TransferDate = transactionDate,
                 Status = DocumentStatus.Completed,
                 Lines =
                 {
@@ -223,13 +225,24 @@ public class QcService : IQcService
                 Type = TransactionType.Transfer,
                 ProductId = source.ProductId,
                 LotId = source.LotId,
-                LocationId = quarantine.Id,
-                Qty = 0m,
-                QtyAfter = target.QtyAvailable +
-                    target.QtyReserved +
-                    target.QtyOnHold,
+                LocationId = source.LocationId,
+                Qty = -source.QtyOnHold,
+                QtyAfter = source.QtyAvailable,
                 ValuationRate = valuationRate,
-                TransactionDate = DateTime.UtcNow,
+                TransactionDate = transactionDate,
+                UserId = userId,
+                ReferenceNo = transfer.TransferNo
+            });
+            await _context.StockTransactions.AddAsync(new StockTransaction
+            {
+                Type = TransactionType.Transfer,
+                ProductId = source.ProductId,
+                LotId = source.LotId,
+                LocationId = quarantine.Id,
+                Qty = source.QtyOnHold,
+                QtyAfter = target.QtyAvailable,
+                ValuationRate = valuationRate,
+                TransactionDate = transactionDate,
                 UserId = userId,
                 ReferenceNo = transfer.TransferNo
             });
@@ -246,7 +259,8 @@ public class QcService : IQcService
     private async Task<IDbContextTransaction?> BeginTransactionIfRelationalAsync()
     {
         return _context.Database.IsRelational()
-            ? await _context.Database.BeginTransactionAsync()
+            ? await _context.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable)
             : null;
     }
 

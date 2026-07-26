@@ -55,17 +55,20 @@
   - in-memory updates use the exact updated tracked quantity;
   - `ValuationRate` is selected from the current lot, with missing-lot failure.
 - Manufactured receipt:
-  - `QtyAfter` is total on-hand in the newly held finished-goods balance;
+  - `QtyAfter` is the finished tuple's exact `QtyAvailable` (`0` while the
+    manufactured quantity remains on hold);
   - `ValuationRate` is the current finished-lot price (no fallback).
 - Backflush:
   - material reservations include their lot;
   - insufficient/missing reserved balance fails before it could become negative;
-  - `QtyAfter` is exact total on-hand after reserved consumption;
+  - `QtyAfter` is the material tuple's exact unchanged `QtyAvailable`, even
+    though the movement consumes the reserved bucket;
   - `ValuationRate` is the selected input-lot price.
 - QC transfer:
   - quarantine hold is incremented per source;
-  - each ledger row records the exact quarantine on-hand balance after that
-    movement and the inspected lot's current price.
+  - every source movement writes a negative source row and a positive quarantine
+    row with one reference, equal magnitude, and the inspected lot's price;
+  - each row records its own tuple's exact `QtyAvailable`, not total on-hand.
 - Focused tests cover all five requested producer paths.
 
 ### 4. Historical ledger migration fails before schema mutation
@@ -221,7 +224,8 @@ dotnet ef migrations script
 ```
 
 - Generated order:
-  1. `IF EXISTS (SELECT 1 FROM [StockTransactions]) ... THROW`
+  1. acquire `TABLOCKX, HOLDLOCK` on `StockTransactions` and fail when history
+     exists
   2. add `IsCancelled`
   3. add `QtyAfter`
   4. add `ValuationRate`
@@ -253,13 +257,13 @@ Skipped: 0
 ```
 
 The expected negative JWT startup tests still write host validation errors to
-the test log; their assertions pass and this output predates the fix wave.
+the test log; their assertions pass.
 
 ### EF/model and source hygiene
 
 - `dotnet ef migrations has-pending-model-changes --no-build`: no changes.
 - `git diff --check`: exit 0.
-- Service stock-transaction producer scan: every requested producer explicitly
+- Repository-wide stock-transaction producer scan: every producer explicitly
   sets `QtyAfter` and `ValuationRate`.
 - Service valuation fallback scan: no `ValuationRate` zero-coalescing remains.
 
@@ -267,6 +271,7 @@ the test log; their assertions pass and this output predates the fix wave.
 
 - `Controllers/InventoryController.cs`
 - `Data/Migrations/20260726065752_AddStockLedgerFields.cs`
+- `Data/DbSeeder.cs`
 - `Services/InventoryService.cs`
 - `Services/QcService.cs`
 - `Services/WorkOrderService.cs`
@@ -276,7 +281,9 @@ the test log; their assertions pass and this output predates the fix wave.
 - `WmsMes.Tests/InventoryViewTests.cs`
 - `WmsMes.Tests/MesCoreServiceTests.cs`
 - `WmsMes.Tests/QcAndReportingTests.cs`
+- `WmsMes.Tests/DbSeederTests.cs`
 - `WmsMes.Tests/StockLedgerMigrationTests.cs`
+- `docs/superpowers/plans/2026-07-26-stock-ledger-invariant-amendment.md`
 - `.superpowers/sdd/final-fix-report.md`
 
 ## Self-review and concerns
@@ -292,8 +299,168 @@ the test log; their assertions pass and this output predates the fix wave.
 - Manufactured receipt valuation intentionally reads `finishedLot.UnitPrice`.
   That current price can legitimately be zero before QC costing, but it is an
   explicit current-lot value, not a fallback or invented historical rate.
-- QC transfer retains its pre-existing `Qty = 0m` representation; this fix wave
-  populates the explicitly requested running balance and valuation fields.
+- QC rejection now uses paired signed transfer rows. This doubles the number of
+  QC ledger rows by design while keeping the physical transfer document count
+  unchanged.
 - EF commands continue to report pre-existing precision warnings for
   `CycleCountItem.SystemQty` and `CountedQty`. They are unrelated to this
   stock-ledger fix wave and the required build itself emits zero warnings.
+
+## Final confirmed design amendment
+
+### Global `QtyAfter` invariant
+
+The confirmed amendment establishes one meaning for every stock ledger row:
+`QtyAfter` is the exact `StockBalance.QtyAvailable` for that row's
+product/lot/location tuple immediately after the movement.
+
+The repository-wide producer audit covers:
+
+1. goods receipt completion;
+2. goods issue completion;
+3. goods receipt cancellation;
+4. goods issue cancellation;
+5. stocktake approval;
+6. manual adjustment;
+7. manufactured receipt;
+8. backflush;
+9. QC transfer source and destination rows.
+10. comprehensive sample-data receipt, issue, manufactured receipt, and
+    backflush rows.
+
+The six `InventoryService` producer tests now retain non-zero reserved/on-hold
+buckets and compare ledger `QtyAfter` directly to the persisted tuple's
+`QtyAvailable`. The work-order test does the same for a manufactured balance
+whose quantity is entirely on hold and for a material balance with non-zero
+available, reserved, and held quantities. The QC test covers two sources and an
+existing quarantine tuple, all with non-zero secondary buckets, and checks every
+ledger row against the persisted balance dictionary. Seeder reconciliation
+coverage checks every generated sample ledger row against its exact post-event
+available balance and explicit current lot valuation.
+
+### Paired QC rejection ledger
+
+For every rejected source hold, `QcService` continues to create one completed
+`StockTransfer`, but now writes two immutable `Transfer` ledger rows:
+
+- source location: `Qty = -movedQty`, `QtyAfter = source.QtyAvailable`;
+- quarantine location: `Qty = movedQty`,
+  `QtyAfter = quarantine.QtyAvailable`.
+
+Both rows share the transfer number, transaction timestamp, lot valuation, user,
+product, and lot. Multi-source test coverage verifies two transfer documents
+produce four ledger rows, each reference resolves to exactly one negative and
+one positive row, and aggregate quantities reconcile to `-10` and `+10`.
+
+`QcService` now starts relational inspections with
+`IsolationLevel.Serializable`. This holds the source and quarantine balance
+reads through claim, mutation, ledger insertion, and commit, preventing a
+concurrent available-balance writer from making `QtyAfter` stale. Work-order
+completion already used the same serializable boundary.
+
+### Writer-blocking migration guard
+
+The migration's first operation now checks history with:
+
+```sql
+FROM [StockTransactions] WITH (TABLOCKX, HOLDLOCK)
+```
+
+`TABLOCKX` blocks concurrent inserts by taking an exclusive table lock, and
+`HOLDLOCK` explicitly retains the serializable lock to transaction completion.
+The migration test also verifies `SuppressTransaction == false` and that every
+later operation is an `AddColumnOperation`.
+
+Fresh generated SQL confirms the precondition and schema changes share one
+transaction:
+
+```text
+BEGIN TRANSACTION;
+IF EXISTS (
+    SELECT 1
+    FROM [StockTransactions] WITH (TABLOCKX, HOLDLOCK)
+)
+    THROW ...;
+ALTER TABLE ... ADD [IsCancelled] ...;
+ALTER TABLE ... ADD [QtyAfter] ...;
+ALTER TABLE ... ADD [ValuationRate] ...;
+INSERT INTO [__EFMigrationsHistory] ...;
+COMMIT;
+```
+
+The local development database still records the ledger and paging migrations
+as applied; no migration history or data was rewritten.
+
+### Amendment TDD evidence
+
+Baseline before amendment:
+
+```text
+dotnet test WmsMes.sln --no-restore
+Passed: 413
+Failed: 0
+Skipped: 0
+```
+
+Work order invariant:
+
+- RED: 1 failed, expected manufactured `QtyAfter` `0`, actual total-on-hand `8`.
+- GREEN: 1 passed after manufactured receipt and backflush switched to exact
+  tuple `QtyAvailable`.
+
+QC pairing and invariant:
+
+- RED: 1 failed, expected four paired rows for two sources, actual two legacy
+  zero-quantity destination-only rows.
+- GREEN: 1 passed after adding source-negative/destination-positive pairs and
+  exact available balances.
+
+Migration writer lock:
+
+- RED: 1 failed because the first SQL operation did not contain
+  `WITH (TABLOCKX, HOLDLOCK)`.
+- GREEN: 1 passed after adding the transactional writer-blocking hints.
+
+Existing compliant InventoryService producers:
+
+- 6 invariant-focused receipt, issue, reversal, stocktake, and adjustment tests
+  passed with non-zero reserved/on-hold buckets.
+
+Final review follow-ups:
+
+- Seeder RED: 12 of 13 generated sample ledger rows retained default
+  `QtyAfter = 0`; the one passing row was the legitimate fully-held manufactured
+  receipt whose available balance is zero.
+- Seeder GREEN: the comprehensive idempotent seeder test passed after every
+  seeded ledger producer received explicit post-balance and current lot
+  valuation inputs.
+- QC isolation RED: expected `Serializable`, observed `Unspecified`.
+- QC isolation GREEN: the relational inspection test passed after the
+  transaction boundary became explicitly serializable.
+- Expanded focused Inventory, MES, QC, migration, and seeder suites:
+  101 passed, 0 failed.
+
+### Amendment final verification
+
+```text
+dotnet build WmsMes.sln --no-restore
+Build succeeded.
+0 Warning(s)
+0 Error(s)
+
+dotnet test WmsMes.sln --no-build --no-restore
+Passed: 414
+Failed: 0
+Skipped: 0
+
+dotnet ef migrations has-pending-model-changes --no-build
+No changes have been made to the model since the last migration.
+```
+
+The generated migration script places the locking precondition, all three
+`ALTER TABLE` statements, and migration-history insert between one
+`BEGIN TRANSACTION` and `COMMIT`. Source scans find no remaining total-on-hand
+helper or `QtyAfter` expression that adds reserved/on-hold buckets. The final
+review reported no critical findings; both important findings were either
+implemented (seeder and QC isolation) or already satisfied by the existing
+serializable work-order transaction.

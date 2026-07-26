@@ -11,7 +11,10 @@ namespace WmsMes.Web.Data.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql("""
-                IF EXISTS (SELECT 1 FROM [StockTransactions])
+                IF EXISTS (
+                    SELECT 1
+                    FROM [StockTransactions] WITH (TABLOCKX, HOLDLOCK)
+                )
                     THROW 51000, N'Cannot add stock-ledger fields while historical StockTransactions exist. Reconcile historical valuation data before retrying.', 1;
                 """);
 

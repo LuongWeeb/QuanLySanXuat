@@ -59,11 +59,13 @@ public class StockLedgerMigrationTests
         var guard = Assert.IsType<
             Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>(
             migrationBuilder.Operations[0]);
+        Assert.Contains("IF EXISTS", guard.Sql, StringComparison.Ordinal);
         Assert.Contains(
-            "IF EXISTS (SELECT 1 FROM [StockTransactions])",
+            "FROM [StockTransactions] WITH (TABLOCKX, HOLDLOCK)",
             guard.Sql,
             StringComparison.Ordinal);
         Assert.Contains("THROW", guard.Sql, StringComparison.Ordinal);
+        Assert.False(guard.SuppressTransaction);
         Assert.All(
             migrationBuilder.Operations.Skip(1),
             operation => Assert.IsType<

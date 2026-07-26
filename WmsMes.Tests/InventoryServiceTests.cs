@@ -32,7 +32,15 @@ public class InventoryServiceTests
                 Qty = 10,
                 UnitPrice = 4.75m
             });
-            seed.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 10 });
+            seed.StockBalances.Add(new StockBalance
+            {
+                ProductId = 1,
+                LotId = 1,
+                LocationId = 1,
+                QtyAvailable = 10,
+                QtyReserved = 5,
+                QtyOnHold = 7
+            });
             await seed.SaveChangesAsync();
         }
 
@@ -47,9 +55,12 @@ public class InventoryServiceTests
         Assert.True(first);
         Assert.False(stale);
         await using var verify = new ApplicationDbContext(options);
-        Assert.Equal(3, (await verify.StockBalances.SingleAsync()).QtyAvailable);
+        var balance = await verify.StockBalances.SingleAsync();
+        Assert.Equal(3, balance.QtyAvailable);
+        Assert.Equal(5, balance.QtyReserved);
+        Assert.Equal(7, balance.QtyOnHold);
         var transaction = Assert.Single(await verify.StockTransactions.ToListAsync());
-        Assert.Equal(3m, transaction.QtyAfter);
+        Assert.Equal(balance.QtyAvailable, transaction.QtyAfter);
         Assert.Equal(4.75m, transaction.ValuationRate);
     }
 
@@ -341,6 +352,23 @@ public class InventoryServiceTests
     {
         await using var context = CreateContext();
         await SeedRequiredMasterDataAsync(context);
+        context.Lots.Add(new Lot
+        {
+            Id = 1,
+            ProductId = 1,
+            LotNo = "LOT-LEDGER",
+            Qty = 5,
+            UnitPrice = 4.25m
+        });
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            QtyAvailable = 5,
+            QtyReserved = 4,
+            QtyOnHold = 6
+        });
         context.GoodsReceipts.Add(new GoodsReceipt
         {
             Id = 1,
@@ -362,8 +390,12 @@ public class InventoryServiceTests
 
         Assert.True(await new InventoryService(context).CompleteGoodsReceiptAsync(1, "user-1"));
 
+        var balance = await context.StockBalances.SingleAsync();
         var transaction = await context.StockTransactions.SingleAsync();
-        Assert.Equal(12m, transaction.QtyAfter);
+        Assert.Equal(17m, balance.QtyAvailable);
+        Assert.Equal(4m, balance.QtyReserved);
+        Assert.Equal(6m, balance.QtyOnHold);
+        Assert.Equal(balance.QtyAvailable, transaction.QtyAfter);
         Assert.Equal(4.25m, transaction.ValuationRate);
         Assert.False(transaction.IsCancelled);
     }
@@ -471,7 +503,15 @@ public class InventoryServiceTests
         await SeedRequiredMasterDataAsync(context);
         context.Customers.Add(new Customer { Id = 1, Code = "C1", Name = "Customer 1" });
         context.Lots.Add(new Lot { Id = 1, ProductId = 1, LotNo = "LOT-LEDGER", Qty = 10, UnitPrice = 7.5m });
-        context.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 10 });
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            QtyAvailable = 10,
+            QtyReserved = 4,
+            QtyOnHold = 6
+        });
         context.GoodsIssues.Add(new GoodsIssue
         {
             Id = 1,
@@ -484,9 +524,12 @@ public class InventoryServiceTests
 
         Assert.True(await new InventoryService(context).CompleteGoodsIssueAsync(1, "user-1"));
 
+        var balance = await context.StockBalances.SingleAsync();
         var transaction = await context.StockTransactions.SingleAsync();
         Assert.Equal(-3m, transaction.Qty);
-        Assert.Equal(7m, transaction.QtyAfter);
+        Assert.Equal(4m, balance.QtyReserved);
+        Assert.Equal(6m, balance.QtyOnHold);
+        Assert.Equal(balance.QtyAvailable, transaction.QtyAfter);
         Assert.Equal(7.5m, transaction.ValuationRate);
         Assert.False(transaction.IsCancelled);
     }
@@ -1936,7 +1979,15 @@ public class InventoryServiceTests
             new Lot { Id = 1, ProductId = 1, LotNo = "LOT-TARGET", Qty = 8, UnitPrice = 6.25m },
             new Lot { Id = 2, ProductId = 1, LotNo = "LOT-OTHER", Qty = 100, UnitPrice = 9m });
         context.StockBalances.AddRange(
-            new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 8 },
+            new StockBalance
+            {
+                ProductId = 1,
+                LotId = 1,
+                LocationId = 1,
+                QtyAvailable = 8,
+                QtyReserved = 4,
+                QtyOnHold = 6
+            },
             new StockBalance { ProductId = 1, LotId = 2, LocationId = 1, QtyAvailable = 100 });
         context.GoodsReceipts.Add(new GoodsReceipt
         {
@@ -1961,14 +2012,20 @@ public class InventoryServiceTests
             .CancelGoodsReceiptAsync(1, "warehouse");
 
         Assert.True(cancelled);
-        Assert.Equal(3m, (await context.StockBalances.FindAsync(1))!.QtyAvailable);
+        var targetBalance = await context.StockBalances
+            .SingleAsync(balance => balance.LotId == 1);
+        Assert.Equal(3m, targetBalance.QtyAvailable);
+        Assert.Equal(4m, targetBalance.QtyReserved);
+        Assert.Equal(6m, targetBalance.QtyOnHold);
         Assert.Equal(3m, (await context.Lots.FindAsync(1))!.Qty);
         context.ChangeTracker.Clear();
+        var persistedBalances = await context.StockBalances
+            .OrderBy(balance => balance.LotId)
+            .ToListAsync();
+        var persistedTarget = persistedBalances.Single(balance => balance.LotId == 1);
         Assert.Equal(
             new[] { 3m, 100m },
-            await context.StockBalances.OrderBy(balance => balance.LotId)
-                .Select(balance => balance.QtyAvailable)
-                .ToArrayAsync());
+            persistedBalances.Select(balance => balance.QtyAvailable).ToArray());
         Assert.Equal(
             new[] { 3m, 100m },
             await context.Lots.OrderBy(lot => lot.Id).Select(lot => lot.Qty).ToArrayAsync());
@@ -1976,7 +2033,7 @@ public class InventoryServiceTests
         Assert.Equal(TransactionType.Receipt, transaction.Type);
         Assert.Equal(1, transaction.LotId);
         Assert.Equal(-5m, transaction.Qty);
-        Assert.Equal(3m, transaction.QtyAfter);
+        Assert.Equal(persistedTarget.QtyAvailable, transaction.QtyAfter);
         Assert.Equal(6.25m, transaction.ValuationRate);
         Assert.True(transaction.IsCancelled);
         Assert.Equal("GR-CANCEL", transaction.ReferenceNo);
@@ -2057,7 +2114,9 @@ public class InventoryServiceTests
             ProductId = 1,
             LotId = 1,
             LocationId = 1,
-            QtyAvailable = 3
+            QtyAvailable = 3,
+            QtyReserved = 4,
+            QtyOnHold = 6
         });
         context.GoodsIssues.Add(new GoodsIssue
         {
@@ -2076,13 +2135,19 @@ public class InventoryServiceTests
             .CancelGoodsIssueAsync(1, "warehouse");
 
         Assert.True(cancelled);
-        Assert.Equal(5m, (await context.StockBalances.SingleAsync()).QtyAvailable);
+        var balance = await context.StockBalances.SingleAsync();
+        Assert.Equal(5m, balance.QtyAvailable);
+        Assert.Equal(4m, balance.QtyReserved);
+        Assert.Equal(6m, balance.QtyOnHold);
         context.ChangeTracker.Clear();
-        Assert.Equal(5m, (await context.StockBalances.SingleAsync()).QtyAvailable);
+        var persistedBalance = await context.StockBalances.SingleAsync();
+        Assert.Equal(5m, persistedBalance.QtyAvailable);
+        Assert.Equal(4m, persistedBalance.QtyReserved);
+        Assert.Equal(6m, persistedBalance.QtyOnHold);
         var transaction = await context.StockTransactions.SingleAsync();
         Assert.Equal(TransactionType.Issue, transaction.Type);
         Assert.Equal(2m, transaction.Qty);
-        Assert.Equal(5m, transaction.QtyAfter);
+        Assert.Equal(persistedBalance.QtyAvailable, transaction.QtyAfter);
         Assert.Equal(7.5m, transaction.ValuationRate);
         Assert.True(transaction.IsCancelled);
         Assert.Equal("GI-CANCEL", transaction.ReferenceNo);
@@ -3195,7 +3260,15 @@ public class InventoryServiceTests
             Qty = 10,
             UnitPrice = 6.25m
         });
-        context.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 0, QtyOnHold = 10 });
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            QtyAvailable = 0,
+            QtyReserved = 4,
+            QtyOnHold = 10
+        });
         context.Stocktakes.Add(new Stocktake
         {
             Id = 1,
@@ -3216,13 +3289,14 @@ public class InventoryServiceTests
         Assert.True(approved);
         var balance = await context.StockBalances.SingleAsync();
         Assert.Equal(8, balance.QtyAvailable);
+        Assert.Equal(4, balance.QtyReserved);
         Assert.Equal(0, balance.QtyOnHold);
         var line = await context.StocktakeLines.SingleAsync();
         Assert.Equal(-2, line.QtyDiscrepancy);
         var transaction = await context.StockTransactions.SingleAsync();
         Assert.Equal(TransactionType.Adjust, transaction.Type);
         Assert.Equal(-2, transaction.Qty);
-        Assert.Equal(8m, transaction.QtyAfter);
+        Assert.Equal(balance.QtyAvailable, transaction.QtyAfter);
         Assert.Equal(6.25m, transaction.ValuationRate);
         Assert.Equal("ST-001", transaction.ReferenceNo);
         Assert.Equal(StocktakeStatus.Completed, (await context.Stocktakes.FindAsync(1))!.Status);

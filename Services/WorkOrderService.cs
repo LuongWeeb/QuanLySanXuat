@@ -303,7 +303,7 @@ public class WorkOrderService : IWorkOrderService
                 LotId = finishedLot.Id,
                 LocationId = qcLocationId,
                 Qty = finalQty,
-                QtyAfter = GetOnHandQty(finishedBalance),
+                QtyAfter = finishedBalance.QtyAvailable,
                 ValuationRate = finishedLot.UnitPrice,
                 TransactionDate = DateTime.UtcNow,
                 UserId = userId,
@@ -336,7 +336,7 @@ public class WorkOrderService : IWorkOrderService
                     LotId = reservation.LotId,
                     LocationId = reservation.LocationId,
                     Qty = -reservation.QtyReserved,
-                    QtyAfter = GetOnHandQty(balance),
+                    QtyAfter = balance.QtyAvailable,
                     ValuationRate = reservation.Lot?.UnitPrice
                         ?? throw new InvalidOperationException(
                             "The backflush valuation lot no longer exists."),
@@ -364,9 +364,6 @@ public class WorkOrderService : IWorkOrderService
             throw;
         }
     }
-
-    private static decimal GetOnHandQty(StockBalance balance) =>
-        balance.QtyAvailable + balance.QtyReserved + balance.QtyOnHold;
 
     private async Task<IDbContextTransaction?> BeginTransactionIfSupportedAsync()
     {

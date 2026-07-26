@@ -240,9 +240,18 @@ public static class DbSeeder
                 if (balance != null && balance.QtyAvailable >= 2m)
                 {
                     balance.QtyAvailable -= 2m;
+                    context.StockTransactions.Add(NewTransaction(
+                        TransactionType.Issue,
+                        bike.Id,
+                        bikeLot.Id,
+                        locations["LOC-FG-01"].Id,
+                        -2m,
+                        balance.QtyAvailable,
+                        bikeLot.UnitPrice,
+                        issue.IssueNo,
+                        userId));
                 }
 
-                context.StockTransactions.Add(NewTransaction(TransactionType.Issue, bike.Id, bikeLot.Id, locations["LOC-FG-01"].Id, -2m, issue.IssueNo, userId));
                 await context.SaveChangesAsync();
             }
         }
@@ -262,8 +271,18 @@ public static class DbSeeder
             context.WorkOrderSteps.AddRange(NewStep(wo, 10, "Lắp ráp khung và bánh xe", centers["WC-ASM-01"], WorkOrderStepStatus.Completed, 10), NewStep(wo, 20, "Lắp xích, yên xe và cân chỉnh", centers["WC-FIN-01"], WorkOrderStepStatus.Completed, 10));
             var outputLot = new Lot { LotNo = "PROD-BIKE-01-20260717-01", ProductId = wo.ProductId, Qty = 10, WorkOrderId = wo.Id, ManufactureDate = DateTime.UtcNow.AddDays(-1) };
             context.Lots.Add(outputLot); await context.SaveChangesAsync();
-            context.StockBalances.Add(new StockBalance { ProductId = wo.ProductId, LotId = outputLot.Id, LocationId = locations["LOC-FG-01"].Id, QtyAvailable = 10 });
-            context.StockTransactions.Add(NewTransaction(TransactionType.Receipt, wo.ProductId, outputLot.Id, locations["LOC-FG-01"].Id, 10, wo.Code, userId));
+            var outputBalance = new StockBalance { ProductId = wo.ProductId, LotId = outputLot.Id, LocationId = locations["LOC-FG-01"].Id, QtyAvailable = 10 };
+            context.StockBalances.Add(outputBalance);
+            context.StockTransactions.Add(NewTransaction(
+                TransactionType.Receipt,
+                wo.ProductId,
+                outputLot.Id,
+                locations["LOC-FG-01"].Id,
+                10,
+                outputBalance.QtyAvailable,
+                outputLot.UnitPrice,
+                wo.Code,
+                userId));
             await context.SaveChangesAsync();
             foreach (var code in new[] { "RM-FRAME-01", "RM-WHEEL-01", "RM-CHAIN-01", "RM-SADDLE-01" })
                 await ConsumeAsync(context, products[code], 10, locations["LOC-RAW-01"], wo.Code, outputLot.Id, userId);
@@ -298,8 +317,18 @@ public static class DbSeeder
             );
             var outputLot = new Lot { LotNo = "PROD-HELM-01-20260717-02", ProductId = wo.ProductId, Qty = 20, WorkOrderId = wo.Id, ManufactureDate = DateTime.UtcNow.AddHours(-2) };
             context.Lots.Add(outputLot); await context.SaveChangesAsync();
-            context.StockBalances.Add(new StockBalance { ProductId = wo.ProductId, LotId = outputLot.Id, LocationId = locations["LOC-FG-01"].Id, QtyAvailable = 0m, QtyOnHold = 20m });
-            context.StockTransactions.Add(NewTransaction(TransactionType.Receipt, wo.ProductId, outputLot.Id, locations["LOC-FG-01"].Id, 20m, wo.Code, userId));
+            var outputBalance = new StockBalance { ProductId = wo.ProductId, LotId = outputLot.Id, LocationId = locations["LOC-FG-01"].Id, QtyAvailable = 0m, QtyOnHold = 20m };
+            context.StockBalances.Add(outputBalance);
+            context.StockTransactions.Add(NewTransaction(
+                TransactionType.Receipt,
+                wo.ProductId,
+                outputLot.Id,
+                locations["LOC-FG-01"].Id,
+                20m,
+                outputBalance.QtyAvailable,
+                outputLot.UnitPrice,
+                wo.Code,
+                userId));
             await context.SaveChangesAsync();
         }
 
@@ -380,10 +409,33 @@ public static class DbSeeder
             lot = new Lot { LotNo = lotNo, ProductId = product.Id, Qty = qty, ManufactureDate = DateTime.UtcNow.AddDays(-3) };
             context.Lots.Add(lot); await context.SaveChangesAsync();
         }
-        if (!await context.StockBalances.AnyAsync(b => b.ProductId == product.Id && b.LotId == lot.Id && b.LocationId == location.Id))
-            context.StockBalances.Add(new StockBalance { ProductId = product.Id, LotId = lot.Id, LocationId = location.Id, QtyAvailable = qty });
+        var balance = await context.StockBalances.FirstOrDefaultAsync(b =>
+            b.ProductId == product.Id &&
+            b.LotId == lot.Id &&
+            b.LocationId == location.Id);
+        if (balance is null)
+        {
+            balance = new StockBalance
+            {
+                ProductId = product.Id,
+                LotId = lot.Id,
+                LocationId = location.Id,
+                QtyAvailable = qty
+            };
+            context.StockBalances.Add(balance);
+        }
+
         if (!await context.StockTransactions.AnyAsync(t => t.ReferenceNo == referenceNo && t.ProductId == product.Id && t.LotId == lot.Id))
-            context.StockTransactions.Add(NewTransaction(TransactionType.Receipt, product.Id, lot.Id, location.Id, qty, referenceNo, (await context.Users.FirstOrDefaultAsync())?.Id ?? "system"));
+            context.StockTransactions.Add(NewTransaction(
+                TransactionType.Receipt,
+                product.Id,
+                lot.Id,
+                location.Id,
+                qty,
+                balance.QtyAvailable,
+                lot.UnitPrice,
+                referenceNo,
+                (await context.Users.FirstOrDefaultAsync())?.Id ?? "system"));
         await context.SaveChangesAsync();
     }
 
@@ -399,9 +451,27 @@ public static class DbSeeder
         EndTime = status == WorkOrderStepStatus.Completed ? DateTime.UtcNow.AddHours(-1) : null
     };
 
-    private static StockTransaction NewTransaction(TransactionType type, int productId, int lotId, int locationId, decimal qty, string referenceNo, string userId) => new()
+    private static StockTransaction NewTransaction(
+        TransactionType type,
+        int productId,
+        int lotId,
+        int locationId,
+        decimal qty,
+        decimal qtyAfter,
+        decimal valuationRate,
+        string referenceNo,
+        string userId) => new()
     {
-        Type = type, ProductId = productId, LotId = lotId, LocationId = locationId, Qty = qty, ReferenceNo = referenceNo, UserId = userId, TransactionDate = DateTime.UtcNow
+        Type = type,
+        ProductId = productId,
+        LotId = lotId,
+        LocationId = locationId,
+        Qty = qty,
+        QtyAfter = qtyAfter,
+        ValuationRate = valuationRate,
+        ReferenceNo = referenceNo,
+        UserId = userId,
+        TransactionDate = DateTime.UtcNow
     };
 
     private static async Task ConsumeAsync(ApplicationDbContext context, Product product, decimal qty, Location location, string referenceNo, int outputLotId, string userId)
@@ -409,7 +479,16 @@ public static class DbSeeder
         var lot = await context.Lots.SingleAsync(l => l.ProductId == product.Id);
         var balance = await context.StockBalances.SingleAsync(b => b.ProductId == product.Id && b.LotId == lot.Id && b.LocationId == location.Id);
         balance.QtyAvailable -= qty;
-        context.StockTransactions.Add(NewTransaction(TransactionType.Backflush, product.Id, lot.Id, location.Id, -qty, referenceNo, userId));
+        context.StockTransactions.Add(NewTransaction(
+            TransactionType.Backflush,
+            product.Id,
+            lot.Id,
+            location.Id,
+            -qty,
+            balance.QtyAvailable,
+            lot.UnitPrice,
+            referenceNo,
+            userId));
         context.LotGenealogies.Add(new LotGenealogy { OutputLotId = outputLotId, InputLotId = lot.Id, QtyConsumed = qty });
         await context.SaveChangesAsync();
     }

@@ -58,6 +58,35 @@ public class DbSeederTests
             .SingleAsync(b => b.Product!.Code == "RM-ABS-01");
         Assert.Equal(460m, absBalance.QtyAvailable);
         Assert.Equal(40m, absBalance.QtyReserved);
+
+        var balances = await context.StockBalances.ToDictionaryAsync(
+            balance => (balance.ProductId, balance.LotId, balance.LocationId));
+        var transactions = await context.StockTransactions
+            .Include(transaction => transaction.Product)
+            .Include(transaction => transaction.Lot)
+            .OrderBy(transaction => transaction.Id)
+            .ToListAsync();
+        Assert.NotEmpty(transactions);
+        Assert.All(
+            transactions,
+            transaction =>
+            {
+                var key = (
+                    transaction.ProductId,
+                    transaction.LotId,
+                    transaction.LocationId);
+                var expectedQtyAfter = transaction.ReferenceNo switch
+                {
+                    "GR-20260715-01" or "GR-20260715-02" => transaction.Qty,
+                    "WO-20260717-01"
+                        when transaction.Type == TransactionType.Receipt => 10m,
+                    "WO-20260717-04" => 0m,
+                    _ => balances[key].QtyAvailable
+                };
+
+                Assert.Equal(expectedQtyAfter, transaction.QtyAfter);
+                Assert.Equal(transaction.Lot!.UnitPrice, transaction.ValuationRate);
+            });
     }
 
     [Fact]

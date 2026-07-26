@@ -234,7 +234,9 @@ public class MesCoreServiceTests
             ProductId = 2,
             LotId = 10,
             LocationId = 1,
-            QtyReserved = 12m
+            QtyAvailable = 5m,
+            QtyReserved = 15m,
+            QtyOnHold = 4m
         });
         await context.SaveChangesAsync();
 
@@ -249,18 +251,24 @@ public class MesCoreServiceTests
         var outputLot = await context.Lots.SingleAsync(l => l.WorkOrderId == 100);
         Assert.StartsWith("FG-01-" + DateTime.Today.ToString("yyyyMMdd"), outputLot.LotNo);
         Assert.Equal(8m, outputLot.Qty);
-        Assert.Equal(77, (await context.StockBalances.SingleAsync(sb => sb.LotId == outputLot.Id)).LocationId);
+        var manufacturedBalance = await context.StockBalances
+            .SingleAsync(sb => sb.LotId == outputLot.Id);
+        Assert.Equal(77, manufacturedBalance.LocationId);
         var manufacturedReceipt = await context.StockTransactions
             .SingleAsync(tx => tx.LotId == outputLot.Id);
         Assert.Equal(77, manufacturedReceipt.LocationId);
-        Assert.Equal(8m, manufacturedReceipt.QtyAfter);
+        Assert.Equal(manufacturedBalance.QtyAvailable, manufacturedReceipt.QtyAfter);
         Assert.Equal(outputLot.UnitPrice, manufacturedReceipt.ValuationRate);
 
-        Assert.Equal(0m, (await context.StockBalances.SingleAsync(sb => sb.LotId == 10)).QtyReserved);
+        var materialBalance = await context.StockBalances
+            .SingleAsync(sb => sb.LotId == 10);
+        Assert.Equal(5m, materialBalance.QtyAvailable);
+        Assert.Equal(3m, materialBalance.QtyReserved);
+        Assert.Equal(4m, materialBalance.QtyOnHold);
         var backflush = await context.StockTransactions
             .SingleAsync(tx => tx.Type == TransactionType.Backflush);
         Assert.Equal(-12m, backflush.Qty);
-        Assert.Equal(0m, backflush.QtyAfter);
+        Assert.Equal(materialBalance.QtyAvailable, backflush.QtyAfter);
         Assert.Equal(6.5m, backflush.ValuationRate);
         Assert.Contains(await context.LotGenealogies.ToListAsync(), g => g.OutputLotId == outputLot.Id && g.InputLotId == 10 && g.QtyConsumed == 12m);
     }
