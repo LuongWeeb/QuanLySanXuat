@@ -107,6 +107,87 @@ public class InventoryController : Controller
         return View(issues);
     }
 
+    [Authorize(Roles = "Admin,Warehouse,Manager")]
+    public async Task<IActionResult> Transactions()
+    {
+        var transactions = await _context.StockTransactions
+            .Include(transaction => transaction.Product)
+            .Include(transaction => transaction.Lot)
+            .Include(transaction => transaction.Location)
+            .OrderByDescending(transaction => transaction.TransactionDate)
+            .ThenByDescending(transaction => transaction.Id)
+            .AsNoTracking()
+            .ToListAsync();
+
+        return View(transactions);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Roles = "Admin,Warehouse,Manager")]
+    public async Task<IActionResult> CancelReceipt(int id)
+    {
+        if (_inventoryService is null)
+        {
+            throw new InvalidOperationException("IInventoryService is required.");
+        }
+
+        var userId = HttpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        try
+        {
+            var success = await _inventoryService.CancelGoodsReceiptAsync(id, userId ?? "system");
+            if (success)
+            {
+                TempData["StatusMessage"] = "Đã hủy phiếu nhập kho và hoàn trả số dư thành công.";
+            }
+            else
+            {
+                TempData["ErrorMessage"] = "Không thể hủy phiếu nhập kho.";
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to cancel goods receipt {ReceiptId}.", id);
+            TempData["ErrorMessage"] =
+                "Không thể hủy phiếu nhập kho. Vui lòng thử lại hoặc liên hệ quản trị viên.";
+        }
+
+        return RedirectToAction(nameof(Receipts));
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Roles = "Admin,Warehouse,Manager")]
+    public async Task<IActionResult> CancelIssue(int id)
+    {
+        if (_inventoryService is null)
+        {
+            throw new InvalidOperationException("IInventoryService is required.");
+        }
+
+        var userId = HttpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        try
+        {
+            var success = await _inventoryService.CancelGoodsIssueAsync(id, userId ?? "system");
+            if (success)
+            {
+                TempData["StatusMessage"] = "Đã hủy phiếu xuất kho và thu hồi số dư thành công.";
+            }
+            else
+            {
+                TempData["ErrorMessage"] = "Không thể hủy phiếu xuất kho.";
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to cancel goods issue {IssueId}.", id);
+            TempData["ErrorMessage"] =
+                "Không thể hủy phiếu xuất kho. Vui lòng thử lại hoặc liên hệ quản trị viên.";
+        }
+
+        return RedirectToAction(nameof(Issues));
+    }
+
     [HttpGet]
     [Authorize(Roles = "Admin,Warehouse,Manager")]
     public async Task<IActionResult> CreateIssue()

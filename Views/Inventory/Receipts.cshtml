@@ -1,4 +1,5 @@
 @model IEnumerable<WmsMes.Web.Domain.Entities.GoodsReceipt>
+@using WmsMes.Web.Domain.Enums
 @inject TimeZoneInfo BusinessTimeZone
 @{
     ViewData["Title"] = "Nhập kho mua hàng";
@@ -9,12 +10,19 @@
         <p class="eyebrow">WMS</p>
         <h2>Lịch sử Nhập kho</h2>
     </div>
-    <a class="btn btn-primary" asp-action="CreateReceipt">Nhập lô mới</a>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" asp-action="Transactions">Sổ cái kho</a>
+        <a class="btn btn-primary" asp-action="CreateReceipt">Nhập lô mới</a>
+    </div>
 </section>
 
 @if (TempData["StatusMessage"] is string statusMessage)
 {
-    <div class="alert alert-info mt-3">@statusMessage</div>
+    <div class="alert alert-info mt-3" role="status">@statusMessage</div>
+}
+@if (TempData["ErrorMessage"] is string errorMessage)
+{
+    <div class="alert alert-danger mt-3" role="alert">@errorMessage</div>
 }
 
 <section class="data-panel mt-3">
@@ -29,14 +37,18 @@
                     <th>Vị trí</th>
                     <th class="text-end">Số lượng</th>
                     <th>Ngày nhập</th>
+                    <th>Trạng thái</th>
+                    <th>Thao tác</th>
                 </tr>
             </thead>
             <tbody>
             @foreach (var receipt in Model)
             {
-                foreach (var line in receipt.Lines)
+                var lines = receipt.Lines.ToList();
+                foreach (var indexedLine in lines.Select((line, index) => new { Line = line, Index = index }))
                 {
-                    <tr>
+                    var line = indexedLine.Line;
+                    <tr class="@(receipt.Status == DocumentStatus.Cancelled ? "text-muted" : "")">
                         <td><code>@receipt.ReceiptNo</code></td>
                         <td>@line.Product?.Name</td>
                         <td>@receipt.Supplier?.Name</td>
@@ -44,6 +56,42 @@
                         <td><code>@line.Location?.Code</code></td>
                         <td class="text-end fw-semibold text-success">+@line.Qty.ToVietnameseNumber()</td>
                         <td>@receipt.ReceiptDate.ToVietnameseBusinessDateTime(BusinessTimeZone)</td>
+                        @if (indexedLine.Index == 0)
+                        {
+                            <td rowspan="@lines.Count">
+                                @if (receipt.Status == DocumentStatus.Cancelled)
+                                {
+                                    <span class="badge bg-danger">Đã hủy</span>
+                                }
+                                else if (receipt.Status == DocumentStatus.Completed)
+                                {
+                                    <span class="badge bg-success">@receipt.Status.ToVietnameseString()</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">@receipt.Status.ToVietnameseString()</span>
+                                }
+                            </td>
+                            <td rowspan="@lines.Count">
+                                @if (receipt.Status == DocumentStatus.Completed)
+                                {
+                                    <form asp-action="CancelReceipt"
+                                          asp-route-id="@receipt.Id"
+                                          method="post"
+                                          asp-antiforgery="true"
+                                          onsubmit="return confirm('Bạn có chắc chắn muốn hủy phiếu nhập kho này? Số lượng tồn kho sẽ bị trừ hoàn lại.');"
+                                          class="d-inline">
+                                        <button type="submit"
+                                                class="btn btn-sm btn-outline-danger"
+                                                aria-label="Hủy phiếu nhập kho @receipt.ReceiptNo">Hủy phiếu</button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <span class="text-muted" aria-label="Không có thao tác">—</span>
+                                }
+                            </td>
+                        }
                     </tr>
                 }
             }

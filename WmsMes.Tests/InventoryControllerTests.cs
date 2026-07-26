@@ -1,5 +1,6 @@
 using System.Data;
 using System.Globalization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
@@ -976,6 +977,203 @@ public class InventoryControllerTests
         Assert.Empty(await context.Lots.ToListAsync());
         Assert.Empty(await context.StockBalances.ToListAsync());
     }
+    [Theory]
+    [InlineData(nameof(InventoryController.CancelReceipt))]
+    [InlineData(nameof(InventoryController.CancelIssue))]
+    public void CancellationPosts_RequireWarehouseAuthorizationAndAntiforgery(string actionName)
+    {
+        var action = typeof(InventoryController).GetMethod(actionName, new[] { typeof(int) });
+
+        Assert.NotNull(action);
+        Assert.Single(action!.GetCustomAttributes(typeof(HttpPostAttribute), true));
+        Assert.Single(action.GetCustomAttributes(typeof(ValidateAntiForgeryTokenAttribute), true));
+        Assert.Equal(
+            "Admin,Warehouse,Manager",
+            Assert.Single(action.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+                .Cast<AuthorizeAttribute>()).Roles);
+    }
+
+    [Fact]
+    public async Task CancelReceipt_WhenServiceSucceeds_UsesAuthenticatedUserAndRedirectsWithSuccess()
+    {
+        await using var context = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"CancelReceiptController_{Guid.NewGuid()}")
+                .Options);
+        var service = new Mock<IInventoryService>();
+        service.Setup(item => item.CancelGoodsReceiptAsync(42, "warehouse-user"))
+            .ReturnsAsync(true);
+        var controller = CancellationController(context, service.Object, authenticated: true);
+
+        var result = await controller.CancelReceipt(42);
+
+        Assert.Equal(
+            nameof(InventoryController.Receipts),
+            Assert.IsType<RedirectToActionResult>(result).ActionName);
+        Assert.Equal(
+            "Đã hủy phiếu nhập kho và hoàn trả số dư thành công.",
+            controller.TempData["StatusMessage"]);
+        Assert.False(controller.TempData.ContainsKey("ErrorMessage"));
+        service.Verify(item => item.CancelGoodsReceiptAsync(42, "warehouse-user"), Times.Once);
+    }
+
+    [Fact]
+    public async Task CancelIssue_WhenServiceReturnsFalse_UsesSystemFallbackAndRedirectsWithError()
+    {
+        await using var context = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"CancelIssueController_{Guid.NewGuid()}")
+                .Options);
+        var service = new Mock<IInventoryService>();
+        service.Setup(item => item.CancelGoodsIssueAsync(17, "system"))
+            .ReturnsAsync(false);
+        var controller = CancellationController(context, service.Object);
+
+        var result = await controller.CancelIssue(17);
+
+        Assert.Equal(
+            nameof(InventoryController.Issues),
+            Assert.IsType<RedirectToActionResult>(result).ActionName);
+        Assert.Equal(
+            "Không thể hủy phiếu xuất kho.",
+            controller.TempData["ErrorMessage"]);
+        Assert.False(controller.TempData.ContainsKey("StatusMessage"));
+        service.Verify(item => item.CancelGoodsIssueAsync(17, "system"), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CancellationPost_WhenServiceThrows_DoesNotExposeExceptionDetails(bool receipt)
+    {
+        await using var context = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"CancelFailureController_{Guid.NewGuid()}")
+                .Options);
+        var service = new Mock<IInventoryService>();
+        if (receipt)
+        {
+            service.Setup(item => item.CancelGoodsReceiptAsync(9, It.IsAny<string>()))
+                .ThrowsAsync(new InvalidOperationException("secret database detail"));
+        }
+        else
+        {
+            service.Setup(item => item.CancelGoodsIssueAsync(9, It.IsAny<string>()))
+                .ThrowsAsync(new InvalidOperationException("secret database detail"));
+        }
+        var controller = CancellationController(context, service.Object, authenticated: true);
+
+        var result = receipt
+            ? await controller.CancelReceipt(9)
+            : await controller.CancelIssue(9);
+
+        var redirect = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal(
+            receipt ? nameof(InventoryController.Receipts) : nameof(InventoryController.Issues),
+            redirect.ActionName);
+        var message = Assert.IsType<string>(controller.TempData["ErrorMessage"]);
+        Assert.DoesNotContain("secret", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Vui lòng thử lại", message);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CancellationPost_WithoutInventoryService_FailsFast(bool receipt)
+    {
+        await using var context = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"CancelMissingService_{Guid.NewGuid()}")
+                .Options);
+        var controller = CancellationController(context);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            receipt ? controller.CancelReceipt(1) : controller.CancelIssue(1));
+
+        Assert.Equal("IInventoryService is required.", exception.Message);
+    }
+
+    [Fact]
+    public async Task Transactions_ReturnsNewestFirstWithDisplayRelationships()
+    {
+        await using var context = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"InventoryTransactions_{Guid.NewGuid()}")
+                .Options);
+        var product = new Product { Code = "P", Name = "Product" };
+        var lot = new Lot { LotNo = "LOT", Product = product };
+        var location = new Location
+        {
+            Code = "LOC",
+            Name = "Location",
+            Zone = new Zone { Code = "Z", Name = "Zone" }
+        };
+        context.StockTransactions.AddRange(
+            new StockTransaction
+            {
+                Type = WmsMes.Web.Domain.Enums.TransactionType.Receipt,
+                Product = product,
+                Lot = lot,
+                Location = location,
+                Qty = 3,
+                TransactionDate = new DateTime(2026, 1, 1),
+                UserId = "old",
+                ReferenceNo = "OLD"
+            },
+            new StockTransaction
+            {
+                Type = WmsMes.Web.Domain.Enums.TransactionType.Issue,
+                Product = product,
+                Lot = lot,
+                Location = location,
+                Qty = -1,
+                TransactionDate = new DateTime(2026, 2, 1),
+                UserId = "new",
+                ReferenceNo = "NEW"
+            });
+        await context.SaveChangesAsync();
+        var controller = new InventoryController(context, Mock.Of<IReportExportService>());
+
+        var result = await controller.Transactions();
+
+        var model = Assert.IsAssignableFrom<IEnumerable<StockTransaction>>(
+            Assert.IsType<ViewResult>(result).Model).ToList();
+        Assert.Equal(new[] { "NEW", "OLD" }, model.Select(item => item.ReferenceNo));
+        Assert.All(model, item =>
+        {
+            Assert.NotNull(item.Product);
+            Assert.NotNull(item.Lot);
+            Assert.NotNull(item.Location);
+        });
+    }
+
+    private static InventoryController CancellationController(
+        ApplicationDbContext context,
+        IInventoryService? inventoryService = null,
+        bool authenticated = false)
+    {
+        var controller = new InventoryController(
+            context,
+            Mock.Of<IReportExportService>(),
+            inventoryService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+        if (authenticated)
+        {
+            controller.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, "warehouse-user") },
+                "Test"));
+        }
+        controller.TempData = new TempDataDictionary(
+            controller.HttpContext,
+            Mock.Of<ITempDataProvider>());
+        return controller;
+    }
+
     private static T Authenticated<T>(T controller) where T : Controller
     {
         controller.ControllerContext = new ControllerContext

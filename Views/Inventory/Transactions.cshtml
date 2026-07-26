@@ -1,0 +1,75 @@
+@model IEnumerable<WmsMes.Web.Domain.Entities.StockTransaction>
+@inject TimeZoneInfo BusinessTimeZone
+@{
+    ViewData["Title"] = "Sổ cái kho";
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">WMS</p>
+        <h2>Lịch sử giao dịch kho</h2>
+    </div>
+    <a class="btn btn-outline-secondary" asp-action="Index">Xem số dư tồn kho</a>
+</section>
+
+<section class="data-panel mt-3">
+    <div class="table-responsive">
+        <table class="table data-table align-middle">
+            <caption class="visually-hidden">
+                Sổ cái giao dịch kho gồm số lượng thay đổi, số dư sau giao dịch, đơn giá vốn và trạng thái.
+            </caption>
+            <thead>
+                <tr>
+                    <th>Thời gian</th>
+                    <th>Loại giao dịch</th>
+                    <th>Tham chiếu</th>
+                    <th>Sản phẩm</th>
+                    <th>Lô</th>
+                    <th>Vị trí</th>
+                    <th class="text-end">Số lượng thay đổi</th>
+                    <th class="text-end">Số dư sau GD</th>
+                    <th class="text-end">Đơn giá vốn</th>
+                    <th>Trạng thái</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var transaction in Model)
+            {
+                <tr class="@(transaction.IsCancelled ? "text-muted text-decoration-line-through" : "")">
+                    <td>@transaction.TransactionDate.ToVietnameseBusinessDateTime(BusinessTimeZone)</td>
+                    <td>@transaction.Type.ToVietnameseString()</td>
+                    <td><code>@transaction.ReferenceNo</code></td>
+                    <td>
+                        <code>@transaction.Product?.Code</code>
+                        <span class="table-subtext">@transaction.Product?.Name</span>
+                    </td>
+                    <td><code>@transaction.Lot?.LotNo</code></td>
+                    <td><code>@transaction.Location?.Code</code></td>
+                    <td class="text-end fw-semibold">
+                        @(transaction.Qty > 0 ? "+" : "")@transaction.Qty.ToVietnameseNumber()
+                    </td>
+                    <td class="text-end">@transaction.QtyAfter.ToVietnameseNumber()</td>
+                    <td class="text-end">@transaction.ValuationRate.ToVietnameseNumber() VNĐ</td>
+                    <td>
+                        @if (transaction.IsCancelled)
+                        {
+                            <span class="badge bg-danger">Đã hủy</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-success">Hợp lệ</span>
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+    @if (!Model.Any())
+    {
+        <div class="empty-state compact">
+            <h3>Chưa có giao dịch kho</h3>
+            <p>Giao dịch sẽ xuất hiện sau khi hoàn tất nghiệp vụ nhập, xuất hoặc điều chỉnh kho.</p>
+        </div>
+    }
+</section>

@@ -60,6 +60,62 @@ public class InventoryViewTests
             issue);
     }
 
+    [Theory]
+    [InlineData(
+        "Receipts.cshtml",
+        "receipt.Status == DocumentStatus.Completed",
+        "CancelReceipt",
+        "phiếu nhập kho",
+        "Số lượng tồn kho sẽ bị trừ hoàn lại")]
+    [InlineData(
+        "Issues.cshtml",
+        "issue.Status == DocumentStatus.Completed",
+        "CancelIssue",
+        "phiếu xuất kho",
+        "Số lượng tồn kho sẽ được trả lại")]
+    public void DocumentLists_RenderSecureCancellationOnlyForCompletedDocuments(
+        string fileName,
+        string completedCondition,
+        string action,
+        string documentLabel,
+        string confirmation)
+    {
+        var view = ReadInventoryView(fileName);
+
+        Assert.Contains(completedCondition, view);
+        Assert.Contains($"asp-action=\"{action}\"", view);
+        Assert.Contains("method=\"post\"", view);
+        Assert.Contains("asp-antiforgery=\"true\"", view);
+        Assert.DoesNotContain("@Html.AntiForgeryToken()", view);
+        Assert.Contains(confirmation, view);
+        Assert.Contains(">Hủy phiếu</button>", view);
+        Assert.Contains("DocumentStatus.Cancelled", view);
+        Assert.Contains("badge bg-danger", view);
+        Assert.Contains("Đã hủy", view);
+        Assert.Contains("TempData[\"ErrorMessage\"]", view);
+        Assert.Contains(documentLabel, view);
+    }
+
+    [Fact]
+    public void Transactions_RendersRunningBalanceValuationAndCancellationStatus()
+    {
+        var view = ReadInventoryView("Transactions.cshtml");
+
+        Assert.Contains("@model IEnumerable<WmsMes.Web.Domain.Entities.StockTransaction>", view);
+        Assert.Contains("Số dư sau GD", view);
+        Assert.Contains("@transaction.QtyAfter.ToVietnameseNumber()", view);
+        Assert.Contains("Đơn giá vốn", view);
+        Assert.Contains("@transaction.ValuationRate.ToVietnameseNumber() VNĐ", view);
+        Assert.Contains("transaction.IsCancelled ? \"text-muted text-decoration-line-through\"", view);
+        Assert.Contains("badge bg-danger", view);
+        Assert.Contains("Đã hủy", view);
+        Assert.Contains("badge bg-success", view);
+        Assert.Contains("Hợp lệ", view);
+    }
+
+    private static string ReadInventoryView(string fileName) =>
+        File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Inventory", fileName));
+
     private static string ProjectRoot() => Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 }
