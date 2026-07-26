@@ -244,6 +244,73 @@ public class InventoryServiceTests
         Assert.False(transaction.IsCancelled);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task CompleteGoodsReceiptAsync_RejectsNonPositiveQuantityBeforeWritingStockOrLedger(decimal qty)
+    {
+        await using var context = CreateContext();
+        await SeedRequiredMasterDataAsync(context);
+        context.GoodsReceipts.Add(new GoodsReceipt
+        {
+            Id = 1,
+            ReceiptNo = "GR-INVALID-QTY",
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsReceiptLine
+                {
+                    ProductId = 1,
+                    LocationId = 1,
+                    LotNo = "LOT-INVALID-QTY",
+                    Qty = qty
+                }
+            }
+        });
+        await context.SaveChangesAsync();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new InventoryService(context).CompleteGoodsReceiptAsync(1, "user-1"));
+
+        Assert.Equal("Quantity must be greater than zero.", exception.Message);
+        Assert.Empty(await context.Lots.ToListAsync());
+        Assert.Empty(await context.StockBalances.ToListAsync());
+        Assert.Empty(await context.StockTransactions.ToListAsync());
+        Assert.Equal(DocumentStatus.Draft, (await context.GoodsReceipts.FindAsync(1))!.Status);
+    }
+
+    [Fact]
+    public async Task CompleteGoodsReceiptAsync_WhenLaterLineHasNonPositiveQuantity_RollsBackEarlierPosting()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.GoodsReceipts.Add(new GoodsReceipt
+        {
+            Id = 1,
+            ReceiptNo = "GR-ROLLBACK",
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsReceiptLine { ProductId = 1, LocationId = 1, LotNo = "A-VALID", Qty = 5 },
+                new GoodsReceiptLine { ProductId = 1, LocationId = 1, LotNo = "Z-INVALID", Qty = 0 }
+            }
+        });
+        await context.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new InventoryService(context).CompleteGoodsReceiptAsync(1, "user-1"));
+
+        context.ChangeTracker.Clear();
+        Assert.Empty(await context.Lots.ToListAsync());
+        Assert.Empty(await context.StockBalances.ToListAsync());
+        Assert.Empty(await context.StockTransactions.ToListAsync());
+        Assert.Equal(DocumentStatus.Draft, (await context.GoodsReceipts.FindAsync(1))!.Status);
+    }
+
     [Fact]
     public async Task CompleteGoodsIssueAsync_ThrowsInvalidOperationException_WhenStockIsInsufficient()
     {
@@ -293,6 +360,108 @@ public class InventoryServiceTests
 
         Assert.True(await new InventoryService(context).CompleteGoodsIssueAsync(1, "user-1"));
 
+        var transaction = await context.StockTransactions.SingleAsync();
+        Assert.Equal(-3m, transaction.Qty);
+        Assert.Equal(7m, transaction.QtyAfter);
+        Assert.Equal(7.5m, transaction.ValuationRate);
+        Assert.False(transaction.IsCancelled);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-3)]
+    public async Task CompleteGoodsIssueAsync_RejectsNonPositiveQuantityBeforeChangingStockOrLedger(decimal qty)
+    {
+        await using var context = CreateContext();
+        await SeedRequiredMasterDataAsync(context);
+        context.Customers.Add(new Customer { Id = 1, Code = "C1", Name = "Customer 1" });
+        context.Lots.Add(new Lot { Id = 1, ProductId = 1, LotNo = "LOT-INVALID-QTY", Qty = 10, UnitPrice = 7.5m });
+        context.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 10 });
+        context.GoodsIssues.Add(new GoodsIssue
+        {
+            Id = 1,
+            IssueNo = "GI-INVALID-QTY",
+            CustomerId = 1,
+            Status = DocumentStatus.Draft,
+            Lines = { new GoodsIssueLine { ProductId = 1, LotId = 1, LocationId = 1, Qty = qty } }
+        });
+        await context.SaveChangesAsync();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new InventoryService(context).CompleteGoodsIssueAsync(1, "user-1"));
+
+        Assert.Equal("Quantity must be greater than zero.", exception.Message);
+        Assert.Equal(10m, (await context.StockBalances.SingleAsync()).QtyAvailable);
+        Assert.Empty(await context.StockTransactions.ToListAsync());
+        Assert.Equal(DocumentStatus.Draft, (await context.GoodsIssues.FindAsync(1))!.Status);
+    }
+
+    [Fact]
+    public async Task CompleteGoodsIssueAsync_WhenLaterLineHasNonPositiveQuantity_RollsBackEarlierPosting()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.Customers.Add(new Customer { Id = 1, Code = "C1", Name = "Customer 1" });
+        context.Lots.AddRange(
+            new Lot { Id = 1, ProductId = 1, LotNo = "LOT-1", Qty = 10 },
+            new Lot { Id = 2, ProductId = 1, LotNo = "LOT-2", Qty = 10 });
+        context.StockBalances.AddRange(
+            new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 10 },
+            new StockBalance { ProductId = 1, LotId = 2, LocationId = 1, QtyAvailable = 10 });
+        context.GoodsIssues.Add(new GoodsIssue
+        {
+            Id = 1,
+            IssueNo = "GI-ROLLBACK",
+            CustomerId = 1,
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsIssueLine { ProductId = 1, LotId = 1, LocationId = 1, Qty = 3 },
+                new GoodsIssueLine { ProductId = 1, LotId = 2, LocationId = 1, Qty = 0 }
+            }
+        });
+        await context.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new InventoryService(context).CompleteGoodsIssueAsync(1, "user-1"));
+
+        context.ChangeTracker.Clear();
+        Assert.Equal(new[] { 10m, 10m }, await context.StockBalances.OrderBy(balance => balance.LotId)
+            .Select(balance => balance.QtyAvailable).ToListAsync());
+        Assert.Empty(await context.StockTransactions.ToListAsync());
+        Assert.Equal(DocumentStatus.Draft, (await context.GoodsIssues.FindAsync(1))!.Status);
+    }
+
+    [Fact]
+    public async Task CompleteGoodsIssueAsync_OnRelationalStore_WritesPersistedLedgerBalanceAndLotValuation()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedRequiredMasterDataAsync(context);
+        context.Customers.Add(new Customer { Id = 1, Code = "C1", Name = "Customer 1" });
+        context.Lots.Add(new Lot { Id = 1, ProductId = 1, LotNo = "LOT-SQLITE", Qty = 10, UnitPrice = 7.5m });
+        context.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 10 });
+        context.GoodsIssues.Add(new GoodsIssue
+        {
+            Id = 1,
+            IssueNo = "GI-SQLITE",
+            CustomerId = 1,
+            Status = DocumentStatus.Draft,
+            Lines = { new GoodsIssueLine { ProductId = 1, LotId = 1, LocationId = 1, Qty = 3 } }
+        });
+        await context.SaveChangesAsync();
+
+        Assert.True(await new InventoryService(context).CompleteGoodsIssueAsync(1, "user-1"));
+
+        context.ChangeTracker.Clear();
+        Assert.Equal(7m, (await context.StockBalances.SingleAsync()).QtyAvailable);
         var transaction = await context.StockTransactions.SingleAsync();
         Assert.Equal(-3m, transaction.Qty);
         Assert.Equal(7m, transaction.QtyAfter);

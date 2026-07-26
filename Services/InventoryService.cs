@@ -171,6 +171,11 @@ public class InventoryService : IInventoryService
                 .ThenBy(line => line.LocationId)
                 .ThenBy(line => line.Id))
             {
+                if (line.Qty <= 0)
+                {
+                    throw new InvalidOperationException("Quantity must be greater than zero.");
+                }
+
                 var lot = await _context.Lots
                     .FirstOrDefaultAsync(l => l.LotNo == line.LotNo && l.ProductId == line.ProductId);
 
@@ -276,6 +281,11 @@ public class InventoryService : IInventoryService
                 .ThenBy(line => line.LocationId)
                 .ThenBy(line => line.Id))
             {
+                if (line.Qty <= 0)
+                {
+                    throw new InvalidOperationException("Quantity must be greater than zero.");
+                }
+
                 decimal qtyAfter;
                 if (_context.Database.IsRelational())
                 {
