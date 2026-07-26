@@ -213,6 +213,38 @@ public class InventoryServiceTests
     }
 
     [Fact]
+    public async Task CompleteGoodsReceiptAsync_WritesRunningBalanceAndLotValuationToLedger()
+    {
+        await using var context = CreateContext();
+        await SeedRequiredMasterDataAsync(context);
+        context.GoodsReceipts.Add(new GoodsReceipt
+        {
+            Id = 1,
+            ReceiptNo = "GR-LEDGER",
+            Status = DocumentStatus.Draft,
+            Lines =
+            {
+                new GoodsReceiptLine
+                {
+                    ProductId = 1,
+                    LocationId = 1,
+                    LotNo = "LOT-LEDGER",
+                    Qty = 12,
+                    UnitPrice = 4.25m
+                }
+            }
+        });
+        await context.SaveChangesAsync();
+
+        Assert.True(await new InventoryService(context).CompleteGoodsReceiptAsync(1, "user-1"));
+
+        var transaction = await context.StockTransactions.SingleAsync();
+        Assert.Equal(12m, transaction.QtyAfter);
+        Assert.Equal(4.25m, transaction.ValuationRate);
+        Assert.False(transaction.IsCancelled);
+    }
+
+    [Fact]
     public async Task CompleteGoodsIssueAsync_ThrowsInvalidOperationException_WhenStockIsInsufficient()
     {
         await using var context = CreateContext();
@@ -239,6 +271,33 @@ public class InventoryServiceTests
         Assert.Equal("Not enough available stock. Negative stock is not allowed.", exception.Message);
         Assert.Equal(10, (await context.StockBalances.SingleAsync()).QtyAvailable);
         Assert.Empty(context.StockTransactions);
+    }
+
+    [Fact]
+    public async Task CompleteGoodsIssueAsync_WritesRemainingBalanceAndLotValuationToLedger()
+    {
+        await using var context = CreateContext();
+        await SeedRequiredMasterDataAsync(context);
+        context.Customers.Add(new Customer { Id = 1, Code = "C1", Name = "Customer 1" });
+        context.Lots.Add(new Lot { Id = 1, ProductId = 1, LotNo = "LOT-LEDGER", Qty = 10, UnitPrice = 7.5m });
+        context.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 10 });
+        context.GoodsIssues.Add(new GoodsIssue
+        {
+            Id = 1,
+            IssueNo = "GI-LEDGER",
+            CustomerId = 1,
+            Status = DocumentStatus.Draft,
+            Lines = { new GoodsIssueLine { ProductId = 1, LotId = 1, LocationId = 1, Qty = 3 } }
+        });
+        await context.SaveChangesAsync();
+
+        Assert.True(await new InventoryService(context).CompleteGoodsIssueAsync(1, "user-1"));
+
+        var transaction = await context.StockTransactions.SingleAsync();
+        Assert.Equal(-3m, transaction.Qty);
+        Assert.Equal(7m, transaction.QtyAfter);
+        Assert.Equal(7.5m, transaction.ValuationRate);
+        Assert.False(transaction.IsCancelled);
     }
 
     [Fact]

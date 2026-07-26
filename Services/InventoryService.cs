@@ -226,6 +226,9 @@ public class InventoryService : IInventoryService
                     LotId = lot.Id,
                     LocationId = line.LocationId,
                     Qty = line.Qty,
+                    QtyAfter = balance.QtyAvailable,
+                    ValuationRate = lot.UnitPrice,
+                    IsCancelled = false,
                     TransactionDate = DateTime.UtcNow,
                     UserId = userId,
                     ReferenceNo = receipt.ReceiptNo
@@ -273,6 +276,7 @@ public class InventoryService : IInventoryService
                 .ThenBy(line => line.LocationId)
                 .ThenBy(line => line.Id))
             {
+                decimal qtyAfter;
                 if (_context.Database.IsRelational())
                 {
                     var updated = await _context.StockBalances
@@ -288,6 +292,14 @@ public class InventoryService : IInventoryService
                     {
                         throw new InvalidOperationException("Not enough available stock. Negative stock is not allowed.");
                     }
+
+                    qtyAfter = await _context.StockBalances
+                        .Where(sb =>
+                            sb.ProductId == line.ProductId &&
+                            sb.LotId == line.LotId &&
+                            sb.LocationId == line.LocationId)
+                        .Select(sb => sb.QtyAvailable)
+                        .SingleAsync();
                 }
                 else
                 {
@@ -304,8 +316,10 @@ public class InventoryService : IInventoryService
                     }
 
                     balance.QtyAvailable -= line.Qty;
+                    qtyAfter = balance.QtyAvailable;
                 }
 
+                var lot = await _context.Lots.FindAsync(line.LotId);
                 await _context.StockTransactions.AddAsync(new StockTransaction
                 {
                     Type = TransactionType.Issue,
@@ -313,6 +327,9 @@ public class InventoryService : IInventoryService
                     LotId = line.LotId,
                     LocationId = line.LocationId,
                     Qty = -line.Qty,
+                    QtyAfter = qtyAfter,
+                    ValuationRate = lot?.UnitPrice ?? 0m,
+                    IsCancelled = false,
                     TransactionDate = DateTime.UtcNow,
                     UserId = userId,
                     ReferenceNo = issue.IssueNo
