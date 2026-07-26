@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.ComponentModel.DataAnnotations.Schema;
 using WmsMes.Web.Domain.Common;
+using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 
 namespace WmsMes.Tests;
@@ -26,7 +28,8 @@ public class CommonExtensionsTests
     public static TheoryData<DocumentStatus, string> DocumentStatuses => new()
     {
         { DocumentStatus.Draft, "Nháp" },
-        { DocumentStatus.Completed, "Đã hoàn thành" }
+        { DocumentStatus.Completed, "Đã hoàn thành" },
+        { DocumentStatus.Cancelled, "Đã hủy" }
     };
 
     public static TheoryData<ProductType, string> ProductTypes => new()
@@ -74,6 +77,26 @@ public class CommonExtensionsTests
     [MemberData(nameof(DocumentStatuses))]
     public void ToVietnameseString_TranslatesEveryDocumentStatus(DocumentStatus value, string expected) =>
         Assert.Equal(expected, value.ToVietnameseString());
+
+    [Fact]
+    public void StockTransaction_InitializesStockLedgerFieldsWithExpectedDefaultsAndPrecision()
+    {
+        var transaction = new StockTransaction();
+
+        Assert.Equal(0m, transaction.QtyAfter);
+        Assert.Equal(0m, transaction.ValuationRate);
+        Assert.False(transaction.IsCancelled);
+        Assert.Equal("decimal(18,2)", typeof(StockTransaction).GetProperty(nameof(StockTransaction.QtyAfter))!
+            .GetCustomAttributes(typeof(ColumnAttribute), inherit: false)
+            .Cast<ColumnAttribute>()
+            .Single()
+            .TypeName);
+        Assert.Equal("decimal(18,2)", typeof(StockTransaction).GetProperty(nameof(StockTransaction.ValuationRate))!
+            .GetCustomAttributes(typeof(ColumnAttribute), inherit: false)
+            .Cast<ColumnAttribute>()
+            .Single()
+            .TypeName);
+    }
 
     [Theory]
     [MemberData(nameof(ProductTypes))]

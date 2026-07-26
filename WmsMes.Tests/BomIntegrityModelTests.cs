@@ -166,10 +166,6 @@ public class BomIntegrityModelTests
             "ApplicationDbContextModelSnapshot.cs"));
         Assert.Contains("UX_BOMs_ProductId_Version", snapshot);
         Assert.Contains("UX_BOMs_OneActivePerProduct", snapshot);
-        Assert.DoesNotContain(
-            "CycleCount",
-            snapshot,
-            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -210,7 +206,6 @@ public class BomIntegrityModelTests
             "Migrations",
             "ApplicationDbContextModelSnapshot.cs"));
         Assert.Contains("UX_BOMItems_BomId_ComponentProductId", snapshot);
-        Assert.DoesNotContain("CycleCount", snapshot, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

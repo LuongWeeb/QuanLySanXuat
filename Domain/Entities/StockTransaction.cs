@@ -32,6 +32,14 @@ public class StockTransaction
     [Column(TypeName = "decimal(18,2)")]
     public decimal Qty { get; set; }
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal QtyAfter { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal ValuationRate { get; set; }
+
+    public bool IsCancelled { get; set; } = false;
+
     [Required]
     public DateTime TransactionDate { get; set; } = DateTime.UtcNow;
 

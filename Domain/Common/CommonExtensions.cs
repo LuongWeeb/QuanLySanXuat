@@ -30,6 +30,7 @@ public static class CommonExtensions
     {
         DocumentStatus.Draft => "Nháp",
         DocumentStatus.Completed => "Đã hoàn thành",
+        DocumentStatus.Cancelled => "Đã hủy",
         _ => status.ToString()
     };
 

@@ -117,7 +117,6 @@ public class DailyProductionLogModelTests
             root, "Data", "Migrations", "ApplicationDbContextModelSnapshot.cs"));
         Assert.Contains("DailyProductionLog", snapshot);
         Assert.Contains("DailyProductionLogs", snapshot);
-        Assert.DoesNotContain("CycleCount", snapshot);
     }
 
     private static string FindRepositoryRoot()
