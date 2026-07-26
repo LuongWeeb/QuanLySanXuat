@@ -118,6 +118,45 @@ public static class DbSeeder
         await SeedMasterDataAsync(context);
         await SeedInventoryDataAsync(context);
         await SeedWorkOrdersAsync(context);
+        await SeedCycleCountDataAsync(context);
+    }
+
+    public static async Task SeedCycleCountDataAsync(ApplicationDbContext context)
+    {
+        var wh = await context.Warehouses.FirstOrDefaultAsync(w => w.Code == "WH01");
+        if (wh is null) return;
+        var location = await context.Locations.FirstOrDefaultAsync(l => l.Code == "LOC-RAW-01");
+        var product = await context.Products.FirstOrDefaultAsync(p => p.Code == "RM-FRAME-01");
+        if (location is null || product is null) return;
+        var lot = await context.Lots.FirstOrDefaultAsync(l => l.ProductId == product.Id);
+        if (lot is null) return;
+
+        if (!await context.CycleCountOrders.AnyAsync(c => c.CountNumber == "CC-20260720-01"))
+        {
+            var order = new CycleCountOrder
+            {
+                CountNumber = "CC-20260720-01",
+                WarehouseId = wh.Id,
+                Status = "Approved",
+                CreatedAt = DateTime.UtcNow.AddDays(-1),
+                CreatedBy = "warehouse@wmsmes.com",
+                CompletedAt = DateTime.UtcNow.AddHours(-10),
+                ApprovedBy = "manager@wmsmes.com",
+                Items = new List<CycleCountItem>
+                {
+                    new CycleCountItem
+                    {
+                        ProductId = product.Id,
+                        LocationId = location.Id,
+                        LotId = lot.Id,
+                        SystemQty = 100m,
+                        CountedQty = 98m
+                    }
+                }
+            };
+            context.CycleCountOrders.Add(order);
+            await context.SaveChangesAsync();
+        }
     }
 
     public static async Task SeedMasterDataAsync(ApplicationDbContext context)
