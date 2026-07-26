@@ -161,7 +161,7 @@ public class InventoryService : IInventoryService
                 .Include(r => r.Lines)
                 .FirstOrDefaultAsync(r => r.Id == receiptId);
 
-            if (receipt is null || receipt.Status == DocumentStatus.Completed)
+            if (receipt is null || receipt.Status != DocumentStatus.Draft)
             {
                 return false;
             }
@@ -324,7 +324,7 @@ public class InventoryService : IInventoryService
                 .Include(i => i.Lines)
                 .FirstOrDefaultAsync(i => i.Id == issueId);
 
-            if (issue is null || issue.Status == DocumentStatus.Completed)
+            if (issue is null || issue.Status != DocumentStatus.Draft)
             {
                 return false;
             }
@@ -824,9 +824,11 @@ public class InventoryService : IInventoryService
 
             var trackedBalance = _context.ChangeTracker.Entries<StockBalance>()
                 .FirstOrDefault(entry =>
-                    entry.Entity.ProductId == resolvedLine.Line.ProductId &&
-                    entry.Entity.LotId == resolvedLine.Lot.Id &&
-                    entry.Entity.LocationId == resolvedLine.Line.LocationId);
+                    EntryMatchesBalanceTarget(
+                        entry,
+                        resolvedLine.Line.ProductId,
+                        resolvedLine.Lot.Id,
+                        resolvedLine.Line.LocationId));
             if (trackedBalance is not null && trackedBalance.State != EntityState.Unchanged)
             {
                 throw CreateDirtyCancellationTargetException();
@@ -873,9 +875,11 @@ public class InventoryService : IInventoryService
 
             var trackedBalance = _context.ChangeTracker.Entries<StockBalance>()
                 .FirstOrDefault(entry =>
-                    entry.Entity.ProductId == line.ProductId &&
-                    entry.Entity.LotId == line.LotId &&
-                    entry.Entity.LocationId == line.LocationId);
+                    EntryMatchesBalanceTarget(
+                        entry,
+                        line.ProductId,
+                        line.LotId,
+                        line.LocationId));
             if (trackedBalance is not null && trackedBalance.State != EntityState.Unchanged)
             {
                 throw CreateDirtyCancellationTargetException();
@@ -910,9 +914,15 @@ public class InventoryService : IInventoryService
         var affectedLotKeys = lineList
             .Select(line => GetLotCacheKey(line.ProductId, line.LotNo))
             .ToHashSet();
+        var resolvedLotIds = resolvedLots.Values
+            .Where(lot => lot is not null)
+            .Select(lot => lot!.Id)
+            .ToHashSet();
         if (_context.ChangeTracker.Entries<Lot>().Any(entry =>
-                affectedLotKeys.Contains(
-                    GetLotCacheKey(entry.Entity.ProductId, entry.Entity.LotNo)) &&
+                (resolvedLotIds.Contains(entry.Entity.Id) ||
+                 affectedLotKeys.Contains(
+                     GetLotCacheKey(entry.Entity.ProductId, entry.Entity.LotNo)) ||
+                 affectedLotKeys.Contains(GetOriginalLotKey(entry))) &&
                 entry.State != EntityState.Unchanged))
         {
             throw CreateDirtyCompletionTargetException();
@@ -930,10 +940,11 @@ public class InventoryService : IInventoryService
             .Select(key => key!.Value)
             .ToHashSet();
         if (_context.ChangeTracker.Entries<StockBalance>().Any(entry =>
-                affectedBalanceKeys.Contains((
-                    entry.Entity.ProductId,
-                    entry.Entity.LotId,
-                    entry.Entity.LocationId)) &&
+                (affectedBalanceKeys.Contains((
+                     entry.Entity.ProductId,
+                     entry.Entity.LotId,
+                     entry.Entity.LocationId)) ||
+                 affectedBalanceKeys.Contains(GetOriginalBalanceKey(entry))) &&
                 entry.State != EntityState.Unchanged))
         {
             throw CreateDirtyCompletionTargetException();
@@ -959,10 +970,11 @@ public class InventoryService : IInventoryService
             .Select(line => (line.ProductId, line.LotId, line.LocationId))
             .ToHashSet();
         if (_context.ChangeTracker.Entries<StockBalance>().Any(entry =>
-                affectedBalanceKeys.Contains((
-                    entry.Entity.ProductId,
-                    entry.Entity.LotId,
-                    entry.Entity.LocationId)) &&
+                (affectedBalanceKeys.Contains((
+                     entry.Entity.ProductId,
+                     entry.Entity.LotId,
+                     entry.Entity.LocationId)) ||
+                 affectedBalanceKeys.Contains(GetOriginalBalanceKey(entry))) &&
                 entry.State != EntityState.Unchanged))
         {
             throw CreateDirtyCompletionTargetException();
@@ -979,6 +991,30 @@ public class InventoryService : IInventoryService
 
     private static string GetCanonicalLotNo(string lotNo) =>
         lotNo.Trim().ToUpperInvariant();
+
+    private static bool EntryMatchesBalanceTarget(
+        EntityEntry<StockBalance> entry,
+        int productId,
+        int lotId,
+        int locationId) =>
+        (entry.Entity.ProductId == productId &&
+         entry.Entity.LotId == lotId &&
+         entry.Entity.LocationId == locationId) ||
+        GetOriginalBalanceKey(entry) == (productId, lotId, locationId);
+
+    private static (int ProductId, int LotId, int LocationId) GetOriginalBalanceKey(
+        EntityEntry<StockBalance> entry) =>
+        (
+            entry.OriginalValues.GetValue<int>(nameof(StockBalance.ProductId)),
+            entry.OriginalValues.GetValue<int>(nameof(StockBalance.LotId)),
+            entry.OriginalValues.GetValue<int>(nameof(StockBalance.LocationId))
+        );
+
+    private static (int ProductId, string CanonicalLotNo) GetOriginalLotKey(
+        EntityEntry<Lot> entry) =>
+        GetLotCacheKey(
+            entry.OriginalValues.GetValue<int>(nameof(Lot.ProductId)),
+            entry.OriginalValues.GetValue<string>(nameof(Lot.LotNo)));
 
     private async Task<StockBalance?> FindStockBalanceWithExclusiveAccessAsync(
         int productId,

@@ -484,3 +484,74 @@ Passed! - Failed: 0, Passed: 363, Skipped: 0, Total: 363
 
 The output includes the expected existing JWT signing-key startup validation
 logs; the test process exits successfully.
+
+---
+
+## Mutable-identity and terminal-state follow-up
+
+This section supersedes the earlier verification counts.
+
+### Dirty mutable identity
+
+Dirty-target guards no longer rely only on the caller's current mutable
+identity fields:
+
+- existing receipt lots are matched by the resolved database `Lot.Id`;
+- added/missing-key lots are additionally matched by current and original
+  `(ProductId, normalized LotNo)`;
+- stock balances are matched against both current and `OriginalValues`
+  `(ProductId, LotId, LocationId)` tuples;
+- the same original-tuple balance matching is used by receipt completion, issue
+  completion, receipt cancellation, and issue cancellation.
+
+This guarantees rejection before `TrackFreshLot` or `TrackFreshBalance` can
+overwrite a caller's local key edits. Tests modify and preserve:
+
+- a lot's `ProductId` and `LotNo`;
+- a receipt-completion balance's `LocationId`;
+- a receipt-cancellation balance's `LotId`;
+- an issue-cancellation balance's `ProductId`.
+
+Every case verifies the explicit unsaved-change rejection, preservation of the
+caller's modified state/value, and no database document, lot, balance, or ledger
+mutation.
+
+### Terminal cancellation
+
+Goods receipt and goods issue completion now accept only `Draft` documents.
+`Completed` and `Cancelled` are terminal for the completion service. Dedicated
+tests prove a cancelled receipt and issue both return `false` without changing
+document status, stock, lot quantity, or ledger history.
+
+### TDD evidence
+
+The focused RED run failed all 6 new tests:
+
+- both cancelled documents reposted and returned `true`;
+- a changed lot identity bypassed completion preflight;
+- changed balance identities bypassed cancellation or failed later with an EF
+  tracking conflict instead of the dirty-target rejection.
+
+After ID/original-value matching and Draft-only preconditions, the same 6 tests
+passed. The full `InventoryServiceTests` suite passed 64/64.
+
+### Self-review
+
+- Cancellation still claims the document before database document/line/target
+  reads; dirty target detection occurs after resolution but before stock
+  mutation, and rollback removes the temporary CAS status change.
+- Completion performs all dirty target preflight before locked refresh or stock
+  mutation.
+- `TrackFresh*` is unreachable for an affected caller-edited target.
+- Natural-key lock ordering, unique savepoints, ReadCommitted-only ambient
+  cancellation, repeated-key caches, and exact balance key-range locks are
+  unchanged.
+
+Final full solution:
+
+```text
+Passed! - Failed: 0, Passed: 369, Skipped: 0, Total: 369
+```
+
+The output includes the expected existing JWT signing-key startup validation
+logs; the test process exits successfully.
