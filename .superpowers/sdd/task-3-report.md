@@ -149,3 +149,140 @@ existing LF-to-CRLF conversion warnings.
   values, entity state, and per-property modification flags. It does not attempt to
   reconstruct navigation loaded-state; no cancellation persistence depends on
   that state.
+
+---
+
+## Important review-fix follow-up
+
+This section supersedes the earlier unresolved concurrency and ambient-transaction
+concerns.
+
+### Ambient transaction atomicity
+
+- Cancellation-owned relational work now starts at `IsolationLevel.Serializable`.
+- When a cancellation joins an existing relational transaction, it creates a
+  method-specific savepoint.
+- Success and precondition-false paths release the savepoint.
+- Failure rolls back to and releases the savepoint, leaving database work performed
+  by the ambient owner before the cancellation untouched.
+- A provider that cannot create savepoints is rejected before cancellation
+  mutation.
+
+SQLite integration coverage proves:
+
+- a receipt cancellation that fails after its first direct SQL stock mutation can
+  be caught while the ambient transaction commits; the prior unrelated product
+  update persists, while receipt status, lot, balance, and ledger remain unchanged;
+- an issue cancellation whose final ledger save fails behaves the same way;
+- issue cancellation success followed by a precondition-false call in the same
+  ambient transaction releases both savepoints and commits the valid cancellation.
+
+### Race-safe missing issue balance
+
+The issue reversal path now acquires each exact balance key once, in deterministic
+`ProductId`, `LotId`, `LocationId` order:
+
+- SQL Server executes the production query with `UPDLOCK, HOLDLOCK` on the exact
+  tuple. `HOLDLOCK` supplies serializable key-range semantics for an absent row and
+  `UPDLOCK` retains update ownership until transaction completion.
+- The model's unique composite index on
+  `(ProductId, LotId, LocationId)` supplies the ordered key range used by that lock.
+- Service-owned transactions are also `Serializable`; an ambient SQL Server
+  transaction receives the same key-range behavior from the query hint.
+- SQLite uses its serializable transaction/writer serialization, with the document
+  status claim occurring before balance access.
+
+The SQL Server evidence is deterministic SQL generation, not a live server stress
+test: the test invokes the private production query builder, calls
+`ToQueryString()`, verifies `WITH (UPDLOCK, HOLDLOCK)` and all three exact-key
+predicates, and verifies the unique model index. This avoids claiming a live
+concurrent SQL Server run that was not performed.
+
+Relational behavior tests additionally prove:
+
+- repeated lines for one missing key create one balance with running `QtyAfter`
+  values `[2, 5]`;
+- repeated lines for one existing key retain the same locked entity and produce
+  quantity `3 + 2 + 3 = 8` with running `QtyAfter` values `[5, 8]`;
+- a stale tracked balance at `3`, externally updated to `7` before cancellation,
+  is refreshed from the locked database row and restored to `9`, not overwritten
+  to `5`.
+
+### Dirty tracked targets and lock ordering
+
+- Cancellation detects changes before document claim or inventory mutation.
+- It rejects an affected `StockBalance` or `Lot` in any state other than
+  `Unchanged`.
+- Tests prove dirty balance reservation and dirty lot valuation changes remain
+  modified, can be saved by the caller afterward, and do not produce partial
+  cancellation. The dirty-lot ambient test also proves prior ambient work survives.
+- Receipt lots are resolved before mutation, then receipt lines are ordered by
+  `ProductId`, resolved `LotId`, and `LocationId`. Issue cancellation uses the same
+  tuple order. This removes the prior LotNo-versus-LotId cross-flow deadlock order.
+
+### Follow-up TDD evidence
+
+First RED command:
+
+```powershell
+dotnet test WmsMes.Tests/WmsMes.Tests.csproj --filter "FullyQualifiedName~CancelGoodsReceiptAsync_WhenAmbientCancellationFails_RollsBackOnlyToItsSavepoint|FullyQualifiedName~CancelGoodsReceiptAsync_WhenTargetBalanceIsDirty|FullyQualifiedName~CancelGoodsReceiptAsync_WhenTargetLotIsDirty|FullyQualifiedName~CancelGoodsIssueAsync_UsesSerializableTransaction" --no-restore
+```
+
+Result before production changes: 0 passed, 4 failed. The ambient transaction
+committed a cancelled receipt, both dirty-target calls completed instead of
+throwing, and Serializable/key-range lock SQL was absent.
+
+After the savepoint, preflight, and lock implementation, the same command passed:
+4 passed, 0 failed.
+
+Second RED command covered dirty issue valuation lot, stale tracked balance,
+cross-flow lock order, the actual generated SQL/model index, and an issue ambient
+save failure:
+
+```powershell
+dotnet test WmsMes.Tests/WmsMes.Tests.csproj --filter "FullyQualifiedName~WhenValuationLotIsDirty|FullyQualifiedName~WithStaleTrackedBalance|FullyQualifiedName~OrdersResolvedLotsById|FullyQualifiedName~GeneratesExactSqlServerKeyRangeLock|FullyQualifiedName~WhenAmbientSaveFails" --no-restore
+```
+
+Result before fixes: 1 passed, 4 failed. The already-implemented issue savepoint
+case passed; the four intended regression cases failed with no dirty-lot exception,
+stale quantity `5` instead of `9`, receipt ledger lot order `[2,1]` instead of
+`[1,2]`, and no callable production SQL query builder.
+
+After fixes, the command passed: 5 passed, 0 failed.
+
+Final reviewer regression:
+
+```powershell
+dotnet test WmsMes.Tests/WmsMes.Tests.csproj --filter "FullyQualifiedName~CancelGoodsIssueAsync_WhenRepeatedKeyBalanceExists" --no-restore
+```
+
+RED: expected final balance `8`, actual `6`.
+
+GREEN after per-cancellation locked-balance caching: 1 passed, 0 failed.
+
+### Final verification
+
+Focused cancellation suite:
+
+```text
+Passed! - Failed: 0, Passed: 20, Skipped: 0, Total: 20
+```
+
+Full solution:
+
+```text
+Passed! - Failed: 0, Passed: 346, Skipped: 0, Total: 346
+```
+
+The full output again contains the expected existing JWT signing-key startup
+validation logs; the test process exits successfully.
+
+Independent final review verdict: **Ready**, with no remaining Critical or
+Important findings.
+
+### Remaining concern
+
+- No live SQL Server concurrency integration test was executed. Concurrency safety
+  is supported by the generated production SQL lock hints, exact predicates,
+  unique composite index, serializable transaction boundary, deterministic lock
+  order, and relational stale/repeated-key behavior tests described above.
