@@ -219,9 +219,9 @@ Relational behavior tests additionally prove:
 - Tests prove dirty balance reservation and dirty lot valuation changes remain
   modified, can be saved by the caller afterward, and do not produce partial
   cancellation. The dirty-lot ambient test also proves prior ambient work survives.
-- Receipt lots are resolved before mutation, then receipt lines are ordered by
-  `ProductId`, resolved `LotId`, and `LocationId`. Issue cancellation uses the same
-  tuple order. This removes the prior LotNo-versus-LotId cross-flow deadlock order.
+- Receipt lots are resolved before mutation. The later final hardening section
+  supersedes this stage's temporary `LotId` ordering with one canonical natural-key
+  comparator across every relevant flow.
 
 ### Follow-up TDD evidence
 
@@ -300,7 +300,7 @@ independent review cycle.
 ### Cancellation transaction policy
 
 - SQL Server cancellation accepts ambient transactions only at
-  `ReadCommitted` or `Snapshot`; `ReadUncommitted`, `RepeatableRead`,
+  `ReadCommitted`; `Snapshot`, `ReadUncommitted`, `RepeatableRead`,
   `Serializable`, `Chaos`, and `Unspecified` are rejected before savepoint,
   document claim, or inventory reads.
 - Owned cancellation transactions use the provider's normal isolation.
@@ -315,13 +315,14 @@ the earlier partial denylist.
 
 ### Cross-flow SQL Server lock order
 
-- Issue completion preloads valuation lots in `ProductId`, `LotId` order.
-  SQL Server uses the production `UPDLOCK, HOLDLOCK` lot-by-id query before any
-  balance mutation.
+- Issue completion resolves lot identities with statement-scoped
+  `READCOMMITTEDLOCK`, then acquires valuation lot locks in canonical
+  `ProductId`, normalized `LotNo` order.
 - Receipt completion first resolves lot identities with
   `READCOMMITTEDLOCK`, preventing ambient `Serializable` reads from retaining
-  shared locks. It then acquires existing lots in canonical
-  `ProductId`, `LotId`, `LocationId` order with `UPDLOCK, HOLDLOCK`.
+  shared locks. It then acquires both existing and missing lots in canonical
+  `ProductId`, normalized `LotNo`, `LocationId` order with
+  `UPDLOCK, HOLDLOCK`.
 - A missing receipt lot is rechecked with `UPDLOCK, HOLDLOCK` on its natural key.
   The model's unique `LotNo` index backs the missing-key range lock.
 - Receipt completion acquires each exact balance tuple once with the existing
@@ -390,3 +391,96 @@ lock hints, model verification of the supporting unique indexes, plus SQLite
 relational tests for document idempotency, savepoint rollback, stale tracked
 state, deterministic order, repeated tuples, and the missing-to-found lot
 transition.
+
+---
+
+## Final independent-review follow-up
+
+This section supersedes all earlier lock-order, ambient-isolation, and
+verification counts.
+
+### Dirty cancellation documents
+
+Cancellation now inspects the exact tracked target document before starting a
+transaction or issuing the relational compare-and-set claim. A tracked
+`GoodsReceipt` or `GoodsIssue` in `Added`, `Modified`, or `Deleted` state is
+rejected. This prevents the operation's context-wide `SaveChangesAsync` from
+overwriting or deleting the status written by the CAS.
+
+Receipt-Modified and Issue-Deleted integration tests prove:
+
+- the rejection happens without stock, lot, ledger, or document mutation;
+- the caller's entity state and current values are unchanged;
+- the database document remains `Completed`.
+
+### Dirty completion targets
+
+Receipt and issue completion preflight every affected tracked `Lot` and
+`StockBalance` before lock acquisition or inventory mutation. Any affected entry
+outside `Unchanged` is rejected instead of being silently overwritten by the
+fresh locked-value refresh.
+
+Coverage includes:
+
+- dirty receipt `QtyReserved`;
+- a receipt lot in `Deleted` state;
+- dirty issue `QtyOnHold` and lot valuation together.
+
+Each test verifies no partial database mutation and preservation of the caller's
+dirty state.
+
+### One stable natural-key order
+
+All relevant completion and cancellation flows now use:
+
+```text
+ProductId -> normalized LotNo -> LocationId -> document line Id
+```
+
+Initial existence and database-assigned `LotId` do not participate in lock order.
+SQL Server identity resolution uses `READCOMMITTEDLOCK`; retained lot locks use
+the exact natural-key query with `UPDLOCK, HOLDLOCK`, backed by the unique
+`LotNo` index. Exact balance tuple locks remain
+`(ProductId, LotId, LocationId)` after the lot lock.
+
+Behavioral order tests cover receipt completion, issue completion, receipt
+cancellation, and issue cancellation with lot IDs deliberately opposite to lot
+number order. A deterministic two-key transition test starts with `LOT-Z`
+existing and inserts the earlier `LOT-A` after its initial missing-resolution
+reader opens; ledger order remains `LOT-A`, then `LOT-Z`.
+
+### TDD evidence
+
+The combined focused RED run produced 10 expected failures:
+
+- two dirty cancellation documents were accepted;
+- three dirty completion target cases were accepted;
+- `Snapshot` was accepted for SQL Server ambient cancellation;
+- receipt completion, issue completion, and receipt cancellation used
+  existence/`LotId`-dependent order;
+- the two-key missing-to-found transition processed `[LOT-Z, LOT-A]`.
+
+After implementation, the expanded focused filter passed 12/12. The complete
+`InventoryServiceTests` suite passed 58/58.
+
+### Final self-review
+
+- The cancellation document guard is in-memory only and therefore preserves
+  CAS-before-database-read ordering.
+- Dirty completion checks run before any lot or balance mutation.
+- Resolution reads under controller-owned `Serializable` transactions use
+  `READCOMMITTEDLOCK`; only canonical natural-key acquisition retains locks.
+- Receipt cancellation maintains Lot-to-Balance order.
+- Issue cancellation, which does not mutate lots, acquires balance locks in the
+  same natural-key sequence used by receipt flows.
+- Unique savepoints, ambient rollback, exact tuple balance locking, repeated-key
+  caches, and stale-value refresh behavior remain covered.
+
+Final full solution:
+
+```text
+Passed! - Failed: 0, Passed: 363, Skipped: 0, Total: 363
+```
+
+The output includes the expected existing JWT signing-key startup validation
+logs; the test process exits successfully.

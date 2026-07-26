@@ -171,92 +171,78 @@ public class InventoryService : IInventoryService
                 throw new InvalidOperationException("Quantity must be greater than zero.");
             }
 
-            var resolvedLots = new Dictionary<(int ProductId, string LotNo), Lot?>();
-            foreach (var key in receipt.Lines
-                .Select(line => (line.ProductId, line.LotNo))
-                .Distinct()
-                .OrderBy(key => key.ProductId)
-                .ThenBy(key => key.LotNo, StringComparer.OrdinalIgnoreCase))
+            var resolvedLots = new Dictionary<(int ProductId, string CanonicalLotNo), Lot?>();
+            foreach (var line in receipt.Lines
+                .GroupBy(line => GetLotCacheKey(line.ProductId, line.LotNo))
+                .OrderBy(group => group.Key.ProductId)
+                .ThenBy(group => group.Key.CanonicalLotNo, StringComparer.Ordinal)
+                .Select(group => group.First()))
             {
+                var key = GetLotCacheKey(line.ProductId, line.LotNo);
                 resolvedLots[key] = _context.Database.ProviderName ==
                     "Microsoft.EntityFrameworkCore.SqlServer"
-                    ? await CreateSqlServerReceiptLotResolutionQuery(key.ProductId, key.LotNo)
+                    ? await CreateSqlServerReceiptLotResolutionQuery(line.ProductId, line.LotNo)
                         .AsNoTracking()
                         .SingleOrDefaultAsync()
                     : await _context.Lots
                         .AsNoTracking()
                         .FirstOrDefaultAsync(lot =>
-                            lot.LotNo == key.LotNo &&
-                            lot.ProductId == key.ProductId);
+                            lot.LotNo == line.LotNo &&
+                            lot.ProductId == line.ProductId);
             }
 
-            var acquiredLots = new Dictionary<int, Lot>();
+            EnsureReceiptCompletionTargetsAreClean(receipt.Lines, resolvedLots);
+
+            var acquiredLots =
+                new Dictionary<(int ProductId, string CanonicalLotNo), Lot>();
             var acquiredBalances =
                 new Dictionary<(int ProductId, int LotId, int LocationId), StockBalance>();
-            foreach (var item in receipt.Lines
-                .Select(line => new
-                {
-                    Line = line,
-                    ResolvedLot = resolvedLots[(line.ProductId, line.LotNo)]
-                })
-                .OrderBy(item => item.Line.ProductId)
-                .ThenBy(item => item.ResolvedLot is null ? 1 : 0)
-                .ThenBy(item => item.ResolvedLot?.Id ?? int.MaxValue)
-                .ThenBy(item => item.Line.LotNo.Trim(), StringComparer.OrdinalIgnoreCase)
-                .ThenBy(item => item.Line.LocationId)
-                .ThenBy(item => item.Line.Id))
+            foreach (var line in receipt.Lines
+                .OrderBy(line => line.ProductId)
+                .ThenBy(line => GetCanonicalLotNo(line.LotNo), StringComparer.Ordinal)
+                .ThenBy(line => line.LocationId)
+                .ThenBy(line => line.Id))
             {
-                var line = item.Line;
-                var lotKey = (line.ProductId, line.LotNo);
-                Lot? lot;
-
-                if (resolvedLots[lotKey] is { } resolvedLot)
+                var lotKey = GetLotCacheKey(line.ProductId, line.LotNo);
+                var isNewLot = false;
+                if (!acquiredLots.TryGetValue(lotKey, out var lot))
                 {
-                    if (!acquiredLots.TryGetValue(resolvedLot.Id, out lot))
-                    {
-                        lot = await FindLotWithExclusiveAccessAsync(resolvedLot.Id);
-                        acquiredLots.Add(lot.Id, lot);
-                    }
-                }
-                else
-                {
+                    var lookupLotNo = resolvedLots[lotKey]?.LotNo ?? line.LotNo;
                     var databaseLot = _context.Database.ProviderName ==
                         "Microsoft.EntityFrameworkCore.SqlServer"
                         ? await CreateSqlServerLockedLotByNaturalKeyQuery(
                                 line.ProductId,
-                                line.LotNo)
+                                lookupLotNo)
                             .AsNoTracking()
                             .SingleOrDefaultAsync()
                         : await _context.Lots
                             .AsNoTracking()
                             .FirstOrDefaultAsync(candidate =>
-                                candidate.LotNo == line.LotNo &&
+                                candidate.LotNo == lookupLotNo &&
                                 candidate.ProductId == line.ProductId);
                     lot = databaseLot is null ? null : TrackFreshLot(databaseLot);
-                    if (lot is not null)
+
+                    if (lot is null)
                     {
-                        resolvedLots[lotKey] = lot;
-                        acquiredLots.TryAdd(lot.Id, lot);
+                        isNewLot = true;
+                        lot = new Lot
+                        {
+                            LotNo = line.LotNo,
+                            ProductId = line.ProductId,
+                            ManufactureDate = line.ManufactureDate,
+                            ExpiryDate = line.ExpiryDate,
+                            Qty = line.Qty,
+                            UnitPrice = line.UnitPrice
+                        };
+                        await _context.Lots.AddAsync(lot);
+                        await _context.SaveChangesAsync();
                     }
+
+                    resolvedLots[lotKey] = lot;
+                    acquiredLots.Add(lotKey, lot);
                 }
 
-                if (lot is null)
-                {
-                    lot = new Lot
-                    {
-                        LotNo = line.LotNo,
-                        ProductId = line.ProductId,
-                        ManufactureDate = line.ManufactureDate,
-                        ExpiryDate = line.ExpiryDate,
-                        Qty = line.Qty,
-                        UnitPrice = line.UnitPrice
-                    };
-                    await _context.Lots.AddAsync(lot);
-                    await _context.SaveChangesAsync();
-                    resolvedLots[lotKey] = lot;
-                    acquiredLots.Add(lot.Id, lot);
-                }
-                else
+                if (!isNewLot)
                 {
                     var totalQty = lot.Qty + line.Qty;
                     lot.UnitPrice = totalQty > 0
@@ -348,20 +334,45 @@ public class InventoryService : IInventoryService
                 throw new InvalidOperationException("Quantity must be greater than zero.");
             }
 
-            var valuationRates = new Dictionary<int, decimal>();
-            foreach (var lotKey in issue.Lines
-                .Select(line => new { line.ProductId, line.LotId })
+            var resolvedLots = new Dictionary<int, Lot>();
+            foreach (var lotId in issue.Lines
+                .Select(line => line.LotId)
                 .Distinct()
-                .OrderBy(key => key.ProductId)
-                .ThenBy(key => key.LotId))
+                .OrderBy(lotId => lotId))
             {
                 var lotQuery = _context.Database.ProviderName ==
                     "Microsoft.EntityFrameworkCore.SqlServer"
-                    ? CreateSqlServerLockedLotByIdQuery(lotKey.LotId)
+                    ? CreateSqlServerLotResolutionByIdQuery(lotId)
                     : _context.Lots;
-                valuationRates[lotKey.LotId] = await lotQuery
+                var lot = await lotQuery
                     .AsNoTracking()
-                    .Where(lot => lot.Id == lotKey.LotId)
+                    .SingleOrDefaultAsync(candidate => candidate.Id == lotId)
+                    ?? throw new InvalidOperationException("The issue references a lot that no longer exists.");
+                resolvedLots.Add(lotId, lot);
+            }
+
+            EnsureIssueCompletionTargetsAreClean(issue.Lines);
+
+            var valuationRates = new Dictionary<int, decimal>();
+            foreach (var lotKey in issue.Lines
+                .Select(line => new
+                {
+                    line.ProductId,
+                    Lot = resolvedLots[line.LotId]
+                })
+                .DistinctBy(key => key.Lot.Id)
+                .OrderBy(key => key.ProductId)
+                .ThenBy(key => GetCanonicalLotNo(key.Lot.LotNo), StringComparer.Ordinal))
+            {
+                var lotQuery = _context.Database.ProviderName ==
+                    "Microsoft.EntityFrameworkCore.SqlServer"
+                    ? CreateSqlServerLockedLotByNaturalKeyQuery(
+                        lotKey.Lot.ProductId,
+                        lotKey.Lot.LotNo)
+                    : _context.Lots;
+                valuationRates[lotKey.Lot.Id] = await lotQuery
+                    .AsNoTracking()
+                    .Where(lot => lot.Id == lotKey.Lot.Id)
                     .Select(lot => (decimal?)lot.UnitPrice)
                     .SingleOrDefaultAsync()
                     ?? 0m;
@@ -369,7 +380,7 @@ public class InventoryService : IInventoryService
 
             foreach (var line in issue.Lines
                 .OrderBy(line => line.ProductId)
-                .ThenBy(line => line.LotId)
+                .ThenBy(line => GetCanonicalLotNo(resolvedLots[line.LotId].LotNo), StringComparer.Ordinal)
                 .ThenBy(line => line.LocationId)
                 .ThenBy(line => line.Id))
             {
@@ -449,6 +460,8 @@ public class InventoryService : IInventoryService
 
     public async Task<bool> CancelGoodsReceiptAsync(int receiptId, string userId)
     {
+        EnsureTrackedCancellationDocumentIsClean<GoodsReceipt>(
+            receipt => receipt.Id == receiptId);
         var changeTrackerSnapshot = CaptureChangeTracker();
         var transactionScope = await BeginCancellationTransactionAsync(
             CreateCancellationSavepointName());
@@ -623,6 +636,8 @@ public class InventoryService : IInventoryService
 
     public async Task<bool> CancelGoodsIssueAsync(int issueId, string userId)
     {
+        EnsureTrackedCancellationDocumentIsClean<GoodsIssue>(
+            issue => issue.Id == issueId);
         var changeTrackerSnapshot = CaptureChangeTracker();
         var transactionScope = await BeginCancellationTransactionAsync(
             CreateCancellationSavepointName());
@@ -779,7 +794,10 @@ public class InventoryService : IInventoryService
 
         return resolvedLines
             .OrderBy(resolved => resolved.Line.ProductId)
-            .ThenBy(resolved => resolved.Lot?.Id ?? int.MaxValue)
+            .ThenBy(
+                resolved => GetCanonicalLotNo(
+                    resolved.Lot?.LotNo ?? resolved.Line.LotNo),
+                StringComparer.Ordinal)
             .ThenBy(resolved => resolved.Line.LocationId)
             .ThenBy(resolved => resolved.Line.Id)
             .ToList();
@@ -830,7 +848,9 @@ public class InventoryService : IInventoryService
 
         return resolvedLines
             .OrderBy(resolved => resolved.Line.ProductId)
-            .ThenBy(resolved => resolved.Line.LotId)
+            .ThenBy(
+                resolved => GetCanonicalLotNo(resolved.Lot?.LotNo ?? string.Empty),
+                StringComparer.Ordinal)
             .ThenBy(resolved => resolved.Line.LocationId)
             .ThenBy(resolved => resolved.Line.Id)
             .ToList();
@@ -865,6 +885,100 @@ public class InventoryService : IInventoryService
 
     private static InvalidOperationException CreateDirtyCancellationTargetException() =>
         new("Cannot cancel an inventory document while an affected lot or stock balance has unsaved changes.");
+
+    private void EnsureTrackedCancellationDocumentIsClean<TEntity>(
+        Func<TEntity, bool> predicate)
+        where TEntity : class
+    {
+        _context.ChangeTracker.DetectChanges();
+        var trackedDocument = _context.ChangeTracker.Entries<TEntity>()
+            .FirstOrDefault(entry => predicate(entry.Entity));
+        if (trackedDocument is not null &&
+            trackedDocument.State != EntityState.Unchanged)
+        {
+            throw new InvalidOperationException(
+                "Cannot cancel an inventory document while that document has unsaved changes.");
+        }
+    }
+
+    private void EnsureReceiptCompletionTargetsAreClean(
+        IEnumerable<GoodsReceiptLine> lines,
+        IReadOnlyDictionary<(int ProductId, string CanonicalLotNo), Lot?> resolvedLots)
+    {
+        _context.ChangeTracker.DetectChanges();
+        var lineList = lines.ToList();
+        var affectedLotKeys = lineList
+            .Select(line => GetLotCacheKey(line.ProductId, line.LotNo))
+            .ToHashSet();
+        if (_context.ChangeTracker.Entries<Lot>().Any(entry =>
+                affectedLotKeys.Contains(
+                    GetLotCacheKey(entry.Entity.ProductId, entry.Entity.LotNo)) &&
+                entry.State != EntityState.Unchanged))
+        {
+            throw CreateDirtyCompletionTargetException();
+        }
+
+        var affectedBalanceKeys = lineList
+            .Select(line =>
+            {
+                var lot = resolvedLots[GetLotCacheKey(line.ProductId, line.LotNo)];
+                return lot is null
+                    ? ((int ProductId, int LotId, int LocationId)?)null
+                    : (line.ProductId, lot.Id, line.LocationId);
+            })
+            .Where(key => key.HasValue)
+            .Select(key => key!.Value)
+            .ToHashSet();
+        if (_context.ChangeTracker.Entries<StockBalance>().Any(entry =>
+                affectedBalanceKeys.Contains((
+                    entry.Entity.ProductId,
+                    entry.Entity.LotId,
+                    entry.Entity.LocationId)) &&
+                entry.State != EntityState.Unchanged))
+        {
+            throw CreateDirtyCompletionTargetException();
+        }
+    }
+
+    private void EnsureIssueCompletionTargetsAreClean(
+        IEnumerable<GoodsIssueLine> lines)
+    {
+        _context.ChangeTracker.DetectChanges();
+        var lineList = lines.ToList();
+        var affectedLotIds = lineList
+            .Select(line => line.LotId)
+            .ToHashSet();
+        if (_context.ChangeTracker.Entries<Lot>().Any(entry =>
+                affectedLotIds.Contains(entry.Entity.Id) &&
+                entry.State != EntityState.Unchanged))
+        {
+            throw CreateDirtyCompletionTargetException();
+        }
+
+        var affectedBalanceKeys = lineList
+            .Select(line => (line.ProductId, line.LotId, line.LocationId))
+            .ToHashSet();
+        if (_context.ChangeTracker.Entries<StockBalance>().Any(entry =>
+                affectedBalanceKeys.Contains((
+                    entry.Entity.ProductId,
+                    entry.Entity.LotId,
+                    entry.Entity.LocationId)) &&
+                entry.State != EntityState.Unchanged))
+        {
+            throw CreateDirtyCompletionTargetException();
+        }
+    }
+
+    private static InvalidOperationException CreateDirtyCompletionTargetException() =>
+        new("Cannot complete an inventory document while an affected lot or stock balance has unsaved changes.");
+
+    private static (int ProductId, string CanonicalLotNo) GetLotCacheKey(
+        int productId,
+        string lotNo) =>
+        (productId, GetCanonicalLotNo(lotNo));
+
+    private static string GetCanonicalLotNo(string lotNo) =>
+        lotNo.Trim().ToUpperInvariant();
 
     private async Task<StockBalance?> FindStockBalanceWithExclusiveAccessAsync(
         int productId,
@@ -903,19 +1017,6 @@ public class InventoryService : IInventoryService
         return TrackFreshBalance(relationalBalance, productId, lotId, locationId);
     }
 
-    private async Task<Lot> FindLotWithExclusiveAccessAsync(int lotId)
-    {
-        var databaseLot = _context.Database.ProviderName ==
-            "Microsoft.EntityFrameworkCore.SqlServer"
-            ? await CreateSqlServerLockedLotByIdQuery(lotId)
-                .AsNoTracking()
-                .SingleAsync()
-            : await _context.Lots
-                .AsNoTracking()
-                .SingleAsync(lot => lot.Id == lotId);
-        return TrackFreshLot(databaseLot);
-    }
-
     private IQueryable<StockBalance> CreateSqlServerLockedBalanceQuery(
         int productId,
         int lotId,
@@ -938,10 +1039,10 @@ public class InventoryService : IInventoryService
               AND [LotNo] = {lotNo}
             """);
 
-    private IQueryable<Lot> CreateSqlServerLockedLotByIdQuery(int lotId) =>
+    private IQueryable<Lot> CreateSqlServerLotResolutionByIdQuery(int lotId) =>
         _context.Lots.FromSqlInterpolated($"""
             SELECT *
-            FROM [Lots] WITH (UPDLOCK, HOLDLOCK)
+            FROM [Lots] WITH (READCOMMITTEDLOCK)
             WHERE [Id] = {lotId}
             """);
 
@@ -1019,7 +1120,7 @@ public class InventoryService : IInventoryService
                 ambientTransaction.GetDbTransaction().IsolationLevel))
         {
             throw new InvalidOperationException(
-                "SQL Server cancellation requires an ambient transaction using ReadCommitted or Snapshot isolation.");
+                "SQL Server cancellation requires an ambient transaction using ReadCommitted isolation.");
         }
 
         if (!ambientTransaction.SupportsSavepoints)
@@ -1037,9 +1138,7 @@ public class InventoryService : IInventoryService
 
     private static bool IsUnsupportedSqlServerAmbientIsolation(
         System.Data.IsolationLevel isolationLevel) =>
-        isolationLevel is not
-            System.Data.IsolationLevel.ReadCommitted and not
-            System.Data.IsolationLevel.Snapshot;
+        isolationLevel is not System.Data.IsolationLevel.ReadCommitted;
 
     private static async Task CompleteCancellationTransactionAsync(
         CancellationTransactionScope transactionScope)
