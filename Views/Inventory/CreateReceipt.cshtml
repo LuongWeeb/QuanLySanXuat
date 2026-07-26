@@ -1,59 +1,184 @@
+@using WmsMes.Web.ViewModels
+@model CreateReceiptViewModel
 @{
     ViewData["Title"] = "Tạo phiếu nhập kho";
 }
 
 <section class="toolbar-row">
     <div>
-        <p class="eyebrow">Goods Receipt</p>
+        <p class="eyebrow">Phiếu nhập kho</p>
         <h2>Tạo Phiếu Nhập kho mới</h2>
     </div>
 </section>
 
-<div class="ops-panel mt-3 col-md-8">
+<div class="ops-panel mt-3">
     <form asp-action="CreateReceipt" method="post">
         <div asp-validation-summary="ModelOnly" class="text-danger"></div>
-        <div class="mb-3">
-            <label for="supplierId" class="form-label">Nhà cung cấp</label>
-            <select id="supplierId" name="supplierId" class="form-select" required>
+        <div class="mb-3 col-md-6">
+            <label asp-for="SupplierId" class="form-label">Nhà cung cấp</label>
+            <select asp-for="SupplierId" class="form-select" required>
+                <option value="">-- Chọn nhà cung cấp --</option>
                 @foreach (var supplier in ViewBag.Suppliers)
                 {
                     <option value="@supplier.Id">@supplier.Name</option>
                 }
             </select>
+            <span asp-validation-for="SupplierId" class="text-danger"></span>
         </div>
-        <div class="mb-3">
-            <label for="productId" class="form-label">Nguyên vật liệu/Sản phẩm</label>
-            <select id="productId" name="productId" class="form-select" required>
-                @foreach (var product in ViewBag.Products)
-                {
-                    <option value="@product.Id">@product.Code - @product.Name</option>
-                }
-            </select>
+
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr>
+                        <th>Sản phẩm</th>
+                        <th>Số lô</th>
+                        <th>Số lượng</th>
+                        <th>Đơn giá</th>
+                        <th>Vị trí</th>
+                        <th><span class="visually-hidden">Thao tác</span></th>
+                    </tr>
+                </thead>
+                <tbody id="receipt-lines">
+                    @for (var index = 0; index < Model.Lines.Count; index++)
+                    {
+                        var line = Model.Lines[index];
+                        var qtyKey = $"Lines[{index}].Qty";
+                        var qtyValue = ViewData.ModelState.TryGetValue(qtyKey, out var qtyEntry)
+                            ? qtyEntry.AttemptedValue
+                            : line.Qty.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        var unitPriceKey = $"Lines[{index}].UnitPrice";
+                        var unitPriceValue = ViewData.ModelState.TryGetValue(unitPriceKey, out var unitPriceEntry)
+                            ? unitPriceEntry.AttemptedValue
+                            : line.UnitPrice.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        <tr data-line-row>
+                            <td>
+                                <label class="visually-hidden" data-label-for="ProductId">Sản phẩm</label>
+                                <select name="Lines[@index].ProductId" data-field="ProductId" class="form-select" required>
+                                    <option value="">-- Chọn sản phẩm --</option>
+                                    @foreach (var product in ViewBag.Products)
+                                    {
+                                        <option value="@product.Id" selected="@(product.Id == line.ProductId ? "selected" : null)">@product.Code - @product.Name</option>
+                                    }
+                                </select>
+                                @Html.ValidationMessage($"Lines[{index}].ProductId", null, new { @class = "text-danger", data_validation_for = "ProductId" })
+                            </td>
+                            <td>
+                                <label class="visually-hidden" data-label-for="LotNo">Số lô</label>
+                                <input name="Lines[@index].LotNo" value="@line.LotNo" data-field="LotNo" class="form-control" required />
+                                @Html.ValidationMessage($"Lines[{index}].LotNo", null, new { @class = "text-danger", data_validation_for = "LotNo" })
+                            </td>
+                            <td>
+                                <label class="visually-hidden" data-label-for="Qty">Số lượng</label>
+                                <input name="Lines[@index].Qty" value="@qtyValue" data-field="Qty" type="number" class="form-control" min="0.01" step="0.01" required />
+                                @Html.ValidationMessage($"Lines[{index}].Qty", null, new { @class = "text-danger", data_validation_for = "Qty" })
+                            </td>
+                            <td>
+                                <label class="visually-hidden" data-label-for="UnitPrice">Đơn giá</label>
+                                <input name="Lines[@index].UnitPrice" value="@unitPriceValue" data-field="UnitPrice" type="number" class="form-control" min="0" step="0.01" required />
+                                @Html.ValidationMessage($"Lines[{index}].UnitPrice", null, new { @class = "text-danger", data_validation_for = "UnitPrice" })
+                            </td>
+                            <td>
+                                <label class="visually-hidden" data-label-for="LocationId">Vị trí</label>
+                                <select name="Lines[@index].LocationId" data-field="LocationId" class="form-select" required>
+                                    <option value="">-- Chọn vị trí --</option>
+                                    @foreach (var location in ViewBag.Locations)
+                                    {
+                                        <option value="@location.Id" selected="@(location.Id == line.LocationId ? "selected" : null)">@location.Code</option>
+                                    }
+                                </select>
+                                @Html.ValidationMessage($"Lines[{index}].LocationId", null, new { @class = "text-danger", data_validation_for = "LocationId" })
+                            </td>
+                            <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-line>Xóa dòng</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
         </div>
-        <div class="mb-3">
-            <label for="lotNo" class="form-label">Số lô (Lot No)</label>
-            <input id="lotNo" name="lotNo" class="form-control" required />
-        </div>
-        <div class="mb-3">
-            <label for="qty" class="form-label">Số lượng</label>
-            <input id="qty" name="qty" type="number" class="form-control" min="0.01" step="0.01" required />
-        </div>
-        <div class="mb-3">
-            <label for="unitPrice" class="form-label">Đơn giá</label>
-            <input id="unitPrice" name="unitPrice" type="number" class="form-control" min="0" step="0.01" required />
-        </div>
-        <div class="mb-3">
-            <label for="locationId" class="form-label">Vị trí lưu trữ</label>
-            <select id="locationId" name="locationId" class="form-select" required>
-                @foreach (var location in ViewBag.Locations)
-                {
-                    <option value="@location.Id">@location.Code</option>
-                }
-            </select>
-        </div>
+
+        @Html.ValidationMessage("Lines", null, new { @class = "text-danger d-block mb-2" })
+        <button type="button" id="add-receipt-line" class="btn btn-outline-primary mb-3">Thêm dòng</button>
         <div class="d-flex gap-2">
             <button type="submit" class="btn btn-primary">Xác nhận nhập kho</button>
             <a class="btn btn-outline-secondary" asp-action="Receipts">Hủy</a>
         </div>
     </form>
 </div>
+
+<template id="receipt-line-template">
+    <tr data-line-row>
+        <td>
+            <label class="visually-hidden" data-label-for="ProductId">Sản phẩm</label>
+            <select name="Lines[__index__].ProductId" data-field="ProductId" class="form-select" required>
+                <option value="">-- Chọn sản phẩm --</option>
+                @foreach (var product in ViewBag.Products)
+                {
+                    <option value="@product.Id">@product.Code - @product.Name</option>
+                }
+            </select>
+        </td>
+        <td><label class="visually-hidden" data-label-for="LotNo">Số lô</label><input name="Lines[__index__].LotNo" data-field="LotNo" class="form-control" required /></td>
+        <td><label class="visually-hidden" data-label-for="Qty">Số lượng</label><input name="Lines[__index__].Qty" data-field="Qty" type="number" class="form-control" min="0.01" step="0.01" required /></td>
+        <td><label class="visually-hidden" data-label-for="UnitPrice">Đơn giá</label><input name="Lines[__index__].UnitPrice" data-field="UnitPrice" type="number" class="form-control" min="0" step="0.01" required /></td>
+        <td>
+            <label class="visually-hidden" data-label-for="LocationId">Vị trí</label>
+            <select name="Lines[__index__].LocationId" data-field="LocationId" class="form-select" required>
+                <option value="">-- Chọn vị trí --</option>
+                @foreach (var location in ViewBag.Locations)
+                {
+                    <option value="@location.Id">@location.Code</option>
+                }
+            </select>
+        </td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-line>Xóa dòng</button></td>
+    </tr>
+</template>
+
+<script>
+    (() => {
+        const lines = document.getElementById('receipt-lines');
+        const template = document.getElementById('receipt-line-template');
+
+        function reindexLines() {
+            const rows = lines.querySelectorAll('[data-line-row]');
+            rows.forEach((row, index) => {
+                row.querySelectorAll('[data-field]').forEach(field => {
+                    const fieldName = field.dataset.field;
+                    field.name = `Lines[${index}].${fieldName}`;
+                    field.id = `receipt-line-${index}-${fieldName}`;
+                });
+                row.querySelectorAll('[data-label-for]').forEach(label => {
+                    label.htmlFor = `receipt-line-${index}-${label.dataset.labelFor}`;
+                });
+                row.querySelectorAll('[data-validation-for]').forEach(message => {
+                    message.dataset.valmsgFor = `Lines[${index}].${message.dataset.validationFor}`;
+                });
+            });
+        }
+
+        function resetRow(row) {
+            row.querySelectorAll('input').forEach(input => input.value = '');
+            row.querySelectorAll('select').forEach(select => select.selectedIndex = 0);
+        }
+
+        document.getElementById('add-receipt-line').addEventListener('click', () => {
+            const index = lines.querySelectorAll('[data-line-row]').length;
+            lines.insertAdjacentHTML('beforeend', template.innerHTML.replaceAll('__index__', index));
+            reindexLines();
+        });
+
+        lines.addEventListener('click', event => {
+            const button = event.target.closest('[data-remove-line]');
+            if (!button) return;
+            const rows = lines.querySelectorAll('[data-line-row]');
+            const row = button.closest('[data-line-row]');
+            if (rows.length === 1) {
+                resetRow(row);
+                return;
+            }
+            row.remove();
+            reindexLines();
+        });
+
+        reindexLines();
+    })();
+</script>

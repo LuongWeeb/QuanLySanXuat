@@ -19,17 +19,17 @@
 <section class="metric-grid" aria-label="Chỉ số vận hành">
     <article class="metric-card">
         <span>Lệnh đang chạy</span>
-        <strong id="activeWorkOrders">@Model.ActiveWorkOrders.ToString("N0")</strong>
-        <small class="text-muted">Trạng thái In progress</small>
+        <strong id="activeWorkOrders">@Model.ActiveWorkOrders.ToVietnameseNumber()</strong>
+        <small class="text-muted">Trạng thái đang sản xuất</small>
     </article>
     <article class="metric-card">
         <span>Lô chờ QC</span>
-        <strong id="pendingQcLots">@Model.PendingQcLots.ToString("N0")</strong>
+        <strong id="pendingQcLots">@Model.PendingQcLots.ToVietnameseNumber()</strong>
         <small class="text-muted">Lô có hàng tạm giữ, không gồm khu cách ly</small>
     </article>
     <article class="metric-card">
         <span>Khối lượng tồn kho</span>
-        <strong id="inventoryVolume">@Model.InventoryVolume.ToString("N2")</strong>
+        <strong id="inventoryVolume">@Model.InventoryVolume.ToVietnameseNumber()</strong>
         <small class="text-muted">Khả dụng + giữ chỗ + tạm giữ</small>
     </article>
 </section>
@@ -37,27 +37,27 @@
 <section class="metric-grid mt-4" aria-label="Chỉ số OEE Sản xuất">
     <article class="metric-card oee-card">
         <span>OEE Tổng thể</span>
-        <strong id="overallOee">@Model.OverallOeePercent%</strong>
+        <strong id="overallOee">@Model.OverallOeePercent.ToVietnameseNumber("N1")%</strong>
         <small class="text-muted">Mục tiêu: ≥ 85%</small>
     </article>
     <article class="metric-card">
-        <span>Sẵn sàng (Availability)</span>
-        <strong id="oeeAvailability">@Model.OeeAvailabilityPercent%</strong>
+        <span>Mức độ sẵn sàng</span>
+        <strong id="oeeAvailability">@Model.OeeAvailabilityPercent.ToVietnameseNumber("N1")%</strong>
         <small class="text-muted">Thời gian chạy máy</small>
     </article>
     <article class="metric-card">
-        <span>Hiệu suất (Performance)</span>
-        <strong id="oeePerformance">@Model.OeePerformancePercent%</strong>
+        <span>Hiệu suất</span>
+        <strong id="oeePerformance">@Model.OeePerformancePercent.ToVietnameseNumber("N1")%</strong>
         <small class="text-muted">Tốc độ sản xuất</small>
     </article>
     <article class="metric-card">
-        <span>Chất lượng (Quality)</span>
-        <strong id="oeeQuality">@Model.OeeQualityPercent%</strong>
+        <span>Chất lượng</span>
+        <strong id="oeeQuality">@Model.OeeQualityPercent.ToVietnameseNumber("N1")%</strong>
         <small class="text-muted">Tỷ lệ thành phẩm đạt</small>
     </article>
     <article class="metric-card">
         <span>Cảnh báo tồn kho tối thiểu</span>
-        <strong id="lowStockAlertCount">@Model.LowStockAlertCount</strong>
+        <strong id="lowStockAlertCount">@Model.LowStockAlertCount.ToVietnameseNumber()</strong>
         <small class="text-muted">Mặt hàng cần được bổ sung</small>
     </article>
 </section>
@@ -73,25 +73,25 @@
     </div>
     <div class="col-lg-3 col-md-6 mb-4">
         <div class="card p-3 shadow-sm h-100">
-            <h3 class="h6 font-weight-bold mb-3">Phân bổ Tồn kho theo Zone</h3>
-            <canvas id="inventoryZoneChart" style="max-height: 300px;" role="img" aria-label="Phân bổ tồn kho theo Zone">
-                Biểu đồ phân bổ tồn kho theo Zone.
+            <h3 class="h6 font-weight-bold mb-3">Phân bổ Tồn kho theo khu vực</h3>
+            <canvas id="inventoryZoneChart" style="max-height: 300px;" role="img" aria-label="Phân bổ tồn kho theo khu vực">
+                Biểu đồ phân bổ tồn kho theo khu vực.
             </canvas>
         </div>
     </div>
     <div class="col-lg-3 col-md-6 mb-4">
         <div class="card p-3 shadow-sm h-100">
             <h3 class="h6 font-weight-bold mb-3">Phân bổ Chất lượng</h3>
-            <canvas id="qualityChart" style="max-height: 300px;" role="img" aria-label="Phân bổ chất lượng Pass, Hold và Quarantine">
-                Biểu đồ phân bổ chất lượng Pass, Hold và Quarantine.
+            <canvas id="qualityChart" style="max-height: 300px;" role="img" aria-label="Phân bổ chất lượng Đạt, Tạm giữ và Cách ly">
+                Biểu đồ phân bổ chất lượng Đạt, Tạm giữ và Cách ly.
             </canvas>
         </div>
     </div>
 </section>
 
 <section class="data-panel mt-4">
-    <h3 class="h5">Trạng thái realtime</h3>
-    <p class="mb-0 text-muted">Dashboard lắng nghe cập nhật từ hệ thống sản xuất và kho. Khi có tín hiệu, số liệu mới được lấy lại từ máy chủ mà không tải lại trang.</p>
+    <h3 class="h5">Trạng thái thời gian thực</h3>
+    <p class="mb-0 text-muted">Bảng điều khiển lắng nghe cập nhật từ hệ thống sản xuất và kho. Khi có tín hiệu, số liệu mới được lấy lại từ máy chủ mà không tải lại trang.</p>
     <p class="mb-0 mt-2 text-muted" id="refreshState" aria-live="polite">Số liệu hiện tại</p>
 </section>
 
@@ -103,7 +103,9 @@
             const metricsUrl = '@Url.Action("Metrics", "Home")';
             const label = document.getElementById("dashboardConnectionLabel");
             const state = document.getElementById("dashboardConnectionState");
-            const number = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 });
+            const integerNumber = new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            const percentNumber = new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+            const decimalNumber = new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             const refreshState = document.getElementById("refreshState");
             const initialMetrics = {
                 dailyLabels: @Html.Raw(JsonSerializer.Serialize(Model.DailyLabels)),
@@ -127,7 +129,21 @@
                             { type: "line", label: "Thực tế", data: initialMetrics.dailyActualOutput, borderColor: "#198754", backgroundColor: "#198754", tension: 0.25, fill: false }
                         ]
                     },
-                    options: { responsive: true, maintainAspectRatio: false }
+                    options: {
+                        locale: "vi-VN",
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { ticks: { callback: value => decimalNumber.format(value) } }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: context => `${context.dataset.label}: ${decimalNumber.format(context.parsed.y)}`
+                                }
+                            }
+                        }
+                    }
                 });
                 inventoryZoneChart = new window.Chart(document.getElementById("inventoryZoneChart"), {
                     type: "doughnut",
@@ -135,15 +151,37 @@
                         labels: initialMetrics.zoneLabels,
                         datasets: [{ data: initialMetrics.zoneQuantities, backgroundColor: ["#0d6efd", "#20c997", "#ffc107", "#6f42c1", "#fd7e14"] }]
                     },
-                    options: { responsive: true, maintainAspectRatio: false }
+                    options: {
+                        locale: "vi-VN",
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: context => `${context.label}: ${decimalNumber.format(context.parsed)}`
+                                }
+                            }
+                        }
+                    }
                 });
                 qualityChart = new window.Chart(document.getElementById("qualityChart"), {
                     type: "doughnut",
                     data: {
-                        labels: ["Pass", "Hold", "Quarantine"],
+                        labels: ["Đạt", "Tạm giữ", "Cách ly"],
                         datasets: [{ data: initialMetrics.qualityCounts, backgroundColor: ["#198754", "#ffc107", "#dc3545"] }]
                     },
-                    options: { responsive: true, maintainAspectRatio: false }
+                    options: {
+                        locale: "vi-VN",
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: context => `${context.label}: ${integerNumber.format(context.parsed)}`
+                                }
+                            }
+                        }
+                    }
                 });
             };
             initializeCharts();
@@ -160,13 +198,13 @@
             const renderConnectivity = () => {
                 const values = [...connectivity.values()];
                 const connected = values.filter(value => value === "connected").length;
-                if (connected === values.length) setState("Realtime", "is-live");
-                else if (connected > 0) setState(`${connected}/${values.length} kênh realtime`, "is-waiting");
+                if (connected === values.length) setState("Thời gian thực", "is-live");
+                else if (connected > 0) setState(`${connected}/${values.length} kênh thời gian thực`, "is-waiting");
                 else setState("Mất kết nối", "is-offline");
             };
 
-            const setMetricValue = (id, value, suffix = "") => {
-                document.getElementById(id).textContent = `${number.format(value)}${suffix}`;
+            const setMetricValue = (id, value, formatter, suffix = "") => {
+                document.getElementById(id).textContent = `${formatter.format(value)}${suffix}`;
             };
 
             const updateCharts = (metrics) => {
@@ -195,14 +233,14 @@
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     const metrics = await response.json();
                     if (generation !== refreshGeneration) return;
-                    document.getElementById("activeWorkOrders").textContent = number.format(metrics.activeWorkOrders);
-                    document.getElementById("pendingQcLots").textContent = number.format(metrics.pendingQcLots);
-                    document.getElementById("inventoryVolume").textContent = number.format(metrics.inventoryVolume);
-                    setMetricValue("overallOee", metrics.overallOeePercent, "%");
-                    setMetricValue("oeeAvailability", metrics.oeeAvailabilityPercent, "%");
-                    setMetricValue("oeePerformance", metrics.oeePerformancePercent, "%");
-                    setMetricValue("oeeQuality", metrics.oeeQualityPercent, "%");
-                    setMetricValue("lowStockAlertCount", metrics.lowStockAlertCount);
+                    document.getElementById("activeWorkOrders").textContent = integerNumber.format(metrics.activeWorkOrders);
+                    document.getElementById("pendingQcLots").textContent = integerNumber.format(metrics.pendingQcLots);
+                    document.getElementById("inventoryVolume").textContent = decimalNumber.format(metrics.inventoryVolume);
+                    setMetricValue("overallOee", metrics.overallOeePercent, percentNumber, "%");
+                    setMetricValue("oeeAvailability", metrics.oeeAvailabilityPercent, percentNumber, "%");
+                    setMetricValue("oeePerformance", metrics.oeePerformancePercent, percentNumber, "%");
+                    setMetricValue("oeeQuality", metrics.oeeQualityPercent, percentNumber, "%");
+                    setMetricValue("lowStockAlertCount", metrics.lowStockAlertCount, integerNumber);
                     updateCharts(metrics);
                     refreshState.textContent = "Số liệu vừa được cập nhật";
                 } catch (error) {

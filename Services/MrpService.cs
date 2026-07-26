@@ -26,23 +26,23 @@ public class MrpService : IMrpService
         }
 
         var results = new List<MrpResultDto>();
-        foreach (var item in bom.Items.OrderBy(i => i.ComponentProductId))
+        foreach (var componentGroup in bom.Items
+            .Where(item => item.ComponentProduct is not null)
+            .GroupBy(item => item.ComponentProductId)
+            .OrderBy(group => group.Key))
         {
-            if (item.ComponentProduct == null)
-            {
-                continue;
-            }
-
-            var grossDemand = qty * item.QtyPer * (1 + item.ScrapPercent / 100);
+            var component = componentGroup.First().ComponentProduct!;
+            var grossDemand = componentGroup.Sum(item =>
+                qty * item.QtyPer * (1 + item.ScrapPercent / 100));
             var stockAvailable = await _context.StockBalances
-                .Where(sb => sb.ProductId == item.ComponentProductId)
+                .Where(sb => sb.ProductId == componentGroup.Key)
                 .SumAsync(sb => sb.QtyAvailable);
 
             results.Add(new MrpResultDto
             {
-                ComponentProductId = item.ComponentProductId,
-                ComponentCode = item.ComponentProduct.Code,
-                ComponentName = item.ComponentProduct.Name,
+                ComponentProductId = componentGroup.Key,
+                ComponentCode = component.Code,
+                ComponentName = component.Name,
                 GrossDemand = grossDemand,
                 StockAvailable = stockAvailable,
                 NetDemand = Math.Max(0, grossDemand - stockAvailable)

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -66,9 +67,36 @@ public class DashboardMetricsTests
         var result = await Controller(context, clock, businessTimeZone).Metrics();
 
         var metrics = Assert.IsType<DashboardViewModel>(Assert.IsType<OkObjectResult>(result).Value);
-        Assert.Equal("21/07", metrics.DailyLabels[^1]);
+        Assert.Equal("21/07/2026", metrics.DailyLabels[^1]);
         Assert.Equal(11m, metrics.DailyActualOutput[^2]);
         Assert.Equal(42m, metrics.DailyActualOutput[^1]);
+    }
+
+    [Fact]
+    public async Task Metrics_FormatsDailyLabelsDeterministicallyUnderNonVietnameseCulture()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        var originalUiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("ar-SA");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("ar-SA");
+            await using var context = new ApplicationDbContext(Options($"Dashboard_Labels_{Guid.NewGuid()}"));
+            var clock = new FixedTimeProvider(new DateTimeOffset(2026, 7, 20, 18, 0, 0, TimeSpan.Zero));
+
+            var result = await Controller(context, clock, VietnamTimeZone()).Metrics();
+
+            var metrics = Assert.IsType<DashboardViewModel>(Assert.IsType<OkObjectResult>(result).Value);
+            Assert.Equal(
+                ["15/07/2026", "16/07/2026", "17/07/2026", "18/07/2026", "19/07/2026", "20/07/2026", "21/07/2026"],
+                metrics.DailyLabels);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
     }
 
     [Fact]
@@ -340,7 +368,9 @@ public class DashboardMetricsTests
         Assert.Equal(50m, metrics.OeePerformancePercent);
         Assert.Equal(90m, metrics.OeeQualityPercent);
         Assert.Equal(30m, metrics.OverallOeePercent);
-        Assert.Equal(Enumerable.Range(0, 7).Select(day => today.AddDays(day - 6).ToString("dd/MM")), metrics.DailyLabels);
+        Assert.Equal(
+            ["09/01/2026", "10/01/2026", "11/01/2026", "12/01/2026", "13/01/2026", "14/01/2026", "15/01/2026"],
+            metrics.DailyLabels);
         Assert.Equal(new[] { 0m, 0m, 0m, 0m, 50m, 50m, 100m }, metrics.DailyPlannedOutput);
         Assert.Equal(new[] { 0m, 0m, 0m, 0m, 0m, 0m, 90m }, metrics.DailyActualOutput);
         Assert.Equal(new[] { "Finished Goods", "Quarantine", "Raw Materials" }, metrics.ZoneLabels);

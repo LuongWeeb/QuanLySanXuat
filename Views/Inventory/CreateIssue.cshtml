@@ -1,59 +1,163 @@
 @using WmsMes.Web.Domain.Entities
+@using WmsMes.Web.ViewModels
+@model CreateIssueViewModel
 @{
     ViewData["Title"] = "Tạo phiếu xuất kho";
     var balances = (IEnumerable<StockBalance>)ViewBag.AvailableBalances;
     var customers = (IEnumerable<Customer>)ViewBag.Customers;
 }
 
-<section class="toolbar-row"><div><p class="eyebrow">Goods Issue</p><h2>Tạo Phiếu Xuất kho mới</h2></div></section>
+<section class="toolbar-row"><div><p class="eyebrow">Phiếu xuất kho</p><h2>Tạo Phiếu Xuất kho mới</h2></div></section>
 
-<div class="ops-panel mt-3 col-md-8">
+<div class="ops-panel mt-3">
     <form asp-action="CreateIssue" method="post">
         <div asp-validation-summary="ModelOnly" class="text-danger"></div>
-        <div class="mb-3">
-            <label for="customerId" class="form-label">Khách hàng</label>
-            <select id="customerId" name="customerId" class="form-select" required>
+        <div class="mb-3 col-md-6">
+            <label asp-for="CustomerId" class="form-label">Khách hàng</label>
+            <select asp-for="CustomerId" class="form-select" required>
                 <option value="">-- Chọn khách hàng --</option>
                 @foreach (var customer in customers)
                 {
                     <option value="@customer.Id">@customer.Code - @customer.Name</option>
                 }
             </select>
-            @Html.ValidationMessage("customerId", null, new { @class = "text-danger" })
+            <span asp-validation-for="CustomerId" class="text-danger"></span>
         </div>
-        <div class="mb-3">
-            <label for="stockSelection" class="form-label">Sản phẩm / Lô / Vị trí khả dụng (FEFO/FIFO)</label>
-            <select id="stockSelection" class="form-select" required>
-                <option value="">-- Chọn tồn kho khả dụng --</option>
-                @foreach (var balance in balances)
-                {
-                    <option value="@balance.ProductId|@balance.LotId|@balance.LocationId"
-                            data-product-id="@balance.ProductId" data-lot-id="@balance.LotId" data-location-id="@balance.LocationId">
-                        @balance.Product?.Code - @balance.Product?.Name | @balance.Lot?.LotNo | HSD: @(balance.Lot?.ExpiryDate?.ToString("yyyy-MM-dd") ?? "FIFO") | @balance.Location?.Code | Có thể xuất: @balance.QtyAvailable.ToString("N2")
-                    </option>
-                }
-            </select>
-            <input id="productId" name="productId" type="hidden" />
-            <input id="lotId" name="lotId" type="hidden" />
-            <input id="locationId" name="locationId" type="hidden" />
-            @Html.ValidationMessage("productId", null, new { @class = "text-danger d-block" })
-            @Html.ValidationMessage("lotId", null, new { @class = "text-danger d-block" })
-            @Html.ValidationMessage("locationId", null, new { @class = "text-danger d-block" })
+
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead><tr><th>Sản phẩm / Lô / Vị trí khả dụng (FEFO/FIFO)</th><th>Số lượng xuất</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead>
+                <tbody id="issue-lines">
+                    @for (var index = 0; index < Model.Lines.Count; index++)
+                    {
+                        var line = Model.Lines[index];
+                        var qtyKey = $"Lines[{index}].Qty";
+                        var qtyValue = ViewData.ModelState.TryGetValue(qtyKey, out var qtyEntry)
+                            ? qtyEntry.AttemptedValue
+                            : line.Qty.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        <tr data-line-row>
+                            <td>
+                                <label class="visually-hidden" data-stock-label>Tồn kho khả dụng</label>
+                                <select class="form-select" data-stock-selection required>
+                                    <option value="">-- Chọn tồn kho khả dụng --</option>
+                                    @foreach (var balance in balances)
+                                    {
+                                        var selected = balance.ProductId == line.ProductId && balance.LotId == line.LotId && balance.LocationId == line.LocationId;
+                                        <option value="@balance.ProductId|@balance.LotId|@balance.LocationId"
+                                                data-product-id="@balance.ProductId" data-lot-id="@balance.LotId" data-location-id="@balance.LocationId"
+                                                selected="@(selected ? "selected" : null)">
+                                            @balance.Product?.Code - @balance.Product?.Name | @balance.Lot?.LotNo | HSD: @(balance.Lot?.ExpiryDate?.ToVietnameseDate() ?? "FIFO") | @balance.Location?.Code | Có thể xuất: @balance.QtyAvailable.ToVietnameseNumber()
+                                        </option>
+                                    }
+                                </select>
+                                <input name="Lines[@index].ProductId" value="@line.ProductId" data-field="ProductId" type="hidden" />
+                                <input name="Lines[@index].LotId" value="@line.LotId" data-field="LotId" type="hidden" />
+                                <input name="Lines[@index].LocationId" value="@line.LocationId" data-field="LocationId" type="hidden" />
+                                @Html.ValidationMessage($"Lines[{index}].ProductId", null, new { @class = "text-danger d-block", data_validation_for = "ProductId" })
+                                @Html.ValidationMessage($"Lines[{index}].LotId", null, new { @class = "text-danger d-block", data_validation_for = "LotId" })
+                                @Html.ValidationMessage($"Lines[{index}].LocationId", null, new { @class = "text-danger d-block", data_validation_for = "LocationId" })
+                            </td>
+                            <td>
+                                <label class="visually-hidden" data-label-for="Qty">Số lượng xuất</label>
+                                <input name="Lines[@index].Qty" value="@qtyValue" data-field="Qty" type="number" class="form-control" min="0.01" step="0.01" required />
+                                @Html.ValidationMessage($"Lines[{index}].Qty", null, new { @class = "text-danger", data_validation_for = "Qty" })
+                            </td>
+                            <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-line>Xóa dòng</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
         </div>
-        <div class="mb-3">
-            <label for="qty" class="form-label">Số lượng xuất</label>
-            <input id="qty" name="qty" type="number" class="form-control" min="0.01" step="0.01" required />
-            @Html.ValidationMessage("qty", null, new { @class = "text-danger" })
-        </div>
+
+        @Html.ValidationMessage("Lines", null, new { @class = "text-danger d-block mb-2" })
+        <button type="button" id="add-issue-line" class="btn btn-outline-primary mb-3">Thêm dòng</button>
         <div class="d-flex gap-2"><button type="submit" class="btn btn-primary">Xác nhận xuất kho</button><a class="btn btn-outline-secondary" asp-action="Issues">Hủy</a></div>
     </form>
 </div>
 
+<template id="issue-line-template">
+    <tr data-line-row>
+        <td>
+            <label class="visually-hidden" data-stock-label>Tồn kho khả dụng</label>
+            <select class="form-select" data-stock-selection required>
+                <option value="">-- Chọn tồn kho khả dụng --</option>
+                @foreach (var balance in balances)
+                {
+                    <option value="@balance.ProductId|@balance.LotId|@balance.LocationId" data-product-id="@balance.ProductId" data-lot-id="@balance.LotId" data-location-id="@balance.LocationId">
+                        @balance.Product?.Code - @balance.Product?.Name | @balance.Lot?.LotNo | HSD: @(balance.Lot?.ExpiryDate?.ToVietnameseDate() ?? "FIFO") | @balance.Location?.Code | Có thể xuất: @balance.QtyAvailable.ToVietnameseNumber()
+                    </option>
+                }
+            </select>
+            <input name="Lines[__index__].ProductId" data-field="ProductId" type="hidden" />
+            <input name="Lines[__index__].LotId" data-field="LotId" type="hidden" />
+            <input name="Lines[__index__].LocationId" data-field="LocationId" type="hidden" />
+        </td>
+        <td><label class="visually-hidden" data-label-for="Qty">Số lượng xuất</label><input name="Lines[__index__].Qty" data-field="Qty" type="number" class="form-control" min="0.01" step="0.01" required /></td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-line>Xóa dòng</button></td>
+    </tr>
+</template>
+
 <script>
-    document.getElementById('stockSelection').addEventListener('change', function () {
-        const option = this.options[this.selectedIndex];
-        document.getElementById('productId').value = option.dataset.productId || '';
-        document.getElementById('lotId').value = option.dataset.lotId || '';
-        document.getElementById('locationId').value = option.dataset.locationId || '';
-    });
+    (() => {
+        const lines = document.getElementById('issue-lines');
+        const template = document.getElementById('issue-line-template');
+
+        function copyStockSelection(row) {
+            const selection = row.querySelector('[data-stock-selection]');
+            const option = selection.options[selection.selectedIndex];
+            row.querySelector('[data-field="ProductId"]').value = option?.dataset.productId || '';
+            row.querySelector('[data-field="LotId"]').value = option?.dataset.lotId || '';
+            row.querySelector('[data-field="LocationId"]').value = option?.dataset.locationId || '';
+        }
+
+        function reindexLines() {
+            const rows = lines.querySelectorAll('[data-line-row]');
+            rows.forEach((row, index) => {
+                const stockSelection = row.querySelector('[data-stock-selection]');
+                stockSelection.id = `issue-line-${index}-stock`;
+                row.querySelector('[data-stock-label]').htmlFor = stockSelection.id;
+                row.querySelectorAll('[data-field]').forEach(field => {
+                    const fieldName = field.dataset.field;
+                    field.name = `Lines[${index}].${fieldName}`;
+                    field.id = `issue-line-${index}-${fieldName}`;
+                });
+                row.querySelectorAll('[data-label-for]').forEach(label => {
+                    label.htmlFor = `issue-line-${index}-${label.dataset.labelFor}`;
+                });
+                row.querySelectorAll('[data-validation-for]').forEach(message => {
+                    message.dataset.valmsgFor = `Lines[${index}].${message.dataset.validationFor}`;
+                });
+            });
+        }
+
+        function resetRow(row) {
+            row.querySelector('[data-stock-selection]').selectedIndex = 0;
+            row.querySelectorAll('input').forEach(input => input.value = '');
+        }
+
+        document.getElementById('add-issue-line').addEventListener('click', () => {
+            const index = lines.querySelectorAll('[data-line-row]').length;
+            lines.insertAdjacentHTML('beforeend', template.innerHTML.replaceAll('__index__', index));
+            reindexLines();
+        });
+
+        lines.addEventListener('change', event => {
+            if (event.target.matches('[data-stock-selection]')) copyStockSelection(event.target.closest('[data-line-row]'));
+        });
+
+        lines.addEventListener('click', event => {
+            const button = event.target.closest('[data-remove-line]');
+            if (!button) return;
+            const rows = lines.querySelectorAll('[data-line-row]');
+            const row = button.closest('[data-line-row]');
+            if (rows.length === 1) {
+                resetRow(row);
+                return;
+            }
+            row.remove();
+            reindexLines();
+        });
+
+        reindexLines();
+    })();
 </script>

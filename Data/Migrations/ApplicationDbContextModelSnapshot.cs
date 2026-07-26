@@ -254,7 +254,14 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProductId");
+                    b.HasIndex("ProductId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BOMs_OneActivePerProduct")
+                        .HasFilter("[IsActive] = 1");
+
+                    b.HasIndex("ProductId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BOMs_ProductId_Version");
 
                     b.ToTable("BOMs", (string)null);
                 });
@@ -281,9 +288,11 @@ namespace WmsMes.Web.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("BomId");
-
                     b.HasIndex("ComponentProductId");
+
+                    b.HasIndex("BomId", "ComponentProductId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BOMItems_BomId_ComponentProductId");
 
                     b.ToTable("BOMItems", (string)null);
                 });
@@ -330,6 +339,35 @@ namespace WmsMes.Web.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Customers", (string)null);
+                });
+
+            modelBuilder.Entity("WmsMes.Web.Domain.Entities.DailyProductionLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<decimal>("QtyProduced")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("WorkOrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkOrderId");
+
+                    b.ToTable("DailyProductionLogs", (string)null);
                 });
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.GoodsIssue", b =>
@@ -1439,6 +1477,17 @@ namespace WmsMes.Web.Data.Migrations
                     b.Navigation("ComponentProduct");
                 });
 
+            modelBuilder.Entity("WmsMes.Web.Domain.Entities.DailyProductionLog", b =>
+                {
+                    b.HasOne("WmsMes.Web.Domain.Entities.WorkOrder", "WorkOrder")
+                        .WithMany("DailyProductionLogs")
+                        .HasForeignKey("WorkOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("WorkOrder");
+                });
+
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.GoodsIssue", b =>
                 {
                     b.HasOne("WmsMes.Web.Domain.Entities.Customer", "Customer")
@@ -1925,6 +1974,8 @@ namespace WmsMes.Web.Data.Migrations
 
             modelBuilder.Entity("WmsMes.Web.Domain.Entities.WorkOrder", b =>
                 {
+                    b.Navigation("DailyProductionLogs");
+
                     b.Navigation("Steps");
                 });
 

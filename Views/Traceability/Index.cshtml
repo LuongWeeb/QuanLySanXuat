@@ -6,28 +6,30 @@
     <div class="panel">
         <div class="d-flex flex-wrap align-items-end justify-content-between gap-3">
             <div>
-                <p class="eyebrow">Lot traceability</p>
+                <p class="eyebrow">Truy xuất nguồn gốc lô</p>
                 <h2 class="section-title">Truy vết phả hệ lô</h2>
             </div>
             <div class="d-flex flex-wrap gap-2">
-                <input id="lotInput" class="form-control" style="min-width: 260px" placeholder="Nhap so lo" />
+                <input id="lotInput" class="form-control" style="min-width: 260px" placeholder="Nhập số lô" />
                 <select id="directionInput" class="form-select" style="width: 150px">
-                    <option value="backward">Nguoc</option>
-                    <option value="forward">Xuoi</option>
+                    <option value="backward">Ngược</option>
+                    <option value="forward">Xuôi</option>
                 </select>
-                <button class="btn btn-primary" type="button" onclick="loadTraceTree()">Tim</button>
+                <button class="btn btn-primary" type="button" onclick="loadTraceTree()">Tìm</button>
             </div>
         </div>
     </div>
 
     <div class="panel trace-panel">
-        <svg id="traceCanvas" role="img" aria-label="So do truy vet lo"></svg>
-        <p id="traceEmpty" class="empty-state">Nhap so lo de xem so do truy vet.</p>
+        <svg id="traceCanvas" role="img" aria-label="Sơ đồ truy vết lô"></svg>
+        <p id="traceEmpty" class="empty-state">Nhập số lô để xem sơ đồ truy vết.</p>
     </div>
 </section>
 
 @section Scripts {
     <script>
+        const number = new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
         async function loadTraceTree() {
             const lotNo = document.getElementById("lotInput").value.trim();
             const direction = document.getElementById("directionInput").value;
@@ -36,7 +38,7 @@
 
             svg.innerHTML = "";
             if (!lotNo) {
-                empty.textContent = "Nhap so lo de xem so do truy vet.";
+                empty.textContent = "Nhập số lô để xem sơ đồ truy vết.";
                 empty.style.display = "block";
                 return;
             }
@@ -44,7 +46,7 @@
             const response = await fetch(`/Traceability/GetTree?lotNo=${encodeURIComponent(lotNo)}&direction=${direction}`);
             const data = await response.json();
             if (!data) {
-                empty.textContent = `Khong tim thay lo ${lotNo}.`;
+                empty.textContent = `Không tìm thấy lô ${lotNo}.`;
                 empty.style.display = "block";
                 return;
             }
@@ -101,7 +103,7 @@
 
             addText(group, x + 14, y + 24, node.lotNo, "700", "#0f172a");
             addText(group, x + 14, y + 44, `${node.productCode} - ${node.productName}`, "500", "#475569");
-            addText(group, x + 14, y + 60, `SL: ${node.qty}`, "500", "#0f766e");
+            addText(group, x + 14, y + 60, `SL: ${number.format(node.qty)}`, "500", "#0f766e");
             svg.appendChild(group);
         }
 

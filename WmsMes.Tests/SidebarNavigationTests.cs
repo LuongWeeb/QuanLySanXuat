@@ -15,7 +15,7 @@ public class SidebarNavigationTests
         AssertSection(layout, "Quản lý Sản xuất (MES)");
         AssertSection(layout, "Kiểm soát Chất lượng & Truy vết");
 
-        AssertLink(layout, "Home", "Index", "Dashboard");
+        AssertLink(layout, "Home", "Index", "Bảng điều khiển");
         AssertLink(layout, "Inventory", "Index", "Số dư tồn kho");
         AssertLink(layout, "Inventory", "Receipts", "Nhập kho");
         AssertLink(layout, "Inventory", "Issues", "Xuất kho");
@@ -24,8 +24,28 @@ public class SidebarNavigationTests
         AssertLink(layout, "Worker", "Index", "Trạm vận hành");
         AssertLink(layout, "Mrp", "Index", "Lập kế hoạch MRP");
         AssertLink(layout, "Product", "Index", "Sản phẩm (SKU)");
+        AssertLink(layout, "Bom", "Index", "Định mức vật tư (BOM)");
         AssertLink(layout, "Qc", "Index", "Kiểm định chất lượng");
         AssertLink(layout, "Traceability", "Index", "Truy vết lô hàng");
+    }
+
+    [Fact]
+    public void Layout_RestrictsBomButKeepsProductIndexOutsideProductionManagementRoles()
+    {
+        var layoutPath = Path.Combine(FindRepositoryRoot(), "Views", "Shared", "_Layout.cshtml");
+        var layout = File.ReadAllText(layoutPath);
+        var roleBoundary = new Regex(
+            """@if\s*\(User\.IsInRole\("Admin"\)\s*\|\|\s*User\.IsInRole\("Planner"\)\s*\|\|\s*User\.IsInRole\("Manager"\)\)\s*\{(?<links>[\s\S]*?)\}""",
+            RegexOptions.IgnoreCase);
+
+        var match = roleBoundary.Match(layout);
+        Assert.True(match.Success, "Production-management role boundary was not found.");
+        var links = match.Groups["links"].Value;
+        AssertLink(links, "WorkOrder", "Index", "Lệnh sản xuất");
+        AssertLink(links, "Mrp", "Index", "Lập kế hoạch MRP");
+        AssertLink(links, "Bom", "Index", "Định mức vật tư (BOM)");
+        Assert.DoesNotContain("asp-controller=\"Product\"", links, StringComparison.OrdinalIgnoreCase);
+        AssertLink(layout, "Product", "Index", "Sản phẩm (SKU)");
     }
 
     private static void AssertSection(string layout, string title)

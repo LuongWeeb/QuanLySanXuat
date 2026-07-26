@@ -12,17 +12,17 @@
     <link rel="stylesheet" href="~/WmsMes.Web.styles.css" asp-append-version="true" />
 </head>
 <body class="app-shell">
-    <aside class="app-sidebar" aria-label="Main navigation">
+    <aside class="app-sidebar" aria-label="Điều hướng chính">
         <a class="brand-lockup" asp-controller="Home" asp-action="Index">
             <span class="brand-mark">WM</span>
             <span>
                 <strong>WMS MES</strong>
-                <small>Operations</small>
+                <small>Vận hành</small>
             </span>
         </a>
         <nav class="side-nav">
             <div class="nav-section-title">Tổng quan</div>
-            <a asp-controller="Home" asp-action="Index">Dashboard</a>
+            <a asp-controller="Home" asp-action="Index">Bảng điều khiển</a>
 
             <div class="nav-section-title">Quản lý Kho (WMS)</div>
             <a asp-controller="Inventory" asp-action="Index">Số dư tồn kho</a>
@@ -31,9 +31,13 @@
             <a asp-controller="Warehouse" asp-action="Index">Kho & Vị trí</a>
 
             <div class="nav-section-title">Quản lý Sản xuất (MES)</div>
-            <a asp-controller="WorkOrder" asp-action="Index">Lệnh sản xuất</a>
+            @if (User.IsInRole("Admin") || User.IsInRole("Planner") || User.IsInRole("Manager"))
+            {
+                <a asp-controller="WorkOrder" asp-action="Index">Lệnh sản xuất</a>
+                <a asp-controller="Mrp" asp-action="Index">Lập kế hoạch MRP</a>
+                <a asp-controller="Bom" asp-action="Index">Định mức vật tư (BOM)</a>
+            }
             <a asp-controller="Worker" asp-action="Index">Trạm vận hành</a>
-            <a asp-controller="Mrp" asp-action="Index">Lập kế hoạch MRP</a>
             <a asp-controller="Product" asp-action="Index">Sản phẩm (SKU)</a>
 
             <div class="nav-section-title">Kiểm soát Chất lượng & Truy vết</div>
@@ -44,10 +48,16 @@
     <div class="app-main">
         <header class="app-topbar">
             <div>
-                <p class="eyebrow">Foundation phase</p>
+                <p class="eyebrow">Nền tảng vận hành</p>
                 <h1>@ViewData["Title"]</h1>
             </div>
             <div class="topbar-actions">
+                <form class="d-flex gap-2" asp-controller="Home" asp-action="Search" method="get">
+                    <label class="visually-hidden" for="global-search">Tìm kiếm toàn hệ thống</label>
+                    <input class="form-control form-control-sm" id="global-search" type="search" name="q" required
+                           style="max-width: 250px" placeholder="Tìm SKU, lệnh SX, số lô..." />
+                    <button class="btn btn-outline-primary btn-sm" type="submit">Tìm</button>
+                </form>
                 @if (User.Identity?.IsAuthenticated == true)
                 {
                     <span class="user-chip">@User.Identity.Name</span>

@@ -1,0 +1,75 @@
+@model IEnumerable<WmsMes.Web.Domain.Entities.BOM>
+@{
+    ViewData["Title"] = "Định mức vật tư (BOM)";
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">MES</p>
+        <h2>Quản lý Định mức vật tư</h2>
+    </div>
+    <a class="btn btn-primary" asp-action="Create">Tạo BOM mới</a>
+</section>
+
+@if (TempData["StatusMessage"] is string statusMessage)
+{
+    <div class="alert alert-info mt-3" role="status">@statusMessage</div>
+}
+
+<section class="data-panel mt-3">
+    <div class="table-responsive">
+        <table class="table data-table align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Sản phẩm</th>
+                    <th>Phiên bản</th>
+                    <th>Ngày hiệu lực</th>
+                    <th>Trạng thái</th>
+                    <th class="text-end">Thao tác</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var bom in Model)
+            {
+                <tr>
+                    <td><code>@bom.Product?.Code</code> - @bom.Product?.Name</td>
+                    <td>@bom.Version</td>
+                    <td>@bom.EffectiveDate.ToVietnameseDate()</td>
+                    <td>
+                        @if (bom.IsActive)
+                        {
+                            <span class="badge bg-success">Đang kích hoạt</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Chưa kích hoạt</span>
+                        }
+                    </td>
+                    <td>
+                        <div class="d-flex justify-content-end gap-2 flex-wrap">
+                            <a class="btn btn-sm btn-outline-primary"
+                               asp-action="Details"
+                               asp-route-id="@bom.Id">Chi tiết</a>
+                            <form asp-action="ToggleActive" asp-route-id="@bom.Id" method="post">
+                                <button type="submit"
+                                        class="btn btn-sm @(bom.IsActive ? "btn-outline-secondary" : "btn-success")"
+                                        aria-label="@(bom.IsActive ? $"Ngừng kích hoạt BOM {bom.Version}" : $"Kích hoạt BOM {bom.Version}")">
+                                    @(bom.IsActive ? "Ngừng kích hoạt" : "Kích hoạt")
+                                </button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+            }
+            @if (!Model.Any())
+            {
+                <tr>
+                    <td colspan="5" class="text-center text-muted py-4">
+                        Chưa có định mức vật tư. Hãy tạo BOM đầu tiên.
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</section>

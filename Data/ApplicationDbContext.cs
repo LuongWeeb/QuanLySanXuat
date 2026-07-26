@@ -65,6 +65,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<WorkOrderStep> WorkOrderSteps { get; set; }
 
+    public DbSet<DailyProductionLog> DailyProductionLogs { get; set; }
+
     public DbSet<MaterialReservation> MaterialReservations { get; set; }
 
     public DbSet<LotGenealogy> LotGenealogies { get; set; }
@@ -315,11 +317,27 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasForeignKey(i => i.BomId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.Entity<BOM>()
+            .HasIndex(bom => new { bom.ProductId, bom.Version })
+            .IsUnique()
+            .HasDatabaseName("UX_BOMs_ProductId_Version");
+
+        builder.Entity<BOM>()
+            .HasIndex(bom => bom.ProductId)
+            .IsUnique()
+            .HasFilter("[IsActive] = 1")
+            .HasDatabaseName("UX_BOMs_OneActivePerProduct");
+
         builder.Entity<BOMItem>()
             .HasOne(i => i.ComponentProduct)
             .WithMany()
             .HasForeignKey(i => i.ComponentProductId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<BOMItem>()
+            .HasIndex(item => new { item.BomId, item.ComponentProductId })
+            .IsUnique()
+            .HasDatabaseName("UX_BOMItems_BomId_ComponentProductId");
 
         builder.Entity<Routing>()
             .HasMany(r => r.Steps)
@@ -337,6 +355,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasMany(w => w.Steps)
             .WithOne(s => s.WorkOrder)
             .HasForeignKey(s => s.WorkOrderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<WorkOrder>()
+            .HasMany(w => w.DailyProductionLogs)
+            .WithOne(log => log.WorkOrder)
+            .HasForeignKey(log => log.WorkOrderId)
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.Entity<WorkOrderStep>()

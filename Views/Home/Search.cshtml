@@ -1,0 +1,112 @@
+@model WmsMes.Web.ViewModels.SearchResultViewModel
+@{
+    ViewData["Title"] = "Kết quả tìm kiếm";
+    var hasResults = Model.Products.Any() || Model.WorkOrders.Any() || Model.Lots.Any() || Model.Locations.Any();
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Tìm kiếm toàn hệ thống</p>
+        <h2>Kết quả cho "@Model.Query"</h2>
+    </div>
+</section>
+
+@if (!hasResults)
+{
+    <div class="empty-state mt-3">
+        <h3>Không tìm thấy kết quả</h3>
+        <p>Không có dữ liệu nào khớp với từ khóa "@Model.Query".</p>
+    </div>
+}
+else
+{
+    <div class="stack-lg mt-3">
+        @if (Model.Products.Any())
+        {
+            <section class="data-panel">
+                <h3>Sản phẩm</h3>
+                <div class="table-responsive">
+                    <table class="table data-table align-middle mb-0">
+                        <thead><tr><th>Mã SKU</th><th>Tên sản phẩm</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead>
+                        <tbody>
+                        @foreach (var product in Model.Products)
+                        {
+                            <tr>
+                                <td><code>@product.Code</code></td>
+                                <td>@product.Name</td>
+                                <td class="text-end"><a class="btn btn-sm btn-outline-primary" asp-controller="Product" asp-action="Index">Xem sản phẩm</a></td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+
+        @if (Model.WorkOrders.Any())
+        {
+            <section class="data-panel">
+                <h3>Lệnh sản xuất</h3>
+                <div class="table-responsive">
+                    <table class="table data-table align-middle mb-0">
+                        <thead><tr><th>Mã lệnh</th><th>Trạng thái</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead>
+                        <tbody>
+                        @foreach (var workOrder in Model.WorkOrders)
+                        {
+                            <tr>
+                                <td><code>@workOrder.Code</code></td>
+                                <td><span class="status-pill">@workOrder.Status.ToVietnameseString()</span></td>
+                                <td class="text-end"><a class="btn btn-sm btn-outline-primary" asp-controller="WorkOrder" asp-action="Details" asp-route-id="@workOrder.Id">Chi tiết</a></td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+
+        @if (Model.Lots.Any())
+        {
+            <section class="data-panel">
+                <h3>Lô</h3>
+                <div class="table-responsive">
+                    <table class="table data-table align-middle mb-0">
+                        <thead><tr><th>Số lô</th><th>Sản phẩm</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead>
+                        <tbody>
+                        @foreach (var lot in Model.Lots)
+                        {
+                            <tr>
+                                <td><code>@lot.LotNo</code></td>
+                                <td>@lot.Product?.Code - @lot.Product?.Name</td>
+                                <td class="text-end"><a class="btn btn-sm btn-outline-primary" asp-controller="Traceability" asp-action="Index">Truy vết</a></td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+
+        @if (Model.Locations.Any())
+        {
+            <section class="data-panel">
+                <h3>Vị trí</h3>
+                <div class="table-responsive">
+                    <table class="table data-table align-middle mb-0">
+                        <thead><tr><th>Mã vị trí</th><th>Tên vị trí</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead>
+                        <tbody>
+                        @foreach (var location in Model.Locations)
+                        {
+                            <tr>
+                                <td><code>@location.Code</code></td>
+                                <td>@location.Name</td>
+                                <td class="text-end"><a class="btn btn-sm btn-outline-primary" asp-controller="Warehouse" asp-action="Index">Xem kho</a></td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+    </div>
+}

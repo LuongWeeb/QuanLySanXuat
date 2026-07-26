@@ -1,14 +1,34 @@
 @model WmsMes.Web.Domain.Entities.WorkOrder
 @using WmsMes.Web.Domain.Entities
 @using WmsMes.Web.Domain.Enums
+@using WmsMes.Web.ViewModels
+@using System.Globalization
 @{
     ViewData["Title"] = $"Lệnh {Model.Code}";
+    var businessDate = (DateTime)ViewData["BusinessDate"]!;
     var reservations = ViewData["Reservations"] as IEnumerable<MaterialReservation> ?? Enumerable.Empty<MaterialReservation>();
     var canManage = User.IsInRole("Admin") || User.IsInRole("Manager");
+    var totalProduced = Model.DailyProductionLogs.Sum(log => log.QtyProduced);
+    var hasValidTarget = Model.Qty > 0;
+    var progressPercentage = hasValidTarget ? totalProduced / Model.Qty * 100 : 0;
+    var progressWidth = Math.Clamp(progressPercentage, 0, 100);
+    var targetReached = hasValidTarget && totalProduced >= Model.Qty;
+    var isOverdue = hasValidTarget && !targetReached && businessDate > Model.DueDate.Date;
+    var daysRemaining = (Model.DueDate.Date - businessDate).Days;
+    var maxDateValue = businessDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    var dateValue = ViewData.ModelState.TryGetValue(nameof(DailyProductionLogInputModel.Date), out var dateEntry)
+        ? dateEntry.AttemptedValue
+        : businessDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    var quantityValue = ViewData.ModelState.TryGetValue(nameof(DailyProductionLogInputModel.QtyProduced), out var quantityEntry)
+        ? quantityEntry.AttemptedValue
+        : string.Empty;
+    var notesValue = ViewData.ModelState.TryGetValue(nameof(DailyProductionLogInputModel.Notes), out var notesEntry)
+        ? notesEntry.AttemptedValue
+        : string.Empty;
 }
 
 <section class="toolbar-row">
-    <div><p class="eyebrow">Work Order</p><h2>@Model.Code</h2></div>
+    <div><p class="eyebrow">Lệnh sản xuất</p><h2>@Model.Code</h2></div>
     <div class="d-flex gap-2">
         <a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a>
         @if (canManage && (Model.Status is WorkOrderStatus.Draft or WorkOrderStatus.Pending))
@@ -34,11 +54,94 @@
 <section class="ops-panel mt-3">
     <dl class="row mb-0">
         <dt class="col-sm-3">Thành phẩm</dt><dd class="col-sm-9">@Model.Product?.Code - @Model.Product?.Name</dd>
-        <dt class="col-sm-3">Số lượng</dt><dd class="col-sm-9">@Model.Qty.ToString("N2")</dd>
-        <dt class="col-sm-3">Hạn hoàn thành</dt><dd class="col-sm-9">@Model.DueDate.ToString("yyyy-MM-dd")</dd>
-        <dt class="col-sm-3">Trạng thái</dt><dd class="col-sm-9"><span class="status-pill">@Model.Status</span></dd>
+        <dt class="col-sm-3">Số lượng</dt><dd class="col-sm-9">@Model.Qty.ToVietnameseNumber()</dd>
+        <dt class="col-sm-3">Hạn hoàn thành</dt><dd class="col-sm-9">@Model.DueDate.ToVietnameseDate()</dd>
+        <dt class="col-sm-3">Trạng thái</dt><dd class="col-sm-9"><span class="status-pill">@Model.Status.ToVietnameseString()</span></dd>
         <dt class="col-sm-3">Phiên bản BOM / Routing</dt><dd class="col-sm-9">@(string.IsNullOrEmpty(Model.BomVersion) ? "—" : Model.BomVersion) / @(string.IsNullOrEmpty(Model.RoutingVersion) ? "—" : Model.RoutingVersion)</dd>
     </dl>
+</section>
+
+<section class="ops-panel mt-3" aria-labelledby="production-progress-heading">
+    <div class="d-flex justify-content-between align-items-center gap-3 mb-2">
+        <h3 class="h5 mb-0" id="production-progress-heading">Tiến độ sản xuất</h3>
+        <span class="fw-semibold">@totalProduced.ToVietnameseNumber() / @Model.Qty.ToVietnameseNumber() (@progressPercentage.ToVietnameseNumber("N1")%)</span>
+    </div>
+    <div class="progress" role="progressbar"
+         aria-label="Tiến độ lệnh @Model.Code"
+         aria-valuenow="@progressWidth.ToString("0.##", CultureInfo.InvariantCulture)"
+         aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-bar @(isOverdue ? "bg-danger" : targetReached ? "bg-success" : "bg-primary")"
+             style="width: @progressWidth.ToString("0.##", CultureInfo.InvariantCulture)%"></div>
+    </div>
+    @if (isOverdue)
+    {
+        <div class="text-danger fw-semibold mt-2">Trễ hạn sản xuất!</div>
+    }
+    else if (hasValidTarget && !targetReached)
+    {
+        <div class="text-muted mt-2">Còn @daysRemaining.ToVietnameseNumber() ngày</div>
+    }
+</section>
+
+@if (Model.Status == WorkOrderStatus.InProgress)
+{
+    <section class="ops-panel mt-3" aria-labelledby="daily-log-form-heading">
+        <h3 class="h5" id="daily-log-form-heading">Ghi sản lượng nhanh</h3>
+        <form asp-action="AddDailyLog" asp-route-id="@Model.Id" method="post">
+            <div asp-validation-summary="All" class="text-danger mb-3" role="alert"></div>
+            <div class="row g-3">
+                <div class="col-12 col-md-3">
+                    <label class="form-label" for="daily-log-date">Ngày sản xuất</label>
+                    <input class="form-control" id="daily-log-date" name="Date" type="date"
+                           value="@dateValue" max="@maxDateValue"
+                           aria-describedby="daily-log-date-error" required />
+                    @Html.ValidationMessage(nameof(DailyProductionLogInputModel.Date), null,
+                        new { @class = "text-danger", id = "daily-log-date-error" })
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label" for="daily-log-quantity">Số lượng sản xuất</label>
+                    <input class="form-control" id="daily-log-quantity" name="QtyProduced"
+                           type="number" min="0.01" step="0.01" value="@quantityValue"
+                           aria-describedby="daily-log-quantity-error" required />
+                    @Html.ValidationMessage(nameof(DailyProductionLogInputModel.QtyProduced), null,
+                        new { @class = "text-danger", id = "daily-log-quantity-error" })
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label" for="daily-log-notes">Ghi chú</label>
+                    <textarea class="form-control" id="daily-log-notes" name="Notes" rows="2"
+                              maxlength="250" aria-describedby="daily-log-notes-error">@notesValue</textarea>
+                    @Html.ValidationMessage(nameof(DailyProductionLogInputModel.Notes), null,
+                        new { @class = "text-danger", id = "daily-log-notes-error" })
+                </div>
+                <div class="col-12">
+                    <button class="btn btn-primary" type="submit">Ghi sản lượng</button>
+                </div>
+            </div>
+        </form>
+    </section>
+}
+
+<section class="data-panel mt-3" aria-labelledby="daily-log-history-heading">
+    <div class="p-3"><h3 class="h5 mb-0" id="daily-log-history-heading">Nhật ký sản lượng</h3></div>
+    <div class="table-responsive">
+        <table class="table data-table align-middle mb-0">
+            <thead><tr><th>Ngày sản xuất</th><th class="text-end">Số lượng</th><th>Ghi chú</th></tr></thead>
+            <tbody>
+            @foreach (var log in Model.DailyProductionLogs.OrderByDescending(log => log.Date).ThenByDescending(log => log.Id))
+            {
+                <tr>
+                    <td>@log.Date.ToVietnameseDate()</td>
+                    <td class="text-end fw-semibold">@log.QtyProduced.ToVietnameseNumber()</td>
+                    <td>@(string.IsNullOrWhiteSpace(log.Notes) ? "—" : log.Notes)</td>
+                </tr>
+            }
+            @if (!Model.DailyProductionLogs.Any())
+            {
+                <tr><td colspan="3" class="text-center text-muted py-3">Chưa có nhật ký sản lượng.</td></tr>
+            }
+            </tbody>
+        </table>
+    </div>
 </section>
 
 <section class="data-panel mt-3">
@@ -49,7 +152,7 @@
             <tbody>
             @foreach (var step in Model.Steps.OrderBy(x => x.StepNumber))
             {
-                <tr><td>@step.StepNumber</td><td>@step.StepName</td><td>@step.WorkCenter?.Code - @step.WorkCenter?.Name</td><td><span class="status-pill">@step.Status</span></td><td class="text-end">@step.QtyOK.ToString("N2") / @step.QtyReject.ToString("N2") / @step.QtyRework.ToString("N2")</td></tr>
+                <tr><td>@step.StepNumber.ToVietnameseNumber()</td><td>@step.StepName</td><td>@step.WorkCenter?.Code - @step.WorkCenter?.Name</td><td><span class="status-pill">@step.Status.ToVietnameseString()</span></td><td class="text-end">@step.QtyOK.ToVietnameseNumber() / @step.QtyReject.ToVietnameseNumber() / @step.QtyRework.ToVietnameseNumber()</td></tr>
             }
             @if (!Model.Steps.Any()) { <tr><td colspan="5" class="text-center text-muted py-3">Công đoạn sẽ được nạp khi phê duyệt.</td></tr> }
             </tbody>
@@ -65,7 +168,7 @@
             <tbody>
             @foreach (var item in reservations)
             {
-                <tr><td>@item.Product?.Code - @item.Product?.Name</td><td><code>@item.Lot?.LotNo</code></td><td><code>@item.Location?.Code</code></td><td class="text-end fw-semibold">@item.QtyReserved.ToString("N2")</td></tr>
+                <tr><td>@item.Product?.Code - @item.Product?.Name</td><td><code>@item.Lot?.LotNo</code></td><td><code>@item.Location?.Code</code></td><td class="text-end fw-semibold">@item.QtyReserved.ToVietnameseNumber()</td></tr>
             }
             @if (!reservations.Any()) { <tr><td colspan="4" class="text-center text-muted py-3">Chưa có vật tư giữ chỗ.</td></tr> }
             </tbody>

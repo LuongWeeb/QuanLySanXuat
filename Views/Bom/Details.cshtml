@@ -1,0 +1,64 @@
+@model WmsMes.Web.Domain.Entities.BOM
+@{
+    ViewData["Title"] = $"BOM {Model.Version}";
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Định mức vật tư</p>
+        <h2>BOM @Model.Version</h2>
+    </div>
+    <a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a>
+</section>
+
+<section class="ops-panel mt-3">
+    <dl class="row mb-0">
+        <dt class="col-sm-4 col-lg-3">Thành phẩm / Bán thành phẩm</dt>
+        <dd class="col-sm-8 col-lg-9"><code>@Model.Product?.Code</code> - @Model.Product?.Name</dd>
+        <dt class="col-sm-4 col-lg-3">Phiên bản</dt>
+        <dd class="col-sm-8 col-lg-9">@Model.Version</dd>
+        <dt class="col-sm-4 col-lg-3">Ngày hiệu lực</dt>
+        <dd class="col-sm-8 col-lg-9">@Model.EffectiveDate.ToVietnameseDate()</dd>
+        <dt class="col-sm-4 col-lg-3">Trạng thái</dt>
+        <dd class="col-sm-8 col-lg-9">
+            <span class="badge @(Model.IsActive ? "bg-success" : "bg-secondary")">
+                @(Model.IsActive ? "Đang kích hoạt" : "Chưa kích hoạt")
+            </span>
+        </dd>
+    </dl>
+</section>
+
+<section class="data-panel mt-3">
+    <div class="p-3">
+        <h3 class="h5 mb-0">Vật tư thành phần</h3>
+    </div>
+    <div class="table-responsive">
+        <table class="table data-table align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Mã SKU</th>
+                    <th>Tên vật tư</th>
+                    <th class="text-end">Định mức</th>
+                    <th class="text-end">Hao hụt (%)</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var item in Model.Items.OrderBy(x => x.ComponentProduct!.Code))
+            {
+                <tr>
+                    <td><code>@item.ComponentProduct?.Code</code></td>
+                    <td>@item.ComponentProduct?.Name</td>
+                    <td class="text-end fw-semibold">@item.QtyPer.ToVietnameseNumber("N4")</td>
+                    <td class="text-end">@item.ScrapPercent.ToVietnameseNumber()</td>
+                </tr>
+            }
+            @if (!Model.Items.Any())
+            {
+                <tr>
+                    <td colspan="4" class="text-center text-muted py-4">BOM chưa có vật tư thành phần.</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</section>

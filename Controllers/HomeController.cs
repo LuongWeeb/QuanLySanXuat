@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using WmsMes.Web.Data;
+using WmsMes.Web.Domain.Common;
+using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Models;
 using WmsMes.Web.Services;
@@ -33,6 +35,55 @@ public class HomeController : Controller
     public async Task<IActionResult> Index()
     {
         return View(await GetMetricsAsync());
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> Search(string? q)
+    {
+        if (string.IsNullOrWhiteSpace(q))
+        {
+            return RedirectToAction(nameof(Index));
+        }
+
+        var query = q.Trim();
+        var canViewWorkOrders = User.IsInRole("Admin") || User.IsInRole("Planner") || User.IsInRole("Manager");
+        var model = new SearchResultViewModel
+        {
+            Query = query,
+            Products = await _context.Products
+                .AsNoTracking()
+                .Where(product => product.Code.Contains(query) || product.Name.Contains(query))
+                .OrderBy(product => product.Code)
+                .ThenBy(product => product.Id)
+                .Take(10)
+                .ToListAsync(),
+            WorkOrders = canViewWorkOrders
+                ? await _context.WorkOrders
+                    .AsNoTracking()
+                    .Where(workOrder => workOrder.Code.Contains(query))
+                    .OrderBy(workOrder => workOrder.Code)
+                    .ThenBy(workOrder => workOrder.Id)
+                    .Take(10)
+                    .ToListAsync()
+                : new List<WorkOrder>(),
+            Lots = await _context.Lots
+                .AsNoTracking()
+                .Include(lot => lot.Product)
+                .Where(lot => lot.LotNo.Contains(query))
+                .OrderBy(lot => lot.LotNo)
+                .ThenBy(lot => lot.Id)
+                .Take(10)
+                .ToListAsync(),
+            Locations = await _context.Locations
+                .AsNoTracking()
+                .Where(location => location.Code.Contains(query))
+                .OrderBy(location => location.Code)
+                .ThenBy(location => location.Id)
+                .Take(10)
+                .ToListAsync()
+        };
+
+        return View(model);
     }
 
     [HttpGet]
@@ -220,7 +271,7 @@ public class HomeController : Controller
         var dailyActualOutput = new List<decimal>();
         for (var date = startDate; date <= today; date = date.AddDays(1))
         {
-            dailyLabels.Add(date.ToString("dd/MM"));
+            dailyLabels.Add(date.ToVietnameseDate());
             dailyPlannedOutput.Add(plannedRows
                 .Where(workOrder => workOrder.DueDate.Date == date)
                 .Sum(workOrder => workOrder.TargetQuantity));

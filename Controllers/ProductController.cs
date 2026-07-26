@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Repositories;
 using WmsMes.Web.Services;
@@ -11,19 +13,32 @@ public class ProductController : Controller
 {
     private readonly IProductService _productService;
     private readonly IGenericRepository<UnitOfMeasure> _uomRepository;
+    private readonly ApplicationDbContext _context;
 
     public ProductController(
         IProductService productService,
-        IGenericRepository<UnitOfMeasure> uomRepository)
+        IGenericRepository<UnitOfMeasure> uomRepository,
+        ApplicationDbContext context)
     {
         _productService = productService;
         _uomRepository = uomRepository;
+        _context = context;
     }
 
     public async Task<IActionResult> Index()
     {
         await PopulateUomsAsync();
-        var products = await _productService.GetAllProductsAsync();
+        var products = (await _productService.GetAllProductsAsync()).ToList();
+        var productIds = products.Select(product => product.Id).ToList();
+        ViewData["StockBalances"] = await _context.StockBalances
+            .Where(balance => productIds.Contains(balance.ProductId))
+            .Include(balance => balance.Location)
+            .Include(balance => balance.Lot)
+            .AsNoTracking()
+            .OrderBy(balance => balance.ProductId)
+            .ThenBy(balance => balance.Location!.Code)
+            .ThenBy(balance => balance.Lot!.LotNo)
+            .ToListAsync();
         return View(products);
     }
 
