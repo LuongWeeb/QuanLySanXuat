@@ -81,6 +81,9 @@ public class InventoryViewTests
         Assert.Contains("hidden.bs.modal", view);
         Assert.Contains("let cameraSession = 0", view);
         Assert.Contains("let scanHandled = false", view);
+        Assert.Contains("let cameraOperation = Promise.resolve()", view);
+        Assert.Contains("cameraOperation = cameraOperation.catch", view);
+        Assert.Contains("cleanupScanner", view);
         Assert.Contains("const scanner = new Html5Qrcode(\"reader\")", view);
         Assert.Contains("session !== cameraSession", view);
         Assert.Contains("camera === scanner", view);
@@ -114,6 +117,8 @@ public class InventoryViewTests
         Assert.Contains("candidates.length === 1", view);
         Assert.Contains("candidates.length > 1", view);
         Assert.Contains("option.hidden = false", view);
+        Assert.Contains("applyStockCriteria", view);
+        Assert.Contains("không tương thích với các mã đã quét trước", view);
     }
 
     [Theory]

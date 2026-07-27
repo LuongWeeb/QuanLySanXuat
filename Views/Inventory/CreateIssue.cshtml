@@ -205,6 +205,7 @@
         let camera = null;
         let cameraSession = 0;
         let scanHandled = false;
+        let cameraOperation = Promise.resolve();
 
         function currentRow() {
             return document.querySelector('#issue-lines [data-line-row]:last-child');
@@ -212,7 +213,11 @@
 
         function rowForSku() {
             let row = currentRow();
-            if (!row || row.querySelector('[data-stock-selection]')?.value) {
+            const hasPendingCriteria = row?.dataset.scanLotNo || row?.dataset.scanLocationCode;
+            const alreadyHasSku = Boolean(row?.dataset.scanProductCode);
+            const isManualCompletedRow =
+                row?.querySelector('[data-stock-selection]')?.value && !hasPendingCriteria;
+            if (!row || alreadyHasSku || isManualCompletedRow) {
                 document.getElementById('add-issue-line').click();
                 row = currentRow();
             }
@@ -249,13 +254,19 @@
                     option.dataset.locationCode?.toUpperCase() === row.dataset.scanLocationCode);
         }
 
-        function resolveStockSelection(row, scannedLabel) {
+        function applyStockCriteria(row) {
             const selection = row.querySelector('[data-stock-selection]');
             const stockOptions = Array.from(selection.options).filter(option => option.value);
             const candidates = stockOptions.filter(option => optionMatchesCriteria(option, row));
             stockOptions.forEach(option => option.hidden = !candidates.includes(option));
             selection.value = '';
             selection.dispatchEvent(new Event('change', { bubbles: true }));
+            return candidates;
+        }
+
+        function resolveStockSelection(row, scannedLabel) {
+            const selection = row.querySelector('[data-stock-selection]');
+            const candidates = applyStockCriteria(row);
 
             if (candidates.length === 1) {
                 selection.value = candidates[0].value;
@@ -290,9 +301,20 @@
             }
 
             if (isSku) {
+                const previousValue = row.dataset.scanProductCode;
                 row.dataset.scanProductCode = code;
-                delete row.dataset.scanLotNo;
-                delete row.dataset.scanLocationCode;
+                const hasCandidate = Array.from(selection.options)
+                    .some(option => optionMatchesCriteria(option, row));
+                if (!hasCandidate) {
+                    if (previousValue) row.dataset.scanProductCode = previousValue;
+                    else delete row.dataset.scanProductCode;
+                    applyStockCriteria(row);
+                    showScanNotification(
+                        `SKU ${rawCode.trim()} không tương thích với các mã đã quét trước.`,
+                        'warning');
+                    scannerInput.focus();
+                    return;
+                }
                 resolveStockSelection(row, rawCode.trim());
                 scannerInput.focus();
                 return;
@@ -319,6 +341,12 @@
             if (!hasCandidate) {
                 if (previousValue) row.dataset[criterionKey] = previousValue;
                 else delete row.dataset[criterionKey];
+                applyStockCriteria(row);
+                showScanNotification(
+                    `Mã ${rawCode.trim()} không tương thích với các mã đã quét trước.`,
+                    'warning');
+                scannerInput.focus();
+                return;
             }
             resolveStockSelection(row, rawCode.trim());
             scannerInput.focus();
@@ -332,7 +360,20 @@
             }
         });
 
-        cameraModal.addEventListener('shown.bs.modal', async () => {
+        async function cleanupScanner(scanner) {
+            if (!scanner) return;
+            if (scanner.isScanning) {
+                await scanner.stop().catch(() => {});
+            }
+            try {
+                scanner.clear();
+            } catch {
+                // Scanner may never have completed startup.
+            }
+            if (camera === scanner) camera = null;
+        }
+
+        cameraModal.addEventListener('shown.bs.modal', () => {
             if (typeof Html5Qrcode === 'undefined') {
                 showScanNotification('Không thể tải thư viện quét camera.', 'danger');
                 return;
@@ -340,40 +381,37 @@
 
             const session = ++cameraSession;
             scanHandled = false;
-            const scanner = new Html5Qrcode("reader");
-            camera = scanner;
-            try {
-                await scanner.start(
-                    { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 250, height: 250 } },
-                    decodedText => {
-                        if (session !== cameraSession || scanHandled) return;
-                        scanHandled = true;
-                        processScan(decodedText);
-                        bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
-                    },
-                    () => {});
-                if (session !== cameraSession) {
-                    if (scanner.isScanning) await scanner.stop().catch(() => {});
-                    scanner.clear();
-                    if (camera === scanner) camera = null;
-                }
-            } catch {
+            cameraOperation = cameraOperation.catch(() => {}).then(async () => {
                 if (session !== cameraSession) return;
-                showScanNotification('Không thể truy cập camera. Vui lòng kiểm tra quyền trình duyệt.', 'danger');
-                bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
-            }
+                const scanner = new Html5Qrcode("reader");
+                camera = scanner;
+                try {
+                    await scanner.start(
+                        { facingMode: 'environment' },
+                        { fps: 10, qrbox: { width: 250, height: 250 } },
+                        decodedText => {
+                            if (session !== cameraSession || scanHandled) return;
+                            scanHandled = true;
+                            processScan(decodedText);
+                            bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
+                        },
+                        () => {});
+                } catch {
+                    if (session === cameraSession) {
+                        showScanNotification('Không thể truy cập camera. Vui lòng kiểm tra quyền trình duyệt.', 'danger');
+                        bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
+                    }
+                }
+            });
         });
 
-        cameraModal.addEventListener('hidden.bs.modal', async () => {
+        cameraModal.addEventListener('hidden.bs.modal', () => {
             ++cameraSession;
-            const scanner = camera;
-            if (scanner?.isScanning) {
-                await scanner.stop().catch(() => {});
-            }
-            scanner?.clear();
-            if (camera === scanner) camera = null;
-            scannerInput.focus();
+            cameraOperation = cameraOperation.catch(() => {}).then(async () => {
+                const scanner = camera;
+                await cleanupScanner(scanner);
+                scannerInput.focus();
+            });
         });
     })();
 </script>

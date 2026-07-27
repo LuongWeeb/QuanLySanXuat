@@ -225,6 +225,7 @@
         let camera = null;
         let cameraSession = 0;
         let scanHandled = false;
+        let cameraOperation = Promise.resolve();
 
         function currentRow() {
             return document.querySelector('#receipt-lines [data-line-row]:last-child');
@@ -308,7 +309,20 @@
             }
         });
 
-        cameraModal.addEventListener('shown.bs.modal', async () => {
+        async function cleanupScanner(scanner) {
+            if (!scanner) return;
+            if (scanner.isScanning) {
+                await scanner.stop().catch(() => {});
+            }
+            try {
+                scanner.clear();
+            } catch {
+                // Scanner may never have completed startup.
+            }
+            if (camera === scanner) camera = null;
+        }
+
+        cameraModal.addEventListener('shown.bs.modal', () => {
             if (typeof Html5Qrcode === 'undefined') {
                 showScanNotification('Không thể tải thư viện quét camera.', 'danger');
                 return;
@@ -316,40 +330,37 @@
 
             const session = ++cameraSession;
             scanHandled = false;
-            const scanner = new Html5Qrcode("reader");
-            camera = scanner;
-            try {
-                await scanner.start(
-                    { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 250, height: 250 } },
-                    decodedText => {
-                        if (session !== cameraSession || scanHandled) return;
-                        scanHandled = true;
-                        processScan(decodedText);
-                        bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
-                    },
-                    () => {});
-                if (session !== cameraSession) {
-                    if (scanner.isScanning) await scanner.stop().catch(() => {});
-                    scanner.clear();
-                    if (camera === scanner) camera = null;
-                }
-            } catch {
+            cameraOperation = cameraOperation.catch(() => {}).then(async () => {
                 if (session !== cameraSession) return;
-                showScanNotification('Không thể truy cập camera. Vui lòng kiểm tra quyền trình duyệt.', 'danger');
-                bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
-            }
+                const scanner = new Html5Qrcode("reader");
+                camera = scanner;
+                try {
+                    await scanner.start(
+                        { facingMode: 'environment' },
+                        { fps: 10, qrbox: { width: 250, height: 250 } },
+                        decodedText => {
+                            if (session !== cameraSession || scanHandled) return;
+                            scanHandled = true;
+                            processScan(decodedText);
+                            bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
+                        },
+                        () => {});
+                } catch {
+                    if (session === cameraSession) {
+                        showScanNotification('Không thể truy cập camera. Vui lòng kiểm tra quyền trình duyệt.', 'danger');
+                        bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
+                    }
+                }
+            });
         });
 
-        cameraModal.addEventListener('hidden.bs.modal', async () => {
+        cameraModal.addEventListener('hidden.bs.modal', () => {
             ++cameraSession;
-            const scanner = camera;
-            if (scanner?.isScanning) {
-                await scanner.stop().catch(() => {});
-            }
-            scanner?.clear();
-            if (camera === scanner) camera = null;
-            scannerInput.focus();
+            cameraOperation = cameraOperation.catch(() => {}).then(async () => {
+                const scanner = camera;
+                await cleanupScanner(scanner);
+                scannerInput.focus();
+            });
         });
     })();
 </script>
