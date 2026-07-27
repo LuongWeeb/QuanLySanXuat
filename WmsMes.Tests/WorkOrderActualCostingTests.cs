@@ -38,6 +38,52 @@ public class WorkOrderActualCostingTests
         Assert.Equal(finishedLot.UnitPrice, receipt.ValuationRate);
     }
 
+    [Fact]
+    public async Task CompleteThenPassQc_PreservesCompletionActualCostOnLotAndReceipt()
+    {
+        await using var context = CreateContext();
+        var start = new DateTime(2026, 7, 27, 1, 0, 0, DateTimeKind.Utc);
+        await SeedCompletionAsync(
+            context,
+            finalQty: 2m,
+            laborRate: 1m,
+            machineRate: 0m,
+            startTime: start,
+            endTime: start.AddMinutes(60),
+            materialQty: 1m,
+            materialUnitPrice: 4.35m);
+        context.ChangeTracker.Clear();
+
+        Assert.True(await new WorkOrderService(context)
+            .CompleteWorkOrderAsync(WorkOrderId, "worker"));
+        var finishedLot = await context.Lots.SingleAsync(lot => lot.WorkOrderId == WorkOrderId);
+        Assert.True(await new QcService(context)
+            .SubmitQCInspectionAsync(
+                new QCInspection
+                {
+                    WorkOrderId = WorkOrderId,
+                    LotId = finishedLot.Id,
+                    Result = QCResult.PASS,
+                    Lines =
+                    {
+                        new QCInspectionLine
+                        {
+                            ParameterName = "Result",
+                            ValueInspected = "PASS"
+                        }
+                    }
+                },
+                "qc-user"));
+        context.ChangeTracker.Clear();
+
+        finishedLot = await context.Lots.SingleAsync(lot => lot.WorkOrderId == WorkOrderId);
+        var originalReceipt = await context.StockTransactions.SingleAsync(transaction =>
+            transaction.Type == TransactionType.Receipt &&
+            transaction.LotId == finishedLot.Id);
+        Assert.Equal(2.68m, finishedLot.UnitPrice);
+        Assert.Equal(finishedLot.UnitPrice, originalReceipt.ValuationRate);
+    }
+
     [Theory]
     [InlineData("missing")]
     [InlineData("zero")]
@@ -120,6 +166,44 @@ public class WorkOrderActualCostingTests
             transaction.LotId == finishedLot.Id);
         Assert.Equal(0m, finishedLot.UnitPrice);
         Assert.Equal(0m, receipt.ValuationRate);
+    }
+
+    [Fact]
+    public async Task CompleteWorkOrderAsync_WhenFinalStepsShareStepNumber_UsesHighestStepId()
+    {
+        await using var context = CreateContext();
+        await SeedCompletionAsync(
+            context,
+            finalQty: 2m,
+            laborRate: 0m,
+            machineRate: 0m,
+            startTime: null,
+            endTime: null,
+            materialQty: 1m,
+            materialUnitPrice: 8m);
+        context.WorkOrderSteps.Add(new WorkOrderStep
+        {
+            Id = 1001,
+            WorkOrderId = WorkOrderId,
+            StepNumber = 10,
+            StepName = "Corrected operation result",
+            WorkCenterId = 1,
+            QtyOK = 4m,
+            Status = WorkOrderStepStatus.Completed
+        });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        Assert.True(await new WorkOrderService(context)
+            .CompleteWorkOrderAsync(WorkOrderId, "worker"));
+
+        var finishedLot = await context.Lots.SingleAsync(lot => lot.WorkOrderId == WorkOrderId);
+        var receipt = await context.StockTransactions.SingleAsync(transaction =>
+            transaction.Type == TransactionType.Receipt &&
+            transaction.LotId == finishedLot.Id);
+        Assert.Equal(4m, finishedLot.Qty);
+        Assert.Equal(2m, finishedLot.UnitPrice);
+        Assert.Equal(4m, receipt.Qty);
     }
 
     private const int WorkOrderId = 100;

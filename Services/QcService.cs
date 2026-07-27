@@ -15,25 +15,22 @@ public class QcService : IQcService
     public const string QuarantineLocationCode = "QC-QUARANTINE";
 
     private readonly ApplicationDbContext _context;
-    private readonly ICostingService _costingService;
     private readonly IHubContext<QualityHub>? _qualityHub;
     private readonly IHubContext<InventoryHub>? _inventoryHub;
     private readonly ILogger<QcService> _logger;
 
-    public QcService(ApplicationDbContext context, ICostingService costingService)
-        : this(context, costingService, null, null)
+    public QcService(ApplicationDbContext context)
+        : this(context, null, null)
     {
     }
 
     public QcService(
         ApplicationDbContext context,
-        ICostingService costingService,
         IHubContext<QualityHub>? qualityHub,
         IHubContext<InventoryHub>? inventoryHub = null,
         ILogger<QcService>? logger = null)
     {
         _context = context;
-        _costingService = costingService;
         _qualityHub = qualityHub;
         _inventoryHub = inventoryHub;
         _logger = logger ?? NullLogger<QcService>.Instance;
@@ -77,11 +74,7 @@ public class QcService : IQcService
 
             await _context.QCInspections.AddAsync(inspection);
 
-            if (inspection.Result == QCResult.PASS)
-            {
-                lot.UnitPrice = await _costingService.CalculateProductionCostAsync(inspection.WorkOrderId);
-            }
-            else if (inspection.Result == QCResult.REJECT)
+            if (inspection.Result == QCResult.REJECT)
             {
                 await ConsolidateHoldInQuarantineAsync(
                     balances,

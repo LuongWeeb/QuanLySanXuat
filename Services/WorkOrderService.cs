@@ -266,7 +266,11 @@ public class WorkOrderService : IWorkOrderService
                 throw new InvalidOperationException("Work order product was not found.");
             }
 
-            var finalQty = workOrder.Steps.OrderByDescending(s => s.StepNumber).First().QtyOK;
+            var finalQty = workOrder.Steps
+                .OrderByDescending(step => step.StepNumber)
+                .ThenByDescending(step => step.Id)
+                .First()
+                .QtyOK;
             var reservations = await _context.MaterialReservations
                 .Include(reservation => reservation.Lot)
                 .Where(reservation => reservation.WorkOrderId == workOrder.Id)
