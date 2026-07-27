@@ -79,6 +79,11 @@ public class InventoryViewTests
         Assert.Contains("event.key === 'Enter'", view);
         Assert.Contains("shown.bs.modal", view);
         Assert.Contains("hidden.bs.modal", view);
+        Assert.Contains("let cameraSession = 0", view);
+        Assert.Contains("let scanHandled = false", view);
+        Assert.Contains("const scanner = new Html5Qrcode(\"reader\")", view);
+        Assert.Contains("session !== cameraSession", view);
+        Assert.Contains("camera === scanner", view);
     }
 
     [Fact]
@@ -103,6 +108,12 @@ public class InventoryViewTests
         Assert.Contains("data-location-code=", view);
         Assert.Contains("option.dataset.productCode", view);
         Assert.Contains("selection.dispatchEvent(new Event('change'", view);
+        Assert.Contains("row.dataset.scanProductCode", view);
+        Assert.Contains("row.dataset.scanLotNo", view);
+        Assert.Contains("row.dataset.scanLocationCode", view);
+        Assert.Contains("candidates.length === 1", view);
+        Assert.Contains("candidates.length > 1", view);
+        Assert.Contains("option.hidden = false", view);
     }
 
     [Theory]

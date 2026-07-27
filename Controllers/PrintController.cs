@@ -53,12 +53,12 @@ public class PrintController : ControllerBase
                         .AlignMiddle()
                         .Column(column =>
                         {
-                            column.Item().Text(location.Zone?.Warehouse?.Name ?? "WMS WAREHOUSE")
+                            column.Item().Text(Abbreviate(location.Zone?.Warehouse?.Name ?? "WMS WAREHOUSE", 36))
                                 .FontSize(8)
                                 .Bold();
-                            column.Item().Text($"Khu vực: {location.Zone?.Code ?? "N/A"}")
+                            column.Item().Text($"Khu vực: {Abbreviate(location.Zone?.Code ?? "N/A", 24)}")
                                 .FontSize(8);
-                            column.Item().PaddingTop(2, Unit.Millimetre).Text(location.Code)
+                            column.Item().PaddingTop(2, Unit.Millimetre).Text(Abbreviate(location.Code, 18))
                                 .FontSize(16)
                                 .Bold()
                                 .FontColor(Colors.Blue.Darken4);
@@ -67,10 +67,7 @@ public class PrintController : ControllerBase
             });
         });
 
-        return File(
-            document.GeneratePdf(),
-            "application/pdf",
-            $"Label_Loc_{location.Code}.pdf");
+        return File(document.GeneratePdf(), "application/pdf");
     }
 
     [HttpGet("lot/{id:int}")]
@@ -104,15 +101,15 @@ public class PrintController : ControllerBase
                         .AlignMiddle()
                         .Column(column =>
                         {
-                            column.Item().Text(lot.Product?.Name ?? "SẢN PHẨM")
+                            column.Item().Text(Abbreviate(lot.Product?.Name ?? "SẢN PHẨM", 36))
                                 .FontSize(8)
                                 .Bold();
-                            column.Item().Text($"SKU: {lot.Product?.Code ?? "N/A"}").FontSize(8);
+                            column.Item().Text($"SKU: {Abbreviate(lot.Product?.Code ?? "N/A", 25)}").FontSize(8);
                             column.Item().Text($"NSX: {lot.ManufactureDate?.ToString("dd/MM/yyyy") ?? "N/A"}")
                                 .FontSize(7);
                             column.Item().Text($"HSD: {lot.ExpiryDate?.ToString("dd/MM/yyyy") ?? "N/A"}")
                                 .FontSize(7);
-                            column.Item().PaddingTop(1, Unit.Millimetre).Text(lot.LotNo)
+                            column.Item().PaddingTop(1, Unit.Millimetre).Text(Abbreviate(lot.LotNo, 18))
                                 .FontSize(14)
                                 .Bold()
                                 .FontColor(Colors.Green.Darken4);
@@ -121,10 +118,7 @@ public class PrintController : ControllerBase
             });
         });
 
-        return File(
-            document.GeneratePdf(),
-            "application/pdf",
-            $"Label_Lot_{lot.LotNo}.pdf");
+        return File(document.GeneratePdf(), "application/pdf");
     }
 
     private static byte[] GenerateQrCode(string text)
@@ -133,5 +127,12 @@ public class PrintController : ControllerBase
         using var qrCodeData = qrGenerator.CreateQrCode(text, QRCodeGenerator.ECCLevel.Q);
         using var qrCode = new PngByteQRCode(qrCodeData);
         return qrCode.GetGraphic(20);
+    }
+
+    private static string Abbreviate(string value, int maximumLength)
+    {
+        return value.Length <= maximumLength
+            ? value
+            : $"{value[..(maximumLength - 1)]}…";
     }
 }

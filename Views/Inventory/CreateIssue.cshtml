@@ -160,8 +160,13 @@
         }
 
         function resetRow(row) {
-            row.querySelector('[data-stock-selection]').selectedIndex = 0;
+            const selection = row.querySelector('[data-stock-selection]');
+            selection.selectedIndex = 0;
+            Array.from(selection.options).forEach(option => option.hidden = false);
             row.querySelectorAll('input').forEach(input => input.value = '');
+            delete row.dataset.scanProductCode;
+            delete row.dataset.scanLotNo;
+            delete row.dataset.scanLocationCode;
         }
 
         document.getElementById('add-issue-line').addEventListener('click', () => {
@@ -198,6 +203,8 @@
         const scanStatus = document.getElementById('scan-status');
         const cameraModal = document.getElementById('cameraScanModal');
         let camera = null;
+        let cameraSession = 0;
+        let scanHandled = false;
 
         function currentRow() {
             return document.querySelector('#issue-lines [data-line-row]:last-child');
@@ -232,6 +239,43 @@
             oscillator.addEventListener('ended', () => context.close());
         }
 
+        function optionMatchesCriteria(option, row) {
+            return Boolean(option.value) &&
+                (!row.dataset.scanProductCode ||
+                    option.dataset.productCode?.toUpperCase() === row.dataset.scanProductCode) &&
+                (!row.dataset.scanLotNo ||
+                    option.dataset.lotNo?.toUpperCase() === row.dataset.scanLotNo) &&
+                (!row.dataset.scanLocationCode ||
+                    option.dataset.locationCode?.toUpperCase() === row.dataset.scanLocationCode);
+        }
+
+        function resolveStockSelection(row, scannedLabel) {
+            const selection = row.querySelector('[data-stock-selection]');
+            const stockOptions = Array.from(selection.options).filter(option => option.value);
+            const candidates = stockOptions.filter(option => optionMatchesCriteria(option, row));
+            stockOptions.forEach(option => option.hidden = !candidates.includes(option));
+            selection.value = '';
+            selection.dispatchEvent(new Event('change', { bubbles: true }));
+
+            if (candidates.length === 1) {
+                selection.value = candidates[0].value;
+                selection.dispatchEvent(new Event('change', { bubbles: true }));
+                showScanNotification(`Đã chọn duy nhất dòng tồn khớp: ${scannedLabel}`, 'success');
+                playBeep();
+                return;
+            }
+
+            if (candidates.length > 1) {
+                showScanNotification(
+                    `Có ${candidates.length} dòng tồn phù hợp. Hãy quét thêm Lot hoặc Vị trí.`,
+                    'warning');
+                playBeep();
+                return;
+            }
+
+            showScanNotification(`Không có dòng tồn khớp đồng thời các mã đã quét: ${scannedLabel}`, 'warning');
+        }
+
         function processScan(rawCode) {
             const code = rawCode.trim().toUpperCase();
             if (!code) return;
@@ -246,30 +290,37 @@
             }
 
             if (isSku) {
-                Array.from(selection.options).forEach(option => {
-                    option.hidden = Boolean(option.value) && option.dataset.productCode?.toUpperCase() !== code;
-                });
-                selection.value = '';
-                selection.dispatchEvent(new Event('change', { bubbles: true }));
-                showScanNotification(`Đã lọc tồn kho theo SKU: ${rawCode.trim()}. Hãy quét Lot hoặc Vị trí.`, 'success');
-                playBeep();
+                row.dataset.scanProductCode = code;
+                delete row.dataset.scanLotNo;
+                delete row.dataset.scanLocationCode;
+                resolveStockSelection(row, rawCode.trim());
                 scannerInput.focus();
                 return;
             }
 
-            const matchedOption = Array.from(selection.options).find(option =>
-                !option.hidden &&
-                (option.dataset.lotNo?.toUpperCase() === code ||
-                    option.dataset.locationCode?.toUpperCase() === code));
-
-            if (matchedOption) {
-                selection.value = matchedOption.value;
-                selection.dispatchEvent(new Event('change', { bubbles: true }));
-                showScanNotification(`Đã chọn dòng tồn khớp mã: ${rawCode.trim()}`, 'success');
-                playBeep();
-            } else {
+            const stockOptions = Array.from(selection.options).filter(option => option.value);
+            const matchesLot = stockOptions.some(option => option.dataset.lotNo?.toUpperCase() === code);
+            const matchesLocation = stockOptions.some(option => option.dataset.locationCode?.toUpperCase() === code);
+            if (!matchesLot && !matchesLocation) {
                 showScanNotification(`Không tìm thấy lô hàng hoặc vị trí phù hợp: ${rawCode.trim()}`, 'warning');
+                scannerInput.focus();
+                return;
             }
+            if (matchesLot && matchesLocation) {
+                showScanNotification(`Mã ${rawCode.trim()} trùng cả Lot và Vị trí; vui lòng quét mã phân biệt.`, 'warning');
+                scannerInput.focus();
+                return;
+            }
+
+            const criterionKey = matchesLot ? 'scanLotNo' : 'scanLocationCode';
+            const previousValue = row.dataset[criterionKey];
+            row.dataset[criterionKey] = code;
+            const hasCandidate = stockOptions.some(option => optionMatchesCriteria(option, row));
+            if (!hasCandidate) {
+                if (previousValue) row.dataset[criterionKey] = previousValue;
+                else delete row.dataset[criterionKey];
+            }
+            resolveStockSelection(row, rawCode.trim());
             scannerInput.focus();
         }
 
@@ -287,28 +338,41 @@
                 return;
             }
 
-            camera = new Html5Qrcode("reader");
+            const session = ++cameraSession;
+            scanHandled = false;
+            const scanner = new Html5Qrcode("reader");
+            camera = scanner;
             try {
-                await camera.start(
+                await scanner.start(
                     { facingMode: 'environment' },
                     { fps: 10, qrbox: { width: 250, height: 250 } },
                     decodedText => {
+                        if (session !== cameraSession || scanHandled) return;
+                        scanHandled = true;
                         processScan(decodedText);
                         bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
                     },
                     () => {});
+                if (session !== cameraSession) {
+                    if (scanner.isScanning) await scanner.stop().catch(() => {});
+                    scanner.clear();
+                    if (camera === scanner) camera = null;
+                }
             } catch {
+                if (session !== cameraSession) return;
                 showScanNotification('Không thể truy cập camera. Vui lòng kiểm tra quyền trình duyệt.', 'danger');
                 bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
             }
         });
 
         cameraModal.addEventListener('hidden.bs.modal', async () => {
-            if (camera?.isScanning) {
-                await camera.stop().catch(() => {});
+            ++cameraSession;
+            const scanner = camera;
+            if (scanner?.isScanning) {
+                await scanner.stop().catch(() => {});
             }
-            camera?.clear();
-            camera = null;
+            scanner?.clear();
+            if (camera === scanner) camera = null;
             scannerInput.focus();
         });
     })();

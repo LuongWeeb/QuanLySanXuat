@@ -223,6 +223,8 @@
         const scanStatus = document.getElementById('scan-status');
         const cameraModal = document.getElementById('cameraScanModal');
         let camera = null;
+        let cameraSession = 0;
+        let scanHandled = false;
 
         function currentRow() {
             return document.querySelector('#receipt-lines [data-line-row]:last-child');
@@ -312,28 +314,41 @@
                 return;
             }
 
-            camera = new Html5Qrcode("reader");
+            const session = ++cameraSession;
+            scanHandled = false;
+            const scanner = new Html5Qrcode("reader");
+            camera = scanner;
             try {
-                await camera.start(
+                await scanner.start(
                     { facingMode: 'environment' },
                     { fps: 10, qrbox: { width: 250, height: 250 } },
                     decodedText => {
+                        if (session !== cameraSession || scanHandled) return;
+                        scanHandled = true;
                         processScan(decodedText);
                         bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
                     },
                     () => {});
+                if (session !== cameraSession) {
+                    if (scanner.isScanning) await scanner.stop().catch(() => {});
+                    scanner.clear();
+                    if (camera === scanner) camera = null;
+                }
             } catch {
+                if (session !== cameraSession) return;
                 showScanNotification('Không thể truy cập camera. Vui lòng kiểm tra quyền trình duyệt.', 'danger');
                 bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
             }
         });
 
         cameraModal.addEventListener('hidden.bs.modal', async () => {
-            if (camera?.isScanning) {
-                await camera.stop().catch(() => {});
+            ++cameraSession;
+            const scanner = camera;
+            if (scanner?.isScanning) {
+                await scanner.stop().catch(() => {});
             }
-            camera?.clear();
-            camera = null;
+            scanner?.clear();
+            if (camera === scanner) camera = null;
             scannerInput.focus();
         });
     })();
