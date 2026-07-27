@@ -61,6 +61,51 @@ public class InventoryViewTests
     }
 
     [Theory]
+    [InlineData("CreateReceipt.cshtml")]
+    [InlineData("CreateIssue.cshtml")]
+    public void TransactionForms_ProvideHardwareAndCameraBarcodeScanning(string fileName)
+    {
+        var view = ReadInventoryView(fileName);
+
+        Assert.Contains("id=\"barcode-scanner-input\"", view);
+        Assert.Contains("id=\"btn-camera-scan\"", view);
+        Assert.Contains("id=\"cameraScanModal\"", view);
+        Assert.Contains("id=\"reader\"", view);
+        Assert.Contains("id=\"scan-status\"", view);
+        Assert.Contains("aria-live=\"polite\"", view);
+        Assert.Contains("https://unpkg.com/html5-qrcode", view);
+        Assert.Contains("new Html5Qrcode(\"reader\")", view);
+        Assert.Contains("processScan", view);
+        Assert.Contains("event.key === 'Enter'", view);
+        Assert.Contains("shown.bs.modal", view);
+        Assert.Contains("hidden.bs.modal", view);
+    }
+
+    [Fact]
+    public void ReceiptScanner_MapsSkuLotAndLocationToTheCurrentLine()
+    {
+        var view = ReadInventoryView("CreateReceipt.cshtml");
+
+        Assert.Contains("const productsMap", view);
+        Assert.Contains("const locationsMap", view);
+        Assert.Contains("[data-field=\"ProductId\"]", view);
+        Assert.Contains("[data-field=\"LotNo\"]", view);
+        Assert.Contains("[data-field=\"LocationId\"]", view);
+    }
+
+    [Fact]
+    public void IssueScanner_UsesExactStockMetadataAndUpdatesHiddenInputs()
+    {
+        var view = ReadInventoryView("CreateIssue.cshtml");
+
+        Assert.Contains("data-product-code=", view);
+        Assert.Contains("data-lot-no=", view);
+        Assert.Contains("data-location-code=", view);
+        Assert.Contains("option.dataset.productCode", view);
+        Assert.Contains("selection.dispatchEvent(new Event('change'", view);
+    }
+
+    [Theory]
     [InlineData(
         "Receipts.cshtml",
         "receipt.Status == DocumentStatus.Completed",

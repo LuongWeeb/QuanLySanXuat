@@ -10,6 +10,18 @@
 <section class="toolbar-row"><div><p class="eyebrow">Phiếu xuất kho</p><h2>Tạo Phiếu Xuất kho mới</h2></div></section>
 
 <div class="ops-panel mt-3">
+    <div class="card mb-3 border-primary">
+        <div class="card-body py-2">
+            <div class="input-group input-group-lg">
+                <span class="input-group-text"><i class="bi bi-qr-code-scan" aria-hidden="true"></i></span>
+                <input type="text" id="barcode-scanner-input" class="form-control" placeholder="Quét mã SKU, Số lô hoặc Vị trí..." aria-label="Mã SKU, số lô hoặc vị trí" autocomplete="off" autofocus />
+                <button type="button" class="btn btn-outline-primary" id="btn-camera-scan" data-bs-toggle="modal" data-bs-target="#cameraScanModal">
+                    <i class="bi bi-camera" aria-hidden="true"></i> Quét bằng Camera
+                </button>
+            </div>
+            <div id="scan-status" class="small text-muted mt-2" role="status" aria-live="polite">Sẵn sàng quét mã.</div>
+        </div>
+    </div>
     <form asp-action="CreateIssue" method="post">
         <div asp-validation-summary="ModelOnly" class="text-danger"></div>
         <div class="mb-3 col-md-6">
@@ -45,6 +57,7 @@
                                         var selected = balance.ProductId == line.ProductId && balance.LotId == line.LotId && balance.LocationId == line.LocationId;
                                         <option value="@balance.ProductId|@balance.LotId|@balance.LocationId"
                                                 data-product-id="@balance.ProductId" data-lot-id="@balance.LotId" data-location-id="@balance.LocationId"
+                                                data-product-code="@balance.Product?.Code" data-lot-no="@balance.Lot?.LotNo" data-location-code="@balance.Location?.Code"
                                                 selected="@(selected ? "selected" : null)">
                                             @balance.Product?.Code - @balance.Product?.Name | @balance.Lot?.LotNo | HSD: @(balance.Lot?.ExpiryDate?.ToVietnameseDate() ?? "FIFO") | @balance.Location?.Code | Có thể xuất: @balance.QtyAvailable.ToVietnameseNumber()
                                         </option>
@@ -75,6 +88,20 @@
     </form>
 </div>
 
+<div class="modal fade" id="cameraScanModal" tabindex="-1" aria-labelledby="cameraScanModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title fs-5" id="cameraScanModalLabel">Quét QR bằng Camera</h2>
+                <button type="button" class="btn-close" id="btn-close-camera" data-bs-dismiss="modal" aria-label="Đóng camera"></button>
+            </div>
+            <div class="modal-body">
+                <div id="reader" class="w-100"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <template id="issue-line-template">
     <tr data-line-row>
         <td>
@@ -83,7 +110,9 @@
                 <option value="">-- Chọn tồn kho khả dụng --</option>
                 @foreach (var balance in balances)
                 {
-                    <option value="@balance.ProductId|@balance.LotId|@balance.LocationId" data-product-id="@balance.ProductId" data-lot-id="@balance.LotId" data-location-id="@balance.LocationId">
+                    <option value="@balance.ProductId|@balance.LotId|@balance.LocationId"
+                            data-product-id="@balance.ProductId" data-lot-id="@balance.LotId" data-location-id="@balance.LocationId"
+                            data-product-code="@balance.Product?.Code" data-lot-no="@balance.Lot?.LotNo" data-location-code="@balance.Location?.Code">
                         @balance.Product?.Code - @balance.Product?.Name | @balance.Lot?.LotNo | HSD: @(balance.Lot?.ExpiryDate?.ToVietnameseDate() ?? "FIFO") | @balance.Location?.Code | Có thể xuất: @balance.QtyAvailable.ToVietnameseNumber()
                     </option>
                 }
@@ -159,5 +188,128 @@
         });
 
         reindexLines();
+    })();
+</script>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+    (() => {
+        const scannerInput = document.getElementById('barcode-scanner-input');
+        const scanStatus = document.getElementById('scan-status');
+        const cameraModal = document.getElementById('cameraScanModal');
+        let camera = null;
+
+        function currentRow() {
+            return document.querySelector('#issue-lines [data-line-row]:last-child');
+        }
+
+        function rowForSku() {
+            let row = currentRow();
+            if (!row || row.querySelector('[data-stock-selection]')?.value) {
+                document.getElementById('add-issue-line').click();
+                row = currentRow();
+            }
+            return row;
+        }
+
+        function showScanNotification(message, type = 'muted') {
+            scanStatus.textContent = message;
+            scanStatus.className = `small mt-2 text-${type}`;
+        }
+
+        function playBeep() {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            const context = new AudioContext();
+            const oscillator = context.createOscillator();
+            const gain = context.createGain();
+            oscillator.connect(gain);
+            gain.connect(context.destination);
+            gain.gain.value = 0.08;
+            oscillator.frequency.value = 880;
+            oscillator.start();
+            oscillator.stop(context.currentTime + 0.08);
+            oscillator.addEventListener('ended', () => context.close());
+        }
+
+        function processScan(rawCode) {
+            const code = rawCode.trim().toUpperCase();
+            if (!code) return;
+
+            const allOptions = Array.from(document.querySelectorAll('#issue-lines [data-stock-selection] option[value]'));
+            const isSku = allOptions.some(option => option.dataset.productCode?.toUpperCase() === code);
+            let row = isSku ? rowForSku() : currentRow();
+            const selection = row?.querySelector('[data-stock-selection]');
+            if (!selection) {
+                showScanNotification('Hãy thêm một dòng trước khi quét.', 'warning');
+                return;
+            }
+
+            if (isSku) {
+                Array.from(selection.options).forEach(option => {
+                    option.hidden = Boolean(option.value) && option.dataset.productCode?.toUpperCase() !== code;
+                });
+                selection.value = '';
+                selection.dispatchEvent(new Event('change', { bubbles: true }));
+                showScanNotification(`Đã lọc tồn kho theo SKU: ${rawCode.trim()}. Hãy quét Lot hoặc Vị trí.`, 'success');
+                playBeep();
+                scannerInput.focus();
+                return;
+            }
+
+            const matchedOption = Array.from(selection.options).find(option =>
+                !option.hidden &&
+                (option.dataset.lotNo?.toUpperCase() === code ||
+                    option.dataset.locationCode?.toUpperCase() === code));
+
+            if (matchedOption) {
+                selection.value = matchedOption.value;
+                selection.dispatchEvent(new Event('change', { bubbles: true }));
+                showScanNotification(`Đã chọn dòng tồn khớp mã: ${rawCode.trim()}`, 'success');
+                playBeep();
+            } else {
+                showScanNotification(`Không tìm thấy lô hàng hoặc vị trí phù hợp: ${rawCode.trim()}`, 'warning');
+            }
+            scannerInput.focus();
+        }
+
+        scannerInput.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                processScan(scannerInput.value);
+                scannerInput.value = '';
+            }
+        });
+
+        cameraModal.addEventListener('shown.bs.modal', async () => {
+            if (typeof Html5Qrcode === 'undefined') {
+                showScanNotification('Không thể tải thư viện quét camera.', 'danger');
+                return;
+            }
+
+            camera = new Html5Qrcode("reader");
+            try {
+                await camera.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 250, height: 250 } },
+                    decodedText => {
+                        processScan(decodedText);
+                        bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
+                    },
+                    () => {});
+            } catch {
+                showScanNotification('Không thể truy cập camera. Vui lòng kiểm tra quyền trình duyệt.', 'danger');
+                bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
+            }
+        });
+
+        cameraModal.addEventListener('hidden.bs.modal', async () => {
+            if (camera?.isScanning) {
+                await camera.stop().catch(() => {});
+            }
+            camera?.clear();
+            camera = null;
+            scannerInput.focus();
+        });
     })();
 </script>

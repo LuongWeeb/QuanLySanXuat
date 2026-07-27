@@ -1,7 +1,10 @@
+@using WmsMes.Web.Domain.Entities
 @using WmsMes.Web.ViewModels
 @model CreateReceiptViewModel
 @{
     ViewData["Title"] = "Tạo phiếu nhập kho";
+    var products = (IEnumerable<Product>)ViewBag.Products;
+    var locations = (IEnumerable<Location>)ViewBag.Locations;
 }
 
 <section class="toolbar-row">
@@ -12,6 +15,18 @@
 </section>
 
 <div class="ops-panel mt-3">
+    <div class="card mb-3 border-primary">
+        <div class="card-body py-2">
+            <div class="input-group input-group-lg">
+                <span class="input-group-text"><i class="bi bi-qr-code-scan" aria-hidden="true"></i></span>
+                <input type="text" id="barcode-scanner-input" class="form-control" placeholder="Quét mã SKU sản phẩm, Số lô hoặc Vị trí..." aria-label="Mã SKU, số lô hoặc vị trí" autocomplete="off" autofocus />
+                <button type="button" class="btn btn-outline-primary" id="btn-camera-scan" data-bs-toggle="modal" data-bs-target="#cameraScanModal">
+                    <i class="bi bi-camera" aria-hidden="true"></i> Quét bằng Camera
+                </button>
+            </div>
+            <div id="scan-status" class="small text-muted mt-2" role="status" aria-live="polite">Sẵn sàng quét mã.</div>
+        </div>
+    </div>
     <form asp-action="CreateReceipt" method="post">
         <div asp-validation-summary="ModelOnly" class="text-danger"></div>
         <div class="mb-3 col-md-6">
@@ -104,6 +119,20 @@
     </form>
 </div>
 
+<div class="modal fade" id="cameraScanModal" tabindex="-1" aria-labelledby="cameraScanModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title fs-5" id="cameraScanModalLabel">Quét QR bằng Camera</h2>
+                <button type="button" class="btn-close" id="btn-close-camera" data-bs-dismiss="modal" aria-label="Đóng camera"></button>
+            </div>
+            <div class="modal-body">
+                <div id="reader" class="w-100"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <template id="receipt-line-template">
     <tr data-line-row>
         <td>
@@ -180,5 +209,132 @@
         });
 
         reindexLines();
+    })();
+</script>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+    (() => {
+        const productsMap = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+            products.Select(product => new { id = product.Id, code = product.Code })));
+        const locationsMap = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+            locations.Select(location => new { id = location.Id, code = location.Code })));
+        const scannerInput = document.getElementById('barcode-scanner-input');
+        const scanStatus = document.getElementById('scan-status');
+        const cameraModal = document.getElementById('cameraScanModal');
+        let camera = null;
+
+        function currentRow() {
+            return document.querySelector('#receipt-lines [data-line-row]:last-child');
+        }
+
+        function rowForProduct() {
+            let row = currentRow();
+            const product = row?.querySelector('[data-field="ProductId"]');
+            const lot = row?.querySelector('[data-field="LotNo"]');
+            if (!row || product?.value || lot?.value) {
+                document.getElementById('add-receipt-line').click();
+                row = currentRow();
+            }
+            return row;
+        }
+
+        function showScanNotification(message, type = 'muted') {
+            scanStatus.textContent = message;
+            scanStatus.className = `small mt-2 text-${type}`;
+        }
+
+        function playBeep() {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            const context = new AudioContext();
+            const oscillator = context.createOscillator();
+            const gain = context.createGain();
+            oscillator.connect(gain);
+            gain.connect(context.destination);
+            gain.gain.value = 0.08;
+            oscillator.frequency.value = 880;
+            oscillator.start();
+            oscillator.stop(context.currentTime + 0.08);
+            oscillator.addEventListener('ended', () => context.close());
+        }
+
+        function processScan(rawCode) {
+            const code = rawCode.trim();
+            if (!code) return;
+
+            const location = locationsMap.find(item => item.code.toUpperCase() === code.toUpperCase());
+            if (location) {
+                const select = currentRow()?.querySelector('[data-field="LocationId"]');
+                if (select) {
+                    select.value = String(location.id);
+                    showScanNotification(`Đã chọn vị trí: ${location.code}`, 'success');
+                    playBeep();
+                }
+                scannerInput.focus();
+                return;
+            }
+
+            const product = productsMap.find(item => item.code.toUpperCase() === code.toUpperCase());
+            if (product) {
+                const select = rowForProduct()?.querySelector('[data-field="ProductId"]');
+                if (select) {
+                    select.value = String(product.id);
+                    showScanNotification(`Đã thêm sản phẩm: ${product.code}`, 'success');
+                    playBeep();
+                }
+                scannerInput.focus();
+                return;
+            }
+
+            const lotInput = currentRow()?.querySelector('[data-field="LotNo"]');
+            if (lotInput) {
+                lotInput.value = code;
+                showScanNotification(`Đã điền số lô: ${code}`, 'info');
+                playBeep();
+            } else {
+                showScanNotification('Hãy thêm một dòng trước khi quét số lô.', 'warning');
+            }
+            scannerInput.focus();
+        }
+
+        scannerInput.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                processScan(scannerInput.value);
+                scannerInput.value = '';
+            }
+        });
+
+        cameraModal.addEventListener('shown.bs.modal', async () => {
+            if (typeof Html5Qrcode === 'undefined') {
+                showScanNotification('Không thể tải thư viện quét camera.', 'danger');
+                return;
+            }
+
+            camera = new Html5Qrcode("reader");
+            try {
+                await camera.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 250, height: 250 } },
+                    decodedText => {
+                        processScan(decodedText);
+                        bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
+                    },
+                    () => {});
+            } catch {
+                showScanNotification('Không thể truy cập camera. Vui lòng kiểm tra quyền trình duyệt.', 'danger');
+                bootstrap.Modal.getOrCreateInstance(cameraModal).hide();
+            }
+        });
+
+        cameraModal.addEventListener('hidden.bs.modal', async () => {
+            if (camera?.isScanning) {
+                await camera.stop().catch(() => {});
+            }
+            camera?.clear();
+            camera = null;
+            scannerInput.focus();
+        });
     })();
 </script>
