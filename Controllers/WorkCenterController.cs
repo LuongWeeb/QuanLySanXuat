@@ -32,17 +32,23 @@ public class WorkCenterController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(WorkCenterCreateInputModel input)
     {
-        var code = input.Code.Trim();
-        if (await _context.WorkCenters.AnyAsync(x => x.Code == code))
+        var code = input.Code?.Trim();
+        var name = input.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(code))
+            ModelState.AddModelError(nameof(input.Code), "Mã trạm là bắt buộc.");
+        else if (await _context.WorkCenters.AnyAsync(x => x.Code == code))
             ModelState.AddModelError(nameof(input.Code), "Mã trạm đã tồn tại.");
+
+        if (string.IsNullOrWhiteSpace(name))
+            ModelState.AddModelError(nameof(input.Name), "Tên trạm là bắt buộc.");
 
         if (!ModelState.IsValid)
             return View(input);
 
         var workCenter = new WorkCenter
         {
-            Code = code,
-            Name = input.Name.Trim(),
+            Code = code!,
+            Name = name!,
             HourlyLaborRate = RoundCurrency(input.HourlyLaborRate),
             HourlyMachineRate = RoundCurrency(input.HourlyMachineRate),
             IsActive = true

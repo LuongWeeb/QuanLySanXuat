@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
@@ -12,6 +13,57 @@ namespace WmsMes.Tests;
 
 public class WorkCenterControllerTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreatePost_WithMissingCode_ReturnsViewWithoutPersisting(string? code)
+    {
+        await using var context = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"WorkCenter_MissingCode_{Guid.NewGuid()}")
+                .Options);
+
+        var result = await Controller(context).Create(new WorkCenterCreateInputModel
+        {
+            Code = code!,
+            Name = "Cost center",
+            HourlyLaborRate = 1,
+            HourlyMachineRate = 1
+        });
+
+        Assert.IsType<ViewResult>(result);
+        Assert.Empty(await context.WorkCenters.ToListAsync());
+    }
+
+    [Fact]
+    public void RateInputs_RejectValuesAboveDecimal18_2Maximum()
+    {
+        const decimal overMaximum = 10_000_000_000_000_000m;
+        var cases = new (object Input, string PropertyName)[]
+        {
+            (new WorkCenterCreateInputModel { Code = "WC", Name = "Work center", HourlyLaborRate = overMaximum }, nameof(WorkCenterCreateInputModel.HourlyLaborRate)),
+            (new WorkCenterCreateInputModel { Code = "WC", Name = "Work center", HourlyMachineRate = overMaximum }, nameof(WorkCenterCreateInputModel.HourlyMachineRate)),
+            (new WorkCenterRateInputModel { Id = 1, HourlyLaborRate = overMaximum }, nameof(WorkCenterRateInputModel.HourlyLaborRate)),
+            (new WorkCenterRateInputModel { Id = 1, HourlyMachineRate = overMaximum }, nameof(WorkCenterRateInputModel.HourlyMachineRate))
+        };
+
+        foreach (var testCase in cases)
+        {
+            var validationResults = new List<ValidationResult>();
+
+            var valid = Validator.TryValidateObject(
+                testCase.Input,
+                new ValidationContext(testCase.Input),
+                validationResults,
+                validateAllProperties: true);
+
+            Assert.False(valid);
+            Assert.Contains(validationResults,
+                result => result.MemberNames.Contains(testCase.PropertyName));
+        }
+    }
+
     [Fact]
     public async Task CreatePost_RoundsRatesAndPersistsWorkCenter()
     {
