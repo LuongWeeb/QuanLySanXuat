@@ -47,6 +47,8 @@ public class ProductController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(Product product)
     {
+        product.StandardCost = Math.Round(product.StandardCost, 2, MidpointRounding.AwayFromZero);
+
         if (!ModelState.IsValid)
         {
             TempData["StatusMessage"] = "Dữ liệu sản phẩm chưa hợp lệ.";
