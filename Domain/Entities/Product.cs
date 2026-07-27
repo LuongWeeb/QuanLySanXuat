@@ -33,6 +33,9 @@ public class Product
     [Column(TypeName = "decimal(18,2)")]
     public decimal MaxStock { get; set; }
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal StandardCost { get; set; } = 0m;
+
     public bool IsLotTracked { get; set; }
 
     public int? ShelfLifeDays { get; set; }

@@ -783,7 +783,7 @@ public class BomControllerTests
             await competitor.OpenAsync(cancellationToken);
             await using var command = competitor.CreateCommand();
             command.CommandText =
-                """INSERT INTO "BOMs" ("EffectiveDate", "IsActive", "ProductId", "Version") VALUES ($date, 0, $productId, $version);""";
+                """INSERT INTO "BOMs" ("EffectiveDate", "IsActive", "ProductId", "Version", "TotalMaterialCost", "TotalOperationCost", "TotalStandardCost") VALUES ($date, 0, $productId, $version, 0, 0, 0);""";
             command.Parameters.AddWithValue("$date", new DateTime(2026, 7, 31));
             command.Parameters.AddWithValue("$productId", productId);
             command.Parameters.AddWithValue("$version", version);

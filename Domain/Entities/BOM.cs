@@ -23,5 +23,14 @@ public class BOM
     [Required]
     public bool IsActive { get; set; } = true;
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal TotalMaterialCost { get; set; } = 0m;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal TotalOperationCost { get; set; } = 0m;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal TotalStandardCost { get; set; } = 0m;
+
     public virtual ICollection<BOMItem> Items { get; set; } = new List<BOMItem>();
 }
