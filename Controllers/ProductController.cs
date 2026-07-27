@@ -11,6 +11,8 @@ namespace WmsMes.Web.Controllers;
 [Authorize]
 public class ProductController : Controller
 {
+    private const decimal MaximumStandardCost = 9_999_999_999_999_999.99m;
+
     private readonly IProductService _productService;
     private readonly IGenericRepository<UnitOfMeasure> _uomRepository;
     private readonly ApplicationDbContext _context;
@@ -47,12 +49,18 @@ public class ProductController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(Product product)
     {
+        if (product.StandardCost is < 0m or > MaximumStandardCost)
+        {
+            ModelState.AddModelError(
+                nameof(product.StandardCost),
+                $"Giá vốn tiêu chuẩn phải từ 0 đến {MaximumStandardCost:0.00}.");
+        }
+
         product.StandardCost = Math.Round(product.StandardCost, 2, MidpointRounding.AwayFromZero);
 
         if (!ModelState.IsValid)
         {
-            TempData["StatusMessage"] = "Dữ liệu sản phẩm chưa hợp lệ.";
-            return RedirectToAction(nameof(Index));
+            return await Index();
         }
 
         try

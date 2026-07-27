@@ -13,6 +13,44 @@ namespace WmsMes.Tests;
 
 public class ProductControllerTests
 {
+    [Theory]
+    [InlineData(-0.01)]
+    [InlineData(10_000_000_000_000_000)]
+    public async Task CreatePost_WithOutOfRangeStandardCost_ReturnsViewWithoutPersisting(
+        decimal standardCost)
+    {
+        await using var context = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"Product_InvalidCost_{Guid.NewGuid()}")
+                .Options);
+        context.UnitOfMeasures.Add(new UnitOfMeasure { Id = 1, Code = "EA", Name = "Each" });
+        await context.SaveChangesAsync();
+        var productRepository = new GenericRepository<Product>(context);
+        var uomRepository = new GenericRepository<UnitOfMeasure>(context);
+        var controller = new ProductController(
+            new ProductService(productRepository, uomRepository),
+            uomRepository,
+            context)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        controller.TempData = new TempDataDictionary(
+            controller.HttpContext,
+            Mock.Of<ITempDataProvider>());
+
+        var result = await controller.Create(new Product
+        {
+            Code = "FG-INVALID-COST",
+            Name = "Invalid cost product",
+            BaseUomId = 1,
+            StandardCost = standardCost
+        });
+
+        Assert.IsType<ViewResult>(result);
+        Assert.True(controller.ModelState.ContainsKey(nameof(Product.StandardCost)));
+        Assert.Empty(await context.Products.ToListAsync());
+    }
+
     [Fact]
     public async Task CreatePost_RoundsAndPersistsStandardCost()
     {
