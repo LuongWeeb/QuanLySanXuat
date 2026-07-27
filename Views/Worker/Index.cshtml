@@ -4,10 +4,20 @@
     ViewData["Title"] = "Trạm vận hành sản xuất";
 }
 
+<div class="card mb-4 border-warning">
+    <div class="card-body py-2">
+        <div class="input-group input-group-lg">
+            <span class="input-group-text bg-warning text-dark"><i class="bi bi-qr-code-scan" aria-hidden="true"></i></span>
+            <input type="text" id="worker-scanner-input" class="form-control" placeholder="Quét mã Lệnh sản xuất để Bắt đầu hoặc Hoàn thành nhanh..." aria-label="Mã lệnh sản xuất" autocomplete="off" autofocus />
+        </div>
+        <div id="worker-scan-status" class="small text-muted mt-2" role="status" aria-live="polite">Sẵn sàng quét lệnh sản xuất.</div>
+    </div>
+</div>
+
 <section class="worker-grid">
     @foreach (var step in Model)
     {
-        <article class="worker-card">
+        <article class="worker-card" data-work-order-code="@step.WorkOrder?.Code" data-step-status="@step.Status">
             <div>
                 <div class="d-flex justify-content-between gap-3">
                     <div>
@@ -44,3 +54,66 @@
         </article>
     }
 </section>
+
+<script>
+    (() => {
+        const scannerInput = document.getElementById('worker-scanner-input');
+        const scanStatus = document.getElementById('worker-scan-status');
+        const pendingStatus = '@WorkOrderStepStatus.Pending.ToString()';
+        const inProgressStatus = '@WorkOrderStepStatus.InProgress.ToString()';
+
+        function showStatus(message, type = 'muted') {
+            scanStatus.textContent = message;
+            scanStatus.className = `small mt-2 text-${type}`;
+        }
+
+        function processWorkerScan(rawCode) {
+            const workOrderCode = rawCode.trim();
+            if (!workOrderCode) return;
+
+            const matchedCard = Array.from(document.querySelectorAll('.worker-card'))
+                .find(card => card.dataset.workOrderCode?.toUpperCase() === workOrderCode.toUpperCase());
+
+            if (!matchedCard) {
+                showStatus(`Không tìm thấy lệnh sản xuất: ${workOrderCode}`, 'warning');
+                scannerInput.focus();
+                return;
+            }
+
+            matchedCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            matchedCard.classList.add('border', 'border-3', 'border-warning');
+            window.setTimeout(
+                () => matchedCard.classList.remove('border', 'border-3', 'border-warning'),
+                2000);
+
+            if (matchedCard.dataset.stepStatus === pendingStatus) {
+                const startForm = matchedCard.querySelector('form[action*="Start"]');
+                if (startForm) {
+                    showStatus(`Đang bắt đầu lệnh: ${workOrderCode}`, 'success');
+                    startForm.requestSubmit();
+                    return;
+                }
+            }
+
+            if (matchedCard.dataset.stepStatus === inProgressStatus) {
+                const qtyInput = matchedCard.querySelector('input[name="qtyOk"]');
+                if (qtyInput) {
+                    qtyInput.focus();
+                    showStatus(`Nhập số lượng đạt cho lệnh: ${workOrderCode}`, 'success');
+                    return;
+                }
+            }
+
+            showStatus(`Công đoạn của lệnh ${workOrderCode} không thể thao tác ở trạng thái hiện tại.`, 'warning');
+            scannerInput.focus();
+        }
+
+        scannerInput.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                processWorkerScan(scannerInput.value);
+                scannerInput.value = '';
+            }
+        });
+    })();
+</script>
