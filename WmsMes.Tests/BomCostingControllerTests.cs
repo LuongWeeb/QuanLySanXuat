@@ -87,6 +87,29 @@ public class BomCostingControllerTests
     }
 
     [Fact]
+    public async Task Create_WhenMultipleActiveRoutingsExist_UsesHighestRoutingId()
+    {
+        await using var context = Context();
+        var parent = Product("FG", ProductType.FinishedGood);
+        var component = Product("RM", ProductType.RawMaterial);
+        var olderCenter = WorkCenter("OLDER-WC", laborRate: 60m, machineRate: 0m);
+        var newerCenter = WorkCenter("NEWER-WC", laborRate: 90m, machineRate: 0m);
+        var olderRouting = Routing(parent, isActive: true, Step(olderCenter, minutes: 60m));
+        context.Products.AddRange(parent, component);
+        context.Routings.Add(olderRouting);
+        await context.SaveChangesAsync();
+        var newerRouting = Routing(parent, isActive: true, Step(newerCenter, minutes: 60m));
+        context.Routings.Add(newerRouting);
+        await context.SaveChangesAsync();
+        Assert.True(newerRouting.Id > olderRouting.Id);
+
+        await Controller(context).Create(Input(parent, component));
+
+        context.ChangeTracker.Clear();
+        Assert.Equal(90m, (await context.BOMs.SingleAsync()).TotalOperationCost);
+    }
+
+    [Fact]
     public async Task Create_RoundsEachCostAwayFromZeroBeforeSavingTotal()
     {
         await using var context = Context();

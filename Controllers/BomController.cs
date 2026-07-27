@@ -359,6 +359,7 @@ public class BomController : Controller
         var activeRouting = await _context.Routings
             .Include(x => x.Steps)
                 .ThenInclude(x => x.WorkCenter)
+            .OrderByDescending(x => x.Id)
             .FirstOrDefaultAsync(x => x.ProductId == bom.ProductId && x.IsActive);
         if (activeRouting is not null)
         {
