@@ -1,0 +1,49 @@
+@model WmsMes.Web.ViewModels.WorkCenterCreateInputModel
+@{
+    ViewData["Title"] = "Thêm trạm sản xuất";
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Cấu hình sản xuất</p>
+        <h2>Thêm trạm sản xuất</h2>
+    </div>
+</section>
+
+<div class="ops-panel mt-3">
+    <form asp-action="Create" method="post">
+        <div asp-validation-summary="ModelOnly" class="text-danger mb-3" role="alert"></div>
+        <div class="row">
+            <div class="col-md-4 mb-3">
+                <label asp-for="Code" class="form-label">Mã trạm</label>
+                <input asp-for="Code" class="form-control" maxlength="50" required />
+                <span asp-validation-for="Code" class="text-danger"></span>
+            </div>
+            <div class="col-md-8 mb-3">
+                <label asp-for="Name" class="form-label">Tên trạm</label>
+                <input asp-for="Name" class="form-control" maxlength="150" required />
+                <span asp-validation-for="Name" class="text-danger"></span>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label asp-for="HourlyLaborRate" class="form-label">Chi phí nhân công mỗi giờ (VNĐ)</label>
+                <input asp-for="HourlyLaborRate" type="number" class="form-control" min="0" step="0.01" required />
+                <span asp-validation-for="HourlyLaborRate" class="text-danger"></span>
+            </div>
+            <div class="col-md-6 mb-3">
+                <label asp-for="HourlyMachineRate" class="form-label">Chi phí máy móc mỗi giờ (VNĐ)</label>
+                <input asp-for="HourlyMachineRate" type="number" class="form-control" min="0" step="0.01" required />
+                <span asp-validation-for="HourlyMachineRate" class="text-danger"></span>
+            </div>
+        </div>
+        <div class="d-flex gap-2 mt-2">
+            <button type="submit" class="btn btn-primary">Lưu trạm</button>
+            <a class="btn btn-outline-secondary" asp-action="Index">Hủy</a>
+        </div>
+    </form>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

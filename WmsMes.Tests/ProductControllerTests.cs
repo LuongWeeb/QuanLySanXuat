@@ -14,13 +14,16 @@ namespace WmsMes.Tests;
 public class ProductControllerTests
 {
     [Fact]
-    public async Task CreatePost_RoundsAndPassesStandardCostToProductServiceForPersistence()
+    public async Task CreatePost_RoundsAndPersistsStandardCost()
     {
         await using var context = new ApplicationDbContext(
             new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase($"Product_Create_{Guid.NewGuid()}")
                 .Options);
-        var productService = new Mock<IProductService>();
+        context.UnitOfMeasures.Add(new UnitOfMeasure { Id = 1, Code = "EA", Name = "Each" });
+        await context.SaveChangesAsync();
+        var productRepository = new GenericRepository<Product>(context);
+        var uomRepository = new GenericRepository<UnitOfMeasure>(context);
         var product = new Product
         {
             Code = "FG-COST",
@@ -28,12 +31,9 @@ public class ProductControllerTests
             BaseUomId = 1,
             StandardCost = 125_000.505m
         };
-        productService.Setup(service => service.CreateProductAsync(
-                It.Is<Product>(candidate => candidate.StandardCost == 125_000.51m)))
-            .ReturnsAsync(true);
         var controller = new ProductController(
-            productService.Object,
-            Mock.Of<IGenericRepository<UnitOfMeasure>>(),
+            new ProductService(productRepository, uomRepository),
+            uomRepository,
             context)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
@@ -45,7 +45,7 @@ public class ProductControllerTests
         var result = await controller.Create(product);
 
         Assert.IsType<RedirectToActionResult>(result);
-        productService.Verify(service => service.CreateProductAsync(
-            It.Is<Product>(candidate => candidate.StandardCost == 125_000.51m)), Times.Once);
+        var persisted = Assert.Single(await context.Products.ToListAsync());
+        Assert.Equal(125_000.51m, persisted.StandardCost);
     }
 }
