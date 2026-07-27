@@ -28,6 +28,33 @@
     </dl>
 </section>
 
+<section class="row g-3 mt-1" aria-label="Giá thành định mức BOM">
+    <div class="col-md-4">
+        <div class="card bg-light h-100">
+            <div class="card-body">
+                <h3 class="h6">Tổng chi phí vật tư định mức</h3>
+                <p class="h4 mb-0">@Model.TotalMaterialCost.ToVietnameseNumber() VNĐ</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card bg-light h-100">
+            <div class="card-body">
+                <h3 class="h6">Tổng chi phí vận hành định mức</h3>
+                <p class="h4 mb-0">@Model.TotalOperationCost.ToVietnameseNumber() VNĐ</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card bg-primary text-white h-100">
+            <div class="card-body">
+                <h3 class="h6">TỔNG GIÁ THÀNH ĐỊNH MỨC TIÊU CHUẨN</h3>
+                <p class="h4 mb-0">@Model.TotalStandardCost.ToVietnameseNumber() VNĐ</p>
+            </div>
+        </div>
+    </div>
+</section>
+
 <section class="data-panel mt-3">
     <div class="p-3">
         <h3 class="h5 mb-0">Vật tư thành phần</h3>

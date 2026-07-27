@@ -40,6 +40,19 @@ public class BomViewTests
     }
 
     [Fact]
+    public void Details_ShowsVietnameseFormattedStandardCostSummary()
+    {
+        var view = ReadView("Details.cshtml");
+
+        Assert.Contains("Tổng chi phí vật tư định mức", view);
+        Assert.Contains("@Model.TotalMaterialCost.ToVietnameseNumber() VNĐ", view);
+        Assert.Contains("Tổng chi phí vận hành định mức", view);
+        Assert.Contains("@Model.TotalOperationCost.ToVietnameseNumber() VNĐ", view);
+        Assert.Contains("TỔNG GIÁ THÀNH ĐỊNH MỨC TIÊU CHUẨN", view);
+        Assert.Contains("@Model.TotalStandardCost.ToVietnameseNumber() VNĐ", view);
+    }
+
+    [Fact]
     public void Create_UsesIndexedAccessibleDynamicRowsAndAlwaysRetainsOne()
     {
         var view = ReadView("Create.cshtml");

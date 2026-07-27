@@ -182,6 +182,7 @@ public class BomController : Controller
 
             _context.BOMs.Add(bom);
             await _context.SaveChangesAsync();
+            await CalculateAndSaveBomCostAsync(bom.Id);
             if (transaction is not null)
                 await transaction.CommitAsync();
         }
@@ -293,6 +294,7 @@ public class BomController : Controller
                     await _context.SaveChangesAsync();
 
                 bom.IsActive = true;
+                await CalculateAndSaveBomCostAsync(bom.Id);
             }
 
             await _context.SaveChangesAsync();
@@ -324,6 +326,66 @@ public class BomController : Controller
             ? $"Đã kích hoạt BOM {bom.Version}."
             : $"Đã ngừng kích hoạt BOM {bom.Version}.";
         return RedirectToAction(nameof(Index));
+    }
+
+    private async Task CalculateAndSaveBomCostAsync(int bomId)
+    {
+        var bom = await _context.BOMs
+            .Include(x => x.Items)
+            .SingleOrDefaultAsync(x => x.Id == bomId);
+        if (bom is null)
+            return;
+
+        var materialCost = 0m;
+        foreach (var item in bom.Items)
+        {
+            var positiveLotPrices = await _context.Lots
+                .Where(x => x.ProductId == item.ComponentProductId && x.Qty > 0m)
+                .Select(x => x.UnitPrice)
+                .ToListAsync();
+            var unitPrice = positiveLotPrices.Count > 0
+                ? positiveLotPrices.Average()
+                : await _context.Products
+                    .Where(x => x.Id == item.ComponentProductId)
+                    .Select(x => x.StandardCost)
+                    .SingleOrDefaultAsync();
+
+            materialCost += item.QtyPer
+                * (1m + item.ScrapPercent / 100m)
+                * unitPrice;
+        }
+
+        var operationCost = 0m;
+        var activeRouting = await _context.Routings
+            .Include(x => x.Steps)
+                .ThenInclude(x => x.WorkCenter)
+            .FirstOrDefaultAsync(x => x.ProductId == bom.ProductId && x.IsActive);
+        if (activeRouting is not null)
+        {
+            foreach (var step in activeRouting.Steps)
+            {
+                if (step.WorkCenter is null)
+                    continue;
+
+                operationCost += step.StandardTimeMinutes / 60m
+                    * (step.WorkCenter.HourlyLaborRate + step.WorkCenter.HourlyMachineRate);
+            }
+        }
+
+        bom.TotalMaterialCost = Math.Round(
+            materialCost,
+            2,
+            MidpointRounding.AwayFromZero);
+        bom.TotalOperationCost = Math.Round(
+            operationCost,
+            2,
+            MidpointRounding.AwayFromZero);
+        bom.TotalStandardCost = Math.Round(
+            bom.TotalMaterialCost + bom.TotalOperationCost,
+            2,
+            MidpointRounding.AwayFromZero);
+
+        await _context.SaveChangesAsync();
     }
 
     private async Task<IActionResult> BomConflictResultAsync(
