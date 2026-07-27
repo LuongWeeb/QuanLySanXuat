@@ -243,6 +243,7 @@ public class WorkOrderService : IWorkOrderService
         {
             var workOrder = await _context.WorkOrders
                 .Include(w => w.Steps)
+                    .ThenInclude(step => step.WorkCenter)
                 .FirstOrDefaultAsync(w => w.Id == workOrderId);
             if (workOrder == null)
             {
@@ -266,6 +267,52 @@ public class WorkOrderService : IWorkOrderService
             }
 
             var finalQty = workOrder.Steps.OrderByDescending(s => s.StepNumber).First().QtyOK;
+            var reservations = await _context.MaterialReservations
+                .Include(reservation => reservation.Lot)
+                .Where(reservation => reservation.WorkOrderId == workOrder.Id)
+                .ToListAsync();
+            var actualMaterialCost = reservations.Sum(reservation =>
+                reservation.QtyReserved *
+                (reservation.Lot?.UnitPrice
+                    ?? throw new InvalidOperationException(
+                        "The backflush valuation lot no longer exists.")));
+
+            var activeRouting = await _context.Routings
+                .AsNoTracking()
+                .Include(routing => routing.Steps)
+                .Where(routing => routing.ProductId == workOrder.ProductId && routing.IsActive)
+                .OrderByDescending(routing => routing.Id)
+                .FirstOrDefaultAsync();
+            var actualOperationCost = 0m;
+            foreach (var step in workOrder.Steps)
+            {
+                if (step.WorkCenter is null)
+                {
+                    continue;
+                }
+
+                var durationMinutes = step.StartTime.HasValue && step.EndTime.HasValue
+                    ? (decimal)(step.EndTime.Value - step.StartTime.Value).TotalMinutes
+                    : 0m;
+                if (durationMinutes <= 0m)
+                {
+                    var standardTimeMinutes = activeRouting?.Steps
+                        .Where(routingStep => routingStep.StepNumber == step.StepNumber)
+                        .Select(routingStep => routingStep.StandardTimeMinutes)
+                        .FirstOrDefault() ?? 0m;
+                    durationMinutes = standardTimeMinutes > 0m
+                        ? standardTimeMinutes
+                        : 0m;
+                }
+
+                actualOperationCost += durationMinutes / 60m *
+                    (step.WorkCenter.HourlyLaborRate + step.WorkCenter.HourlyMachineRate);
+            }
+
+            var totalActualCost = actualMaterialCost + actualOperationCost;
+            var unitActualCost = finalQty > 0m
+                ? Math.Round(totalActualCost / finalQty, 2, MidpointRounding.AwayFromZero)
+                : 0m;
             var qcLocationId = await _context.Locations
                 .Where(location => location.Code == FinishedGoodsQcLocationCode && location.IsActive)
                 .Select(location => (int?)location.Id)
@@ -281,6 +328,7 @@ public class WorkOrderService : IWorkOrderService
                 ManufactureDate = DateTime.UtcNow,
                 ExpiryDate = product.ShelfLifeDays.HasValue ? DateTime.UtcNow.AddDays(product.ShelfLifeDays.Value) : null,
                 Qty = finalQty,
+                UnitPrice = unitActualCost,
                 WorkOrderId = workOrder.Id
             };
 
@@ -304,16 +352,12 @@ public class WorkOrderService : IWorkOrderService
                 LocationId = qcLocationId,
                 Qty = finalQty,
                 QtyAfter = finishedBalance.QtyAvailable,
-                ValuationRate = finishedLot.UnitPrice,
+                ValuationRate = unitActualCost,
                 TransactionDate = DateTime.UtcNow,
                 UserId = userId,
                 ReferenceNo = workOrder.Code
             });
 
-            var reservations = await _context.MaterialReservations
-                .Include(reservation => reservation.Lot)
-                .Where(r => r.WorkOrderId == workOrder.Id)
-                .ToListAsync();
             foreach (var reservation in reservations)
             {
                 var balance = await _context.StockBalances.FirstOrDefaultAsync(sb =>
@@ -337,9 +381,7 @@ public class WorkOrderService : IWorkOrderService
                     LocationId = reservation.LocationId,
                     Qty = -reservation.QtyReserved,
                     QtyAfter = balance.QtyAvailable,
-                    ValuationRate = reservation.Lot?.UnitPrice
-                        ?? throw new InvalidOperationException(
-                            "The backflush valuation lot no longer exists."),
+                    ValuationRate = reservation.Lot!.UnitPrice,
                     TransactionDate = DateTime.UtcNow,
                     UserId = userId,
                     ReferenceNo = workOrder.Code
