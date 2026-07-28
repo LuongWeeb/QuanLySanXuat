@@ -113,6 +113,7 @@ builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<ICycleCountService, CycleCountService>();
 builder.Services.AddScoped<IMrpService, MrpService>();
+builder.Services.AddScoped<IProductionPlanService, ProductionPlanService>();
 builder.Services.AddScoped<IWorkOrderService, WorkOrderService>();
 builder.Services.AddScoped<ICostingService, CostingService>();
 builder.Services.AddScoped<IQcService, QcService>();
