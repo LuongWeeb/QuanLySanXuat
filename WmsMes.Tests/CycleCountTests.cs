@@ -6,11 +6,77 @@ using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.DTOs;
 using WmsMes.Web.Services;
+using System.Text.RegularExpressions;
 
 namespace WmsMes.Tests;
 
 public class CycleCountTests
 {
+    [Fact]
+    public async Task CreateOrderAsync_UsesDailySequenceAndSnapshotsOnlyPositiveTotalStock()
+    {
+        await using var context = CreateContext();
+        var (warehouse, availableBalance) =
+            await AddWarehouseBalanceAsync(context, qtyAvailable: 100);
+        var heldOnly = await AddAdditionalBalanceAsync(
+            context, warehouse, "HELD", qtyAvailable: 0);
+        heldOnly.QtyOnHold = 5;
+        var empty = await AddAdditionalBalanceAsync(
+            context, warehouse, "EMPTY", qtyAvailable: 0);
+        await context.SaveChangesAsync();
+        var service = new CycleCountService(context, new InventoryService(context));
+
+        var first = await service.CreateOrderAsync(warehouse.Id, "counter-1");
+        var second = await service.CreateOrderAsync(warehouse.Id, "counter-1");
+
+        Assert.Matches(
+            new Regex($@"^CC-{DateTime.UtcNow:yyyyMMdd}-\d{{3}}$"),
+            first.CountNumber);
+        Assert.EndsWith("-001", first.CountNumber);
+        Assert.EndsWith("-002", second.CountNumber);
+        Assert.Equal(2, first.Items.Count);
+        Assert.Equal(
+            100,
+            first.Items.Single(item =>
+                item.ProductId == availableBalance.ProductId).SystemQty);
+        Assert.Equal(
+            0,
+            first.Items.Single(item =>
+                item.ProductId == heldOnly.ProductId).SystemQty);
+        Assert.DoesNotContain(
+            first.Items,
+            item => item.ProductId == empty.ProductId);
+    }
+
+    [Fact]
+    public async Task UpdateCountedQtysAndApproveLedger_UsePlanContract()
+    {
+        await using var context = CreateContext();
+        var (warehouse, balance) =
+            await AddWarehouseBalanceAsync(context, qtyAvailable: 100);
+        ICycleCountService service =
+            new CycleCountService(context, new InventoryService(context));
+        var order = await service.CreateOrderAsync(warehouse.Id, "counter-1");
+        var item = Assert.Single(order.Items);
+
+        Assert.True(await service.UpdateCountedQtysAsync(
+            order.Id,
+            new Dictionary<int, decimal> { [item.Id] = 90 }));
+        Assert.True(await service.ApproveAndAdjustLedgerAsync(
+            order.Id,
+            "manager-1"));
+
+        Assert.Equal(
+            90,
+            await context.StockBalances
+                .Where(stock => stock.Id == balance.Id)
+                .Select(stock => stock.QtyAvailable)
+                .SingleAsync());
+        var transaction = Assert.Single(await context.StockTransactions.ToListAsync());
+        Assert.Equal(TransactionType.Adjust, transaction.Type);
+        Assert.Equal(-10, transaction.Qty);
+    }
+
     [Fact]
     public async Task RecordCountResultsAsync_RejectsNegativeBatchWithoutMutatingAnyItem()
     {
