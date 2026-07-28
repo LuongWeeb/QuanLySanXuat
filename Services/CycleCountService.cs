@@ -25,14 +25,50 @@ public class CycleCountService : ICycleCountService
 
     public async Task<CycleCountOrder> CreateCycleCountOrderAsync(int warehouseId, string createdBy)
     {
+        return await CreateOrderAsync(warehouseId, createdBy);
+    }
+
+    public Task<CycleCountOrder?> GetByIdAsync(int id)
+    {
+        return _context.CycleCountOrders
+            .Include(order => order.Warehouse)
+            .Include(order => order.Items).ThenInclude(item => item.Product)
+            .Include(order => order.Items).ThenInclude(item => item.Location)
+            .Include(order => order.Items).ThenInclude(item => item.Lot)
+            .FirstOrDefaultAsync(order => order.Id == id);
+    }
+
+    public async Task<CycleCountOrder> CreateOrderAsync(
+        int warehouseId,
+        string createdBy)
+    {
+        if (!await _context.Warehouses.AnyAsync(warehouse =>
+                warehouse.Id == warehouseId && warehouse.IsActive))
+        {
+            throw new ArgumentException(
+                "Warehouse does not exist or is inactive.",
+                nameof(warehouseId));
+        }
+
         var balances = await _context.StockBalances
             .Where(balance => balance.Location!.Zone!.WarehouseId == warehouseId &&
-                              balance.Location.Code != QcService.QuarantineLocationCode)
+                              balance.Location.Code != QcService.QuarantineLocationCode &&
+                              balance.QtyAvailable +
+                                  balance.QtyReserved +
+                                  balance.QtyOnHold > 0)
             .ToListAsync();
+        var datePrefix = $"CC-{DateTime.UtcNow:yyyyMMdd}-";
+        var dailyCount = await _context.CycleCountOrders.CountAsync(order =>
+            order.CountNumber.StartsWith(datePrefix));
+        if (dailyCount >= 999)
+        {
+            throw new InvalidOperationException(
+                "The daily cycle count sequence has been exhausted.");
+        }
 
         var order = new CycleCountOrder
         {
-            CountNumber = $"CC-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}",
+            CountNumber = $"{datePrefix}{dailyCount + 1:000}",
             WarehouseId = warehouseId,
             CreatedBy = createdBy,
             Items = balances.Select(balance => new CycleCountItem
@@ -47,6 +83,27 @@ public class CycleCountService : ICycleCountService
         await _context.CycleCountOrders.AddAsync(order);
         await _context.SaveChangesAsync();
         return order;
+    }
+
+    public Task<bool> UpdateCountedQtysAsync(
+        int orderId,
+        Dictionary<int, decimal> itemCounts)
+    {
+        var results = itemCounts
+            .Select(entry => new CountResultDto
+            {
+                CycleCountItemId = entry.Key,
+                CountedQty = entry.Value
+            })
+            .ToList();
+        return RecordCountResultsAsync(orderId, results);
+    }
+
+    public Task<bool> ApproveAndAdjustLedgerAsync(
+        int orderId,
+        string managerUserId)
+    {
+        return ApproveAndAdjustStockAsync(orderId, managerUserId);
     }
 
     public async Task<bool> RecordCountResultsAsync(int orderId, List<CountResultDto> results)
