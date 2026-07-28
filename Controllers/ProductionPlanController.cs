@@ -14,13 +14,23 @@ public class ProductionPlanController : Controller
 {
     private readonly ApplicationDbContext _context;
     private readonly IProductionPlanService _planService;
+    private readonly IPurchaseRequestService? _purchaseRequestService;
 
     public ProductionPlanController(
         ApplicationDbContext context,
         IProductionPlanService planService)
+        : this(context, planService, null)
+    {
+    }
+
+    public ProductionPlanController(
+        ApplicationDbContext context,
+        IProductionPlanService planService,
+        IPurchaseRequestService? purchaseRequestService)
     {
         _context = context;
         _planService = planService;
+        _purchaseRequestService = purchaseRequestService;
     }
 
     public async Task<IActionResult> Index()
@@ -141,6 +151,32 @@ public class ProductionPlanController : Controller
     public IActionResult RunMrp(int id)
     {
         return RedirectToAction(nameof(Details), new { id, runMrp = true });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> GeneratePurchaseRequest(int id)
+    {
+        if (_purchaseRequestService is null)
+        {
+            throw new InvalidOperationException(
+                "Purchase request service is not configured.");
+        }
+
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "system";
+        var request = await _purchaseRequestService.GenerateFromMrpAsync(id, userId);
+        if (request is not null)
+        {
+            TempData["StatusMessage"] =
+                $"Đã tự động tạo Yêu cầu mua hàng mã {request.RequestNo} từ kết quả MRP.";
+        }
+        else
+        {
+            TempData["StatusMessage"] =
+                "Tất cả các nguyên vật liệu đều đã đủ tồn kho, không cần tạo Yêu cầu mua hàng.";
+        }
+
+        return RedirectToAction(nameof(Details), new { id });
     }
 
     [HttpPost]
