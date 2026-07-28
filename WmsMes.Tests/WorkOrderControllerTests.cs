@@ -95,11 +95,249 @@ public class WorkOrderControllerTests
         var result = await Controller(context).Details(order.Id);
 
         var view = Assert.IsType<ViewResult>(result);
-        var model = Assert.IsType<WorkOrder>(view.Model);
-        Assert.Equal("Mixer", Assert.Single(model.Steps).WorkCenter!.Name);
-        Assert.Equal("Ca sáng", Assert.Single(model.DailyProductionLogs).Notes);
-        var reservations = Assert.IsAssignableFrom<IEnumerable<MaterialReservation>>(view.ViewData["Reservations"]);
-        Assert.Equal("LOT-1", Assert.Single(reservations).Lot!.LotNo);
+        var model = Assert.IsType<WorkOrderDetailsViewModel>(view.Model);
+        Assert.Equal("Mixer", Assert.Single(model.Order.Steps).WorkCenter!.Name);
+        Assert.Equal("Ca sáng", Assert.Single(model.Order.DailyProductionLogs).Notes);
+        Assert.Equal("LOT-1", Assert.Single(model.Reservations).Lot!.LotNo);
+    }
+
+    [Fact]
+    public async Task Details_BuildsComparativeCostAnalysisFromNewestStandardsAndActualUsage()
+    {
+        await using var context = new ApplicationDbContext(Options($"WO_CostAnalysis_{Guid.NewGuid()}"));
+        var product = Product("FG");
+        var material = Product("RM", manufactured: false);
+        var firstCenter = new WorkCenter
+        {
+            Id = 101,
+            Code = "WC-1",
+            Name = "Cutting",
+            HourlyLaborRate = 2m,
+            HourlyMachineRate = 4m
+        };
+        var secondCenter = new WorkCenter
+        {
+            Id = 102,
+            Code = "WC-2",
+            Name = "Packing",
+            HourlyLaborRate = 1m,
+            HourlyMachineRate = 2m
+        };
+        var order = Order(product, "WO-COST", DateTime.UtcNow);
+        order.Qty = 10m;
+        order.Steps.Add(new WorkOrderStep
+        {
+            Id = 201,
+            StepNumber = 10,
+            StepName = "Cutting",
+            WorkCenter = firstCenter,
+            StartTime = new DateTime(2026, 7, 27, 1, 0, 0, DateTimeKind.Utc),
+            EndTime = new DateTime(2026, 7, 27, 1, 15, 0, DateTimeKind.Utc),
+            QtyOK = 8m
+        });
+        order.Steps.Add(new WorkOrderStep
+        {
+            Id = 202,
+            StepNumber = 20,
+            StepName = "Packing",
+            WorkCenter = secondCenter,
+            QtyOK = 4m
+        });
+        context.WorkOrders.Add(order);
+        context.BOMs.AddRange(
+            new BOM { Id = 301, Product = product, Version = "OLD", IsActive = true, TotalMaterialCost = 99m },
+            new BOM { Id = 302, Product = product, Version = "NEW", IsActive = true, TotalMaterialCost = 2m });
+        context.Routings.AddRange(
+            new Routing
+            {
+                Id = 401,
+                Product = product,
+                Name = "Old routing",
+                Version = "OLD",
+                IsActive = true,
+                Steps =
+                {
+                    new RoutingStep
+                    {
+                        StepNumber = 20,
+                        StepName = "Packing",
+                        WorkCenter = secondCenter,
+                        StandardTimeMinutes = 180m
+                    }
+                }
+            },
+            new Routing
+            {
+                Id = 402,
+                Product = product,
+                Name = "Current routing",
+                Version = "NEW",
+                IsActive = true,
+                Steps =
+                {
+                    new RoutingStep
+                    {
+                        StepNumber = 10,
+                        StepName = "Cutting",
+                        WorkCenter = firstCenter,
+                        StandardTimeMinutes = 30m
+                    },
+                    new RoutingStep
+                    {
+                        StepNumber = 20,
+                        StepName = "Packing",
+                        WorkCenter = secondCenter,
+                        StandardTimeMinutes = 60m
+                    }
+                }
+            });
+        context.MaterialReservations.Add(new MaterialReservation
+        {
+            WorkOrder = order,
+            Product = material,
+            Lot = new Lot { LotNo = "RM-LOT", Product = material, UnitPrice = 1.5m },
+            Location = new Location
+            {
+                Code = "A-01",
+                Name = "A-01",
+                Zone = new Zone { Code = "Z", Name = "Zone" }
+            },
+            QtyReserved = 3m
+        });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        var view = Assert.IsType<ViewResult>(await Controller(context).Details(order.Id));
+        var analysis = Assert.IsType<WorkOrderDetailsViewModel>(view.Model).CostAnalysis;
+
+        Assert.Equal(new CostComparisonViewModel(20m, 4.5m), analysis.MaterialCost);
+        Assert.Equal(new CostComparisonViewModel(20m, 1.5m), analysis.LaborCost);
+        Assert.Equal(new CostComparisonViewModel(40m, 3m), analysis.MachineCost);
+        Assert.Equal(new CostComparisonViewModel(80m, 9m), analysis.TotalCost);
+        Assert.Equal(new CostComparisonViewModel(8m, 2.25m), analysis.UnitCost);
+    }
+
+    [Fact]
+    public async Task Details_WhenCostingInputsAreIncomplete_ReturnsZeroAnalysisWithoutThrowing()
+    {
+        await using var context = new ApplicationDbContext(Options($"WO_EmptyCostAnalysis_{Guid.NewGuid()}"));
+        var order = Order(Product("FG-ZERO"), "WO-ZERO", DateTime.UtcNow);
+        context.WorkOrders.Add(order);
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        var view = Assert.IsType<ViewResult>(await Controller(context).Details(order.Id));
+        var analysis = Assert.IsType<WorkOrderDetailsViewModel>(view.Model).CostAnalysis;
+
+        Assert.Equal(new CostComparisonViewModel(0m, 0m), analysis.MaterialCost);
+        Assert.Equal(new CostComparisonViewModel(0m, 0m), analysis.LaborCost);
+        Assert.Equal(new CostComparisonViewModel(0m, 0m), analysis.MachineCost);
+        Assert.Equal(new CostComparisonViewModel(0m, 0m), analysis.TotalCost);
+        Assert.Equal(new CostComparisonViewModel(0m, 0m), analysis.UnitCost);
+    }
+
+    [Fact]
+    public async Task Details_RoundsDisplayedCostAwayFromZero()
+    {
+        await using var context = new ApplicationDbContext(Options($"WO_CostRounding_{Guid.NewGuid()}"));
+        var product = Product("FG-ROUND");
+        var material = Product("RM-ROUND", manufactured: false);
+        var order = Order(product, "WO-ROUND", DateTime.UtcNow);
+        order.Qty = 1m;
+        context.WorkOrders.Add(order);
+        context.BOMs.Add(new BOM
+        {
+            Product = product,
+            Version = "V1",
+            IsActive = true,
+            TotalMaterialCost = 1.005m
+        });
+        context.MaterialReservations.Add(new MaterialReservation
+        {
+            WorkOrder = order,
+            Product = material,
+            Lot = new Lot { LotNo = "ROUND-LOT", Product = material, UnitPrice = 2.01m },
+            Location = new Location
+            {
+                Code = "ROUND",
+                Name = "Round",
+                Zone = new Zone { Code = "R", Name = "Round" }
+            },
+            QtyReserved = 0.5m
+        });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        var view = Assert.IsType<ViewResult>(await Controller(context).Details(order.Id));
+        var analysis = Assert.IsType<WorkOrderDetailsViewModel>(view.Model).CostAnalysis;
+
+        Assert.Equal(1.01m, analysis.MaterialCost.Target);
+        Assert.Equal(1.01m, analysis.MaterialCost.Actual);
+    }
+
+    [Fact]
+    public async Task Details_TotalCostEqualsSumOfDisplayedRoundedComponents()
+    {
+        await using var context = new ApplicationDbContext(
+            Options($"WO_CostComponentRounding_{Guid.NewGuid()}"));
+        var product = Product("FG-COMPONENT-ROUND");
+        var material = Product("RM-COMPONENT-ROUND", manufactured: false);
+        var center = new WorkCenter
+        {
+            Code = "WC-ROUND",
+            Name = "Rounding center",
+            HourlyLaborRate = 0.30m,
+            HourlyMachineRate = 0.30m
+        };
+        var order = Order(product, "WO-COMPONENT-ROUND", DateTime.UtcNow);
+        order.Qty = 1m;
+        order.Steps.Add(new WorkOrderStep
+        {
+            StepNumber = 10,
+            StepName = "Rounding operation",
+            WorkCenter = center,
+            StartTime = new DateTime(2026, 7, 27, 1, 0, 0, DateTimeKind.Utc),
+            EndTime = new DateTime(2026, 7, 27, 1, 1, 0, DateTimeKind.Utc),
+            QtyOK = 1m
+        });
+        context.WorkOrders.Add(order);
+        context.BOMs.Add(new BOM
+        {
+            Product = product,
+            Version = "V1",
+            IsActive = true,
+            TotalMaterialCost = 1.005m
+        });
+        context.MaterialReservations.Add(new MaterialReservation
+        {
+            WorkOrder = order,
+            Product = material,
+            Lot = new Lot
+            {
+                LotNo = "COMPONENT-ROUND-LOT",
+                Product = material,
+                UnitPrice = 1.005m
+            },
+            Location = new Location
+            {
+                Code = "COMPONENT-ROUND",
+                Name = "Component round",
+                Zone = new Zone { Code = "CR", Name = "Component round" }
+            },
+            QtyReserved = 1m
+        });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        var view = Assert.IsType<ViewResult>(await Controller(context).Details(order.Id));
+        var analysis = Assert.IsType<WorkOrderDetailsViewModel>(view.Model).CostAnalysis;
+
+        Assert.Equal(
+            analysis.MaterialCost.Target + analysis.LaborCost.Target + analysis.MachineCost.Target,
+            analysis.TotalCost.Target);
+        Assert.Equal(
+            analysis.MaterialCost.Actual + analysis.LaborCost.Actual + analysis.MachineCost.Actual,
+            analysis.TotalCost.Actual);
     }
 
     [Fact]

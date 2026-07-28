@@ -14,6 +14,7 @@ using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Services;
+using WmsMes.Web.ViewModels;
 
 namespace WmsMes.Tests;
 
@@ -126,7 +127,7 @@ public class DailyProductionLogControllerTests
 
         var view = Assert.IsType<ViewResult>(result);
         Assert.Equal(nameof(WorkOrderController.Details), view.ViewName);
-        Assert.IsType<WorkOrder>(view.Model);
+        Assert.IsType<WorkOrderDetailsViewModel>(view.Model);
         Assert.Contains(expectedField, controller.ModelState.Keys);
         Assert.Empty(context.DailyProductionLogs);
     }
@@ -164,7 +165,7 @@ public class DailyProductionLogControllerTests
 
         var view = Assert.IsType<ViewResult>(result);
         Assert.Equal(nameof(WorkOrderController.Details), view.ViewName);
-        var returnedOrder = Assert.IsType<WorkOrder>(view.Model);
+        var returnedOrder = Assert.IsType<WorkOrderDetailsViewModel>(view.Model).Order;
         Assert.Equal(0m, returnedOrder.DailyProductionLogs.Sum(log => log.QtyProduced));
         var error = Assert.Single(controller.ModelState["Date"]!.Errors);
         Assert.Contains("tương lai", error.ErrorMessage, StringComparison.OrdinalIgnoreCase);

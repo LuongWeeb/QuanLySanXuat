@@ -58,13 +58,34 @@ public class WorkOrderController : Controller
         if (order is null) return NotFound();
 
         ViewData["BusinessDate"] = GetBusinessDate();
-        ViewData["Reservations"] = await _context.MaterialReservations.AsNoTracking()
+        var reservations = await _context.MaterialReservations.AsNoTracking()
             .Include(x => x.Product)
             .Include(x => x.Lot)
             .Include(x => x.Location)
             .Where(x => x.WorkOrderId == id)
             .ToListAsync();
-        return View(order);
+        var activeBomMaterialCost = await _context.BOMs.AsNoTracking()
+            .Where(bom => bom.ProductId == order.ProductId && bom.IsActive)
+            .OrderByDescending(bom => bom.Id)
+            .Select(bom => (decimal?)bom.TotalMaterialCost)
+            .FirstOrDefaultAsync() ?? 0m;
+        var activeRouting = await _context.Routings.AsNoTracking()
+            .Include(routing => routing.Steps)
+                .ThenInclude(step => step.WorkCenter)
+            .Where(routing => routing.ProductId == order.ProductId && routing.IsActive)
+            .OrderByDescending(routing => routing.Id)
+            .FirstOrDefaultAsync();
+
+        return View(new WorkOrderDetailsViewModel
+        {
+            Order = order,
+            Reservations = reservations,
+            CostAnalysis = BuildCostAnalysis(
+                order,
+                reservations,
+                activeBomMaterialCost,
+                activeRouting)
+        });
     }
 
     [HttpPost]
@@ -286,6 +307,92 @@ public class WorkOrderController : Controller
             .Where(x => x.IsManufactured && x.IsActive)
             .OrderBy(x => x.Code)
             .ToListAsync();
+
+    private static ProductionCostAnalysisViewModel BuildCostAnalysis(
+        WorkOrder order,
+        IReadOnlyCollection<MaterialReservation> reservations,
+        decimal targetMaterialCostPerUnit,
+        Routing? activeRouting)
+    {
+        var plannedQuantity = order.Qty > 0m ? order.Qty : 0m;
+        var targetMaterialCost = targetMaterialCostPerUnit * plannedQuantity;
+        var targetLaborCostPerUnit = activeRouting?.Steps.Sum(step =>
+            step.StandardTimeMinutes / 60m *
+            (step.WorkCenter?.HourlyLaborRate ?? 0m)) ?? 0m;
+        var targetMachineCostPerUnit = activeRouting?.Steps.Sum(step =>
+            step.StandardTimeMinutes / 60m *
+            (step.WorkCenter?.HourlyMachineRate ?? 0m)) ?? 0m;
+        var targetLaborCost = targetLaborCostPerUnit * plannedQuantity;
+        var targetMachineCost = targetMachineCostPerUnit * plannedQuantity;
+
+        var actualMaterialCost = reservations.Sum(reservation =>
+            reservation.QtyReserved * (reservation.Lot?.UnitPrice ?? 0m));
+        var actualLaborCost = 0m;
+        var actualMachineCost = 0m;
+        foreach (var step in order.Steps)
+        {
+            if (step.WorkCenter is null)
+            {
+                continue;
+            }
+
+            var durationMinutes = step.StartTime.HasValue && step.EndTime.HasValue
+                ? (decimal)(step.EndTime.Value - step.StartTime.Value).TotalMinutes
+                : 0m;
+            if (durationMinutes <= 0m)
+            {
+                var standardTimeMinutes = activeRouting?.Steps
+                    .Where(routingStep => routingStep.StepNumber == step.StepNumber)
+                    .OrderByDescending(routingStep => routingStep.Id)
+                    .Select(routingStep => routingStep.StandardTimeMinutes)
+                    .FirstOrDefault() ?? 0m;
+                durationMinutes = standardTimeMinutes > 0m
+                    ? standardTimeMinutes
+                    : 0m;
+            }
+
+            actualLaborCost += durationMinutes / 60m *
+                step.WorkCenter.HourlyLaborRate;
+            actualMachineCost += durationMinutes / 60m *
+                step.WorkCenter.HourlyMachineRate;
+        }
+
+        var materialComparison = new CostComparisonViewModel(
+            targetMaterialCost,
+            actualMaterialCost);
+        var laborComparison = new CostComparisonViewModel(
+            targetLaborCost,
+            actualLaborCost);
+        var machineComparison = new CostComparisonViewModel(
+            targetMachineCost,
+            actualMachineCost);
+        var targetTotalCost = materialComparison.Target
+            + laborComparison.Target
+            + machineComparison.Target;
+        var actualTotalCost = materialComparison.Actual
+            + laborComparison.Actual
+            + machineComparison.Actual;
+        var finishedOutputQuantity = order.Steps
+            .OrderByDescending(step => step.StepNumber)
+            .ThenByDescending(step => step.Id)
+            .Select(step => step.QtyOK)
+            .FirstOrDefault();
+        var targetUnitCost = plannedQuantity > 0m
+            ? targetTotalCost / plannedQuantity
+            : 0m;
+        var actualUnitCost = finishedOutputQuantity > 0m
+            ? actualTotalCost / finishedOutputQuantity
+            : 0m;
+
+        return new ProductionCostAnalysisViewModel
+        {
+            MaterialCost = materialComparison,
+            LaborCost = laborComparison,
+            MachineCost = machineComparison,
+            TotalCost = new CostComparisonViewModel(targetTotalCost, actualTotalCost),
+            UnitCost = new CostComparisonViewModel(targetUnitCost, actualUnitCost)
+        };
+    }
 
     private enum DailyLogSaveResult
     {

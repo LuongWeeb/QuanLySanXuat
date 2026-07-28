@@ -9,7 +9,7 @@ public class LocalizationViewTests
 
         Assert.Contains("@item.Type.ToVietnameseString()", ReadView("Product", "Index.cshtml"));
         Assert.Contains("@order.Status.ToVietnameseString()", ReadView("WorkOrder", "Index.cshtml"));
-        Assert.Contains("@Model.Status.ToVietnameseString()", ReadView("WorkOrder", "Details.cshtml"));
+        Assert.Contains("@order.Status.ToVietnameseString()", ReadView("WorkOrder", "Details.cshtml"));
         Assert.Contains("@step.Status.ToVietnameseString()", ReadView("WorkOrder", "Details.cshtml"));
         Assert.Contains("@step.Status.ToVietnameseString()", ReadView("Worker", "Index.cshtml"));
         Assert.Contains("@workOrder.Status.ToVietnameseString()", ReadView("Home", "Search.cshtml"));

@@ -32,7 +32,7 @@ public class DailyProductionLogViewTests
         Assert.Contains("table-responsive", view);
         Assert.Contains("OrderByDescending", view);
         Assert.Contains("Chưa có nhật ký sản lượng.", view);
-        Assert.Contains("Model.Status == WorkOrderStatus.InProgress", view);
+        Assert.Contains("order.Status == WorkOrderStatus.InProgress", view);
         Assert.Contains("asp-action=\"AddDailyLog\"", view);
         Assert.Contains("asp-validation-summary=\"All\"", view);
         Assert.Contains("for=\"daily-log-date\"", view);
@@ -61,8 +61,8 @@ public class DailyProductionLogViewTests
         Assert.Contains("ViewData[\"BusinessDate\"]", details);
         Assert.Contains("businessDate > order.DueDate.Date", index);
         Assert.Contains("order.DueDate.Date - businessDate", index);
-        Assert.Contains("businessDate > Model.DueDate.Date", details);
-        Assert.Contains("Model.DueDate.Date - businessDate", details);
+        Assert.Contains("businessDate > order.DueDate.Date", details);
+        Assert.Contains("order.DueDate.Date - businessDate", details);
         Assert.Contains(
             "businessDate.ToString(\"yyyy-MM-dd\", CultureInfo.InvariantCulture)",
             details);
@@ -76,7 +76,7 @@ public class DailyProductionLogViewTests
 
         Assert.Contains("var hasValidTarget = order.Qty > 0", index);
         Assert.Contains("hasValidTarget && !targetReached", index);
-        Assert.Contains("var hasValidTarget = Model.Qty > 0", details);
+        Assert.Contains("var hasValidTarget = order.Qty > 0", details);
         Assert.Contains("hasValidTarget && !targetReached", details);
     }
 

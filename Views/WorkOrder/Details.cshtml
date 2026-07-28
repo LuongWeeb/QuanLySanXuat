@@ -1,20 +1,21 @@
-@model WmsMes.Web.Domain.Entities.WorkOrder
+@model WmsMes.Web.ViewModels.WorkOrderDetailsViewModel
 @using WmsMes.Web.Domain.Entities
 @using WmsMes.Web.Domain.Enums
 @using WmsMes.Web.ViewModels
 @using System.Globalization
 @{
-    ViewData["Title"] = $"Lệnh {Model.Code}";
+    var order = Model.Order;
+    ViewData["Title"] = $"Lệnh {order.Code}";
     var businessDate = (DateTime)ViewData["BusinessDate"]!;
-    var reservations = ViewData["Reservations"] as IEnumerable<MaterialReservation> ?? Enumerable.Empty<MaterialReservation>();
+    var reservations = Model.Reservations;
     var canManage = User.IsInRole("Admin") || User.IsInRole("Manager");
-    var totalProduced = Model.DailyProductionLogs.Sum(log => log.QtyProduced);
-    var hasValidTarget = Model.Qty > 0;
-    var progressPercentage = hasValidTarget ? totalProduced / Model.Qty * 100 : 0;
+    var totalProduced = order.DailyProductionLogs.Sum(log => log.QtyProduced);
+    var hasValidTarget = order.Qty > 0;
+    var progressPercentage = hasValidTarget ? totalProduced / order.Qty * 100 : 0;
     var progressWidth = Math.Clamp(progressPercentage, 0, 100);
-    var targetReached = hasValidTarget && totalProduced >= Model.Qty;
-    var isOverdue = hasValidTarget && !targetReached && businessDate > Model.DueDate.Date;
-    var daysRemaining = (Model.DueDate.Date - businessDate).Days;
+    var targetReached = hasValidTarget && totalProduced >= order.Qty;
+    var isOverdue = hasValidTarget && !targetReached && businessDate > order.DueDate.Date;
+    var daysRemaining = (order.DueDate.Date - businessDate).Days;
     var maxDateValue = businessDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     var dateValue = ViewData.ModelState.TryGetValue(nameof(DailyProductionLogInputModel.Date), out var dateEntry)
         ? dateEntry.AttemptedValue
@@ -28,18 +29,18 @@
 }
 
 <section class="toolbar-row">
-    <div><p class="eyebrow">Lệnh sản xuất</p><h2>@Model.Code</h2></div>
+    <div><p class="eyebrow">Lệnh sản xuất</p><h2>@order.Code</h2></div>
     <div class="d-flex gap-2">
         <a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a>
-        @if (canManage && (Model.Status is WorkOrderStatus.Draft or WorkOrderStatus.Pending))
+        @if (canManage && (order.Status is WorkOrderStatus.Draft or WorkOrderStatus.Pending))
         {
-            <form asp-action="Approve" asp-route-id="@Model.Id" method="post">
+            <form asp-action="Approve" asp-route-id="@order.Id" method="post">
                 <button class="btn btn-primary" type="submit">Phê duyệt</button>
             </form>
         }
-        @if (canManage && Model.Status == WorkOrderStatus.InProgress)
+        @if (canManage && order.Status == WorkOrderStatus.InProgress)
         {
-            <form asp-action="Complete" asp-route-id="@Model.Id" method="post">
+            <form asp-action="Complete" asp-route-id="@order.Id" method="post">
                 <button class="btn btn-success" type="submit">Xác nhận hoàn thành</button>
             </form>
         }
@@ -53,21 +54,21 @@
 
 <section class="ops-panel mt-3">
     <dl class="row mb-0">
-        <dt class="col-sm-3">Thành phẩm</dt><dd class="col-sm-9">@Model.Product?.Code - @Model.Product?.Name</dd>
-        <dt class="col-sm-3">Số lượng</dt><dd class="col-sm-9">@Model.Qty.ToVietnameseNumber()</dd>
-        <dt class="col-sm-3">Hạn hoàn thành</dt><dd class="col-sm-9">@Model.DueDate.ToVietnameseDate()</dd>
-        <dt class="col-sm-3">Trạng thái</dt><dd class="col-sm-9"><span class="status-pill">@Model.Status.ToVietnameseString()</span></dd>
-        <dt class="col-sm-3">Phiên bản BOM / Routing</dt><dd class="col-sm-9">@(string.IsNullOrEmpty(Model.BomVersion) ? "—" : Model.BomVersion) / @(string.IsNullOrEmpty(Model.RoutingVersion) ? "—" : Model.RoutingVersion)</dd>
+        <dt class="col-sm-3">Thành phẩm</dt><dd class="col-sm-9">@order.Product?.Code - @order.Product?.Name</dd>
+        <dt class="col-sm-3">Số lượng</dt><dd class="col-sm-9">@order.Qty.ToVietnameseNumber()</dd>
+        <dt class="col-sm-3">Hạn hoàn thành</dt><dd class="col-sm-9">@order.DueDate.ToVietnameseDate()</dd>
+        <dt class="col-sm-3">Trạng thái</dt><dd class="col-sm-9"><span class="status-pill">@order.Status.ToVietnameseString()</span></dd>
+        <dt class="col-sm-3">Phiên bản BOM / Routing</dt><dd class="col-sm-9">@(string.IsNullOrEmpty(order.BomVersion) ? "—" : order.BomVersion) / @(string.IsNullOrEmpty(order.RoutingVersion) ? "—" : order.RoutingVersion)</dd>
     </dl>
 </section>
 
 <section class="ops-panel mt-3" aria-labelledby="production-progress-heading">
     <div class="d-flex justify-content-between align-items-center gap-3 mb-2">
         <h3 class="h5 mb-0" id="production-progress-heading">Tiến độ sản xuất</h3>
-        <span class="fw-semibold">@totalProduced.ToVietnameseNumber() / @Model.Qty.ToVietnameseNumber() (@progressPercentage.ToVietnameseNumber("N1")%)</span>
+        <span class="fw-semibold">@totalProduced.ToVietnameseNumber() / @order.Qty.ToVietnameseNumber() (@progressPercentage.ToVietnameseNumber("N1")%)</span>
     </div>
     <div class="progress" role="progressbar"
-         aria-label="Tiến độ lệnh @Model.Code"
+         aria-label="Tiến độ lệnh @order.Code"
          aria-valuenow="@progressWidth.ToString("0.##", CultureInfo.InvariantCulture)"
          aria-valuemin="0" aria-valuemax="100">
         <div class="progress-bar @(isOverdue ? "bg-danger" : targetReached ? "bg-success" : "bg-primary")"
@@ -83,11 +84,11 @@
     }
 </section>
 
-@if (Model.Status == WorkOrderStatus.InProgress)
+@if (order.Status == WorkOrderStatus.InProgress)
 {
     <section class="ops-panel mt-3" aria-labelledby="daily-log-form-heading">
         <h3 class="h5" id="daily-log-form-heading">Ghi sản lượng nhanh</h3>
-        <form asp-action="AddDailyLog" asp-route-id="@Model.Id" method="post">
+        <form asp-action="AddDailyLog" asp-route-id="@order.Id" method="post">
             <div asp-validation-summary="All" class="text-danger mb-3" role="alert"></div>
             <div class="row g-3">
                 <div class="col-12 col-md-3">
@@ -127,7 +128,7 @@
         <table class="table data-table align-middle mb-0">
             <thead><tr><th>Ngày sản xuất</th><th class="text-end">Số lượng</th><th>Ghi chú</th></tr></thead>
             <tbody>
-            @foreach (var log in Model.DailyProductionLogs.OrderByDescending(log => log.Date).ThenByDescending(log => log.Id))
+            @foreach (var log in order.DailyProductionLogs.OrderByDescending(log => log.Date).ThenByDescending(log => log.Id))
             {
                 <tr>
                     <td>@log.Date.ToVietnameseDate()</td>
@@ -135,7 +136,7 @@
                     <td>@(string.IsNullOrWhiteSpace(log.Notes) ? "—" : log.Notes)</td>
                 </tr>
             }
-            @if (!Model.DailyProductionLogs.Any())
+            @if (!order.DailyProductionLogs.Any())
             {
                 <tr><td colspan="3" class="text-center text-muted py-3">Chưa có nhật ký sản lượng.</td></tr>
             }
@@ -150,13 +151,66 @@
         <table class="table data-table align-middle mb-0">
             <thead><tr><th>#</th><th>Công đoạn</th><th>Trạm</th><th>Trạng thái</th><th class="text-end">Đạt / Loại / Làm lại</th></tr></thead>
             <tbody>
-            @foreach (var step in Model.Steps.OrderBy(x => x.StepNumber))
+            @foreach (var step in order.Steps.OrderBy(x => x.StepNumber))
             {
                 <tr><td>@step.StepNumber.ToVietnameseNumber()</td><td>@step.StepName</td><td>@step.WorkCenter?.Code - @step.WorkCenter?.Name</td><td><span class="status-pill">@step.Status.ToVietnameseString()</span></td><td class="text-end">@step.QtyOK.ToVietnameseNumber() / @step.QtyReject.ToVietnameseNumber() / @step.QtyRework.ToVietnameseNumber()</td></tr>
             }
-            @if (!Model.Steps.Any()) { <tr><td colspan="5" class="text-center text-muted py-3">Công đoạn sẽ được nạp khi phê duyệt.</td></tr> }
+            @if (!order.Steps.Any()) { <tr><td colspan="5" class="text-center text-muted py-3">Công đoạn sẽ được nạp khi phê duyệt.</td></tr> }
             </tbody>
         </table>
+    </div>
+</section>
+
+<section class="card mt-3 border-info" aria-labelledby="production-cost-analysis-heading">
+    <div class="card-header bg-info text-white">
+        <h3 class="h5 mb-0" id="production-cost-analysis-heading">Bảng Phân tích Giá thành Sản xuất</h3>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table data-table table-bordered align-middle mb-0">
+                <caption class="visually-hidden">So sánh chi phí định mức, thực tế và chênh lệch của lệnh sản xuất</caption>
+                <thead>
+                    <tr class="table-light">
+                        <th scope="col">Khoản mục chi phí</th>
+                        <th scope="col" class="text-end">Định mức (Target)</th>
+                        <th scope="col" class="text-end">Thực tế (Actual)</th>
+                        <th scope="col" class="text-end">Chênh lệch (Variance)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <th scope="row">Chi phí vật tư</th>
+                        <td class="text-end">@Model.CostAnalysis.MaterialCost.Target.ToVietnameseNumber() VNĐ</td>
+                        <td class="text-end">@Model.CostAnalysis.MaterialCost.Actual.ToVietnameseNumber() VNĐ</td>
+                        <td class="text-end">@Model.CostAnalysis.MaterialCost.Variance.ToVietnameseNumber() VNĐ</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Chi phí nhân công</th>
+                        <td class="text-end">@Model.CostAnalysis.LaborCost.Target.ToVietnameseNumber() VNĐ</td>
+                        <td class="text-end">@Model.CostAnalysis.LaborCost.Actual.ToVietnameseNumber() VNĐ</td>
+                        <td class="text-end">@Model.CostAnalysis.LaborCost.Variance.ToVietnameseNumber() VNĐ</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Chi phí vận hành máy</th>
+                        <td class="text-end">@Model.CostAnalysis.MachineCost.Target.ToVietnameseNumber() VNĐ</td>
+                        <td class="text-end">@Model.CostAnalysis.MachineCost.Actual.ToVietnameseNumber() VNĐ</td>
+                        <td class="text-end">@Model.CostAnalysis.MachineCost.Variance.ToVietnameseNumber() VNĐ</td>
+                    </tr>
+                    <tr class="table-light fw-bold">
+                        <th scope="row">TỔNG CỘNG</th>
+                        <td class="text-end">@Model.CostAnalysis.TotalCost.Target.ToVietnameseNumber() VNĐ</td>
+                        <td class="text-end">@Model.CostAnalysis.TotalCost.Actual.ToVietnameseNumber() VNĐ</td>
+                        <td class="text-end">@Model.CostAnalysis.TotalCost.Variance.ToVietnameseNumber() VNĐ</td>
+                    </tr>
+                    <tr class="fw-semibold">
+                        <th scope="row">Giá thành đơn vị</th>
+                        <td class="text-end">@Model.CostAnalysis.UnitCost.Target.ToVietnameseNumber() VNĐ</td>
+                        <td class="text-end">@Model.CostAnalysis.UnitCost.Actual.ToVietnameseNumber() VNĐ</td>
+                        <td class="text-end">@Model.CostAnalysis.UnitCost.Variance.ToVietnameseNumber() VNĐ</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 </section>
 
