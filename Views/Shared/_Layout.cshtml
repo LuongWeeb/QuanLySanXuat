@@ -29,6 +29,7 @@
             <a asp-controller="Inventory" asp-action="Receipts">Nhập kho</a>
             <a asp-controller="Inventory" asp-action="Issues">Xuất kho</a>
             <a asp-controller="Warehouse" asp-action="Index">Kho & Vị trí</a>
+            <a asp-controller="CycleCount" asp-action="Index">Kiểm kê kho (Stocktake)</a>
 
             <div class="nav-section-title">Quản lý Sản xuất (MES)</div>
             @if (User.IsInRole("Admin") || User.IsInRole("Planner") || User.IsInRole("Manager"))

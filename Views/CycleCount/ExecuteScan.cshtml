@@ -1,0 +1,107 @@
+@model WmsMes.Web.Domain.Entities.CycleCountOrder
+@{
+    ViewData["Title"] = "Quét kiểm kê";
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Đếm hàng bằng mã vạch</p>
+        <h2>@Model.CountNumber</h2>
+        <p class="text-muted mb-0">@Model.Warehouse?.Code — @Model.Warehouse?.Name</p>
+    </div>
+    <span class="status-pill is-muted">@Model.Status</span>
+</section>
+
+@if (TempData["ErrorMessage"] is string error)
+{
+    <div class="alert alert-danger" role="alert">@error</div>
+}
+@if (TempData["StatusMessage"] is string statusMessage)
+{
+    <div class="alert alert-success" role="status">@statusMessage</div>
+}
+
+<section class="ops-panel mb-3">
+    <div class="row g-3 align-items-end">
+        <div class="col-lg-7">
+            <label for="barcode-input" class="form-label">Quét mã vị trí hoặc số lô</label>
+            <input id="barcode-input"
+                   class="form-control form-control-lg"
+                   type="text"
+                   autocomplete="off"
+                   autofocus
+                   placeholder="Quét mã rồi nhấn Enter"
+                   aria-describedby="scan-status" />
+        </div>
+        <div class="col-lg-5 d-flex gap-2">
+            <button id="start-camera" class="btn btn-outline-primary flex-grow-1" type="button">Mở camera</button>
+            <button id="stop-camera" class="btn btn-outline-secondary" type="button" disabled>Dừng</button>
+        </div>
+    </div>
+    <div id="scan-status" class="form-text mt-2" aria-live="polite">Sẵn sàng nhận mã quét.</div>
+    <video id="barcode-camera" class="w-100 mt-3 rounded d-none" playsinline muted aria-label="Camera quét mã vạch"></video>
+</section>
+
+<details class="ops-panel mb-3">
+    <summary class="fw-bold">Thêm lô phát hiện ngoài snapshot</summary>
+    <form asp-action="AddDiscoveredItem" method="post" class="row g-3 mt-1">
+        <input name="id" value="@Model.Id" type="hidden" />
+        <div class="col-md-4">
+            <label for="discovered-location" class="form-label">Mã vị trí</label>
+            <input id="discovered-location" name="locationCode" class="form-control" required />
+        </div>
+        <div class="col-md-4">
+            <label for="discovered-lot" class="form-label">Số lô</label>
+            <input id="discovered-lot" name="lotNo" class="form-control" required />
+        </div>
+        <div class="col-md-2">
+            <label for="discovered-qty" class="form-label">Số lượng</label>
+            <input id="discovered-qty" name="countedQty" class="form-control" type="number" min="0" step="0.01" required />
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+            <button class="btn btn-outline-primary w-100" type="submit">Thêm lô</button>
+        </div>
+    </form>
+</details>
+
+<form asp-action="SaveScan" method="post">
+    <input name="id" value="@Model.Id" type="hidden" />
+    <section class="data-panel">
+        <div class="table-responsive">
+            <table class="table data-table align-middle">
+                <thead><tr><th>Vị trí</th><th>Sản phẩm</th><th>Lô</th><th class="text-end">Hệ thống</th><th style="min-width: 150px">Đếm thực tế</th></tr></thead>
+                <tbody>
+                @foreach (var item in Model.Items.OrderBy(item => item.Location!.Code).ThenBy(item => item.Lot!.LotNo))
+                {
+                    <tr class="count-row"
+                        data-location-code="@item.Location?.Code"
+                        data-lot-no="@item.Lot?.LotNo">
+                        <td><code>@item.Location?.Code</code></td>
+                        <td>@item.Product?.Code — @item.Product?.Name</td>
+                        <td><code>@item.Lot?.LotNo</code></td>
+                        <td class="text-end">@item.SystemQty.ToVietnameseNumber()</td>
+                        <td>
+                            <label class="visually-hidden" for="count-@item.Id">Số lượng đếm thực tế cho lô @item.Lot?.LotNo</label>
+                            <input id="count-@item.Id"
+                                   name="itemCounts[@item.Id]"
+                                   class="form-control counted-qty"
+                                   type="number"
+                                   min="0"
+                                   step="0.01"
+                                   value="@item.CountedQty?.ToString(System.Globalization.CultureInfo.InvariantCulture)" />
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+    <div class="d-flex gap-2 mt-3">
+        <button class="btn btn-primary" type="submit">Hoàn tất kiểm đếm</button>
+        <a class="btn btn-outline-secondary" asp-action="Index">Lưu sau</a>
+    </div>
+</form>
+
+@section Scripts {
+    <script src="~/js/cycle-count-scan.js" asp-append-version="true"></script>
+}

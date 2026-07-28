@@ -1,0 +1,54 @@
+@model IEnumerable<WmsMes.Web.Domain.Entities.CycleCountOrder>
+@{
+    ViewData["Title"] = "Kiểm kê kho";
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Đối chiếu tồn kho</p>
+        <h2>Đợt kiểm kê bằng mã vạch</h2>
+        <p class="text-muted mb-0">Theo dõi snapshot, tiến độ đếm và phê duyệt điều chỉnh.</p>
+    </div>
+    <a class="btn btn-primary" asp-action="Create">Tạo đợt kiểm kê</a>
+</section>
+
+@if (TempData["StatusMessage"] is string status)
+{
+    <div class="alert alert-success" role="status">@status</div>
+}
+
+<section class="data-panel">
+    <div class="table-responsive">
+        <table class="table data-table align-middle">
+            <thead>
+                <tr><th>Mã đợt</th><th>Kho</th><th>Người tạo</th><th>Ngày tạo</th><th>Trạng thái</th><th></th></tr>
+            </thead>
+            <tbody>
+            @foreach (var order in Model)
+            {
+                <tr>
+                    <td><code>@order.CountNumber</code></td>
+                    <td>@order.Warehouse?.Code — @order.Warehouse?.Name</td>
+                    <td>@order.CreatedBy</td>
+                    <td>@order.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                    <td><span class="status-pill @(order.Status == "Approved" ? "is-active" : "is-muted")">@order.Status</span></td>
+                    <td class="text-end">
+                        @if (order.Status is "Draft" or "InProgress")
+                        {
+                            <a class="btn btn-sm btn-primary" asp-action="ExecuteScan" asp-route-id="@order.Id">Tiếp tục đếm</a>
+                        }
+                        else
+                        {
+                            <a class="btn btn-sm btn-outline-primary" asp-action="Details" asp-route-id="@order.Id">Xem đối chiếu</a>
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+    @if (!Model.Any())
+    {
+        <div class="empty-state compact"><h3>Chưa có đợt kiểm kê</h3><p>Khởi tạo một snapshot tồn kho để bắt đầu kiểm đếm.</p></div>
+    }
+</section>

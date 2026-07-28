@@ -20,6 +20,7 @@ public class SidebarNavigationTests
         AssertLink(layout, "Inventory", "Receipts", "Nhập kho");
         AssertLink(layout, "Inventory", "Issues", "Xuất kho");
         AssertLink(layout, "Warehouse", "Index", "Kho & Vị trí");
+        AssertLink(layout, "CycleCount", "Index", "Kiểm kê kho (Stocktake)");
         AssertLink(layout, "WorkOrder", "Index", "Lệnh sản xuất");
         AssertLink(layout, "Worker", "Index", "Trạm vận hành");
         AssertLink(layout, "Mrp", "Index", "Lập kế hoạch MRP");

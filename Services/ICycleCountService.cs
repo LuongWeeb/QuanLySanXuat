@@ -5,6 +5,24 @@ namespace WmsMes.Web.Services;
 
 public interface ICycleCountService
 {
+    Task<CycleCountOrder?> GetByIdAsync(int id);
+
+    Task<CycleCountOrder> CreateOrderAsync(int warehouseId, string createdBy);
+
+    Task<bool> UpdateCountedQtysAsync(
+        int orderId,
+        Dictionary<int, decimal> itemCounts);
+
+    Task<bool> AddDiscoveredItemAsync(
+        int orderId,
+        string locationCode,
+        string lotNo,
+        decimal countedQty);
+
+    Task<bool> ApproveAndAdjustLedgerAsync(
+        int orderId,
+        string managerUserId);
+
     Task<CycleCountOrder> CreateCycleCountOrderAsync(int warehouseId, string createdBy);
 
     Task<bool> RecordCountResultsAsync(int orderId, List<CountResultDto> results);
