@@ -21,13 +21,23 @@ public class QcController : Controller
 
     public async Task<IActionResult> Index()
     {
-        var lots = await _context.StockBalances.AsNoTracking().Where(x => x.QtyOnHold > 0 && x.Location!.Code != QcService.QuarantineLocationCode)
-            .Select(x => x.Lot!).Distinct().Include(x => x.Product).OrderBy(x => x.LotNo).ToListAsync();
-        return View(lots);
+        return View(await GetPendingLotsAsync());
+    }
+
+    public async Task<IActionResult> Pending()
+    {
+        return View(await GetPendingLotsAsync());
     }
 
     [HttpGet]
     public async Task<IActionResult> Inspect(int lotId)
+    {
+        var loaded = await LoadAsync(lotId);
+        return loaded is null ? NotFound() : View(loaded.Value.Model);
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> CreateInspection(int lotId)
     {
         var loaded = await LoadAsync(lotId);
         return loaded is null ? NotFound() : View(loaded.Value.Model);
@@ -39,7 +49,7 @@ public class QcController : Controller
     {
         var loaded = await LoadAsync(input.LotId);
         if (loaded is null) return NotFound();
-        var (model, lot, checklist) = loaded.Value;
+        var (model, lot, checklist, goodsReceiptId, type) = loaded.Value;
 
         if (input.ChecklistId != checklist.Id) ModelState.AddModelError(nameof(input.ChecklistId), "Bộ tiêu chí không hợp lệ hoặc không còn hoạt động.");
         if (input.Result is not QCResult.PASS and not QCResult.REJECT) ModelState.AddModelError(nameof(input.Result), "Kết quả chỉ có thể là PASS hoặc REJECT.");
@@ -66,7 +76,7 @@ public class QcController : Controller
             return RedirectToAction(nameof(Inspect), new { lotId = lot.Id });
         }
 
-        var inspection = new QCInspection { LotId = lot.Id, WorkOrderId = lot.WorkOrderId!.Value, Result = input.Result, Note = input.Note?.Trim() ?? string.Empty,
+        var inspection = new QCInspection { LotId = lot.Id, WorkOrderId = lot.WorkOrderId, GoodsReceiptId = goodsReceiptId, Type = type, Result = input.Result, Note = input.Note?.Trim() ?? string.Empty,
             Lines = checklist.Items.Where(item => !string.IsNullOrWhiteSpace(values.GetValueOrDefault(item.Id)))
                 .Select(item => new QCInspectionLine { ParameterName = item.ParameterName, ValueInspected = values[item.Id].Trim() }).ToList() };
         try
@@ -83,14 +93,65 @@ public class QcController : Controller
         }
     }
 
-    private async Task<(QcInspectionInputModel Model, Lot Lot, QCChecklist Checklist)?> LoadAsync(int lotId)
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public Task<IActionResult> CreateInspection(QcInspectionInputModel input)
     {
-        var lot = await _context.Lots.AsNoTracking().Include(x => x.Product).SingleOrDefaultAsync(x => x.Id == lotId && x.WorkOrderId != null);
+        return Inspect(input);
+    }
+
+    public async Task<IActionResult> Details(int id)
+    {
+        var inspection = await _context.QCInspections
+            .AsNoTracking()
+            .Include(item => item.Lot)
+                .ThenInclude(lot => lot!.Product)
+            .Include(item => item.WorkOrder)
+            .Include(item => item.GoodsReceipt)
+            .Include(item => item.Lines)
+            .SingleOrDefaultAsync(item => item.Id == id);
+        return inspection is null ? NotFound() : View(inspection);
+    }
+
+    private async Task<(QcInspectionInputModel Model, Lot Lot, QCChecklist Checklist, int? GoodsReceiptId, QCInspectionType Type)?> LoadAsync(int lotId)
+    {
+        var lot = await _context.Lots.AsNoTracking().Include(x => x.Product).SingleOrDefaultAsync(x => x.Id == lotId);
         if (lot is null || !await _context.StockBalances.AnyAsync(x => x.LotId == lotId && x.QtyOnHold > 0 && x.Location!.Code != QcService.QuarantineLocationCode)) return null;
+        var goodsReceiptId = lot.WorkOrderId.HasValue
+            ? null
+            : await _context.GoodsReceiptLines
+                .Where(line => line.ProductId == lot.ProductId &&
+                    line.LotNo == lot.LotNo &&
+                    line.GoodsReceipt!.Status == DocumentStatus.Completed)
+                .OrderByDescending(line => line.GoodsReceipt!.ReceiptDate)
+                .ThenByDescending(line => line.GoodsReceiptId)
+                .Select(line => (int?)line.GoodsReceiptId)
+                .FirstOrDefaultAsync();
+        if (!lot.WorkOrderId.HasValue && !goodsReceiptId.HasValue) return null;
         var checklist = await _context.QCChecklists.AsNoTracking().Include(x => x.Items).Where(x => x.ProductId == lot.ProductId && x.IsActive).OrderByDescending(x => x.Id).FirstOrDefaultAsync();
         if (checklist is null || checklist.Items.Count == 0) return null;
         var model = new QcInspectionInputModel { LotId=lot.Id, ChecklistId=checklist.Id, LotNo=lot.LotNo, ProductDisplay=$"{lot.Product?.Code} - {lot.Product?.Name}", ChecklistName=checklist.Name,
             Measurements=checklist.Items.OrderBy(x=>x.Id).Select(x=>new QcMeasurementInputModel {ChecklistItemId=x.Id,ParameterName=x.ParameterName,MinVal=x.MinVal,MaxVal=x.MaxVal,Unit=x.Unit,IsRequired=x.IsRequired}).ToList() };
-        return (model, lot, checklist);
+        return (
+            model,
+            lot,
+            checklist,
+            goodsReceiptId,
+            lot.WorkOrderId.HasValue
+                ? QCInspectionType.FinalFGQC
+                : QCInspectionType.InwardQC);
+    }
+
+    private Task<List<Lot>> GetPendingLotsAsync()
+    {
+        return _context.StockBalances
+            .AsNoTracking()
+            .Where(item => item.QtyOnHold > 0 &&
+                item.Location!.Code != QcService.QuarantineLocationCode)
+            .Select(item => item.Lot!)
+            .Distinct()
+            .Include(item => item.Product)
+            .OrderBy(item => item.LotNo)
+            .ToListAsync();
     }
 }

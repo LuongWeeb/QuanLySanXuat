@@ -59,6 +59,61 @@ public class QcControllerTests
         Assert.Equal(nameof(QcController.Index), redirect.ActionName); service.VerifyAll(); Assert.NotNull(captured); Assert.Equal(lot.WorkOrderId, captured.WorkOrderId); Assert.Equal("Moisture", Assert.Single(captured.Lines).ParameterName); Assert.Equal("12.5", captured.Lines.Single().ValueInspected); Assert.Equal("ok", captured.Note); Assert.Equal(0, captured.Id);
     }
 
+    [Fact]
+    public async Task Submit_InwardLotBuildsInspectionLinkedToGoodsReceipt()
+    {
+        await using var db = new ApplicationDbContext(Options());
+        var lot = Lot("RAW");
+        var balance = Balance(lot, 2);
+        db.StockBalances.Add(balance);
+        var checklist = Checklist(lot.Product!, "Inward", true, "Moisture");
+        db.QCChecklists.Add(checklist);
+        var receipt = new GoodsReceipt
+        {
+            ReceiptNo = "GR-001",
+            Status = DocumentStatus.Completed,
+            Lines =
+            {
+                new GoodsReceiptLine
+                {
+                    Product = lot.Product,
+                    LotNo = lot.LotNo,
+                    Qty = 2,
+                    Location = balance.Location
+                }
+            }
+        };
+        db.GoodsReceipts.Add(receipt);
+        await db.SaveChangesAsync();
+        QCInspection? captured = null;
+        var service = new Mock<IQcService>();
+        service.Setup(item => item.SubmitQCInspectionAsync(
+                It.IsAny<QCInspection>(), "qc"))
+            .Callback<QCInspection, string>((item, _) => captured = item)
+            .ReturnsAsync(true);
+        var input = new QcInspectionInputModel
+        {
+            LotId = lot.Id,
+            ChecklistId = checklist.Id,
+            Result = QCResult.PASS,
+            Measurements =
+            {
+                new QcMeasurementInputModel
+                {
+                    ChecklistItemId = checklist.Items.Single().Id,
+                    Value = "12"
+                }
+            }
+        };
+
+        await Controller(db, service.Object, "qc").Inspect(input);
+
+        Assert.NotNull(captured);
+        Assert.Equal(QCInspectionType.InwardQC, captured.Type);
+        Assert.Equal(receipt.Id, captured.GoodsReceiptId);
+        Assert.Null(captured.WorkOrderId);
+    }
+
     [Theory]
     [InlineData(2, "12")]
     [InlineData(0, "")]
