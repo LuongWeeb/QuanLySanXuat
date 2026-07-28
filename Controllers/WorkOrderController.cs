@@ -357,6 +357,8 @@ public class WorkOrderController : Controller
                 step.WorkCenter.HourlyMachineRate;
         }
 
+        var rawTargetTotalCost = targetMaterialCost + targetLaborCost + targetMachineCost;
+        var rawActualTotalCost = actualMaterialCost + actualLaborCost + actualMachineCost;
         var targetBreakdown = RoundCostBreakdown(
             targetMaterialCost,
             targetLaborCost,
@@ -382,10 +384,10 @@ public class WorkOrderController : Controller
             .Select(step => step.QtyOK)
             .FirstOrDefault();
         var targetUnitCost = plannedQuantity > 0m
-            ? targetTotalCost / plannedQuantity
+            ? rawTargetTotalCost / plannedQuantity
             : 0m;
         var actualUnitCost = finishedOutputQuantity > 0m
-            ? actualTotalCost / finishedOutputQuantity
+            ? rawActualTotalCost / finishedOutputQuantity
             : 0m;
 
         return new ProductionCostAnalysisViewModel

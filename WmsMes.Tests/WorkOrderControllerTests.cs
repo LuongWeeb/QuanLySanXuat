@@ -345,6 +345,50 @@ public class WorkOrderControllerTests
     }
 
     [Fact]
+    public async Task Details_UnitCostDividesRawTotalBeforeRoundingLikeCompletion()
+    {
+        await using var context = new ApplicationDbContext(
+            Options($"WO_UnitCostRoundingOrder_{Guid.NewGuid()}"));
+        var product = Product("FG-UNIT-ROUND");
+        var material = Product("RM-UNIT-ROUND", manufactured: false);
+        var order = Order(product, "WO-UNIT-ROUND", DateTime.UtcNow);
+        order.Qty = 2m;
+        order.Steps.Add(new WorkOrderStep
+        {
+            StepNumber = 10,
+            StepName = "Output",
+            QtyOK = 2m
+        });
+        context.WorkOrders.Add(order);
+        context.MaterialReservations.Add(new MaterialReservation
+        {
+            WorkOrder = order,
+            Product = material,
+            Lot = new Lot
+            {
+                LotNo = "UNIT-ROUND-LOT",
+                Product = material,
+                UnitPrice = 0.01m
+            },
+            Location = new Location
+            {
+                Code = "UNIT-ROUND",
+                Name = "Unit round",
+                Zone = new Zone { Code = "UR", Name = "Unit round" }
+            },
+            QtyReserved = 0.50m
+        });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        var view = Assert.IsType<ViewResult>(await Controller(context).Details(order.Id));
+        var analysis = Assert.IsType<WorkOrderDetailsViewModel>(view.Model).CostAnalysis;
+
+        Assert.Equal(0.01m, analysis.TotalCost.Actual);
+        Assert.Equal(0m, analysis.UnitCost.Actual);
+    }
+
+    [Fact]
     public async Task Details_SuppliesVietnamBusinessDateAcrossUtcDateBoundary()
     {
         await using var context = new ApplicationDbContext(Options($"WO_DetailsBusinessDate_{Guid.NewGuid()}"));
