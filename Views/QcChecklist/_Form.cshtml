@@ -1,0 +1,83 @@
+@model WmsMes.Web.ViewModels.QcChecklistInputModel
+
+<div asp-validation-summary="All" class="text-danger mb-3" role="alert"></div>
+<input asp-for="Id" type="hidden" />
+<div class="row">
+    <div class="col-lg-7 mb-3">
+        <label asp-for="ProductId" class="form-label">Sản phẩm</label>
+        <select asp-for="ProductId" asp-items="ViewBag.Products" class="form-select" required>
+            <option value="">-- Chọn sản phẩm --</option>
+        </select>
+        <span asp-validation-for="ProductId" class="text-danger"></span>
+    </div>
+    <div class="col-lg-5 mb-3">
+        <label asp-for="Name" class="form-label">Tên mẫu kiểm định</label>
+        <input asp-for="Name" class="form-control" maxlength="250" required />
+        <span asp-validation-for="Name" class="text-danger"></span>
+    </div>
+</div>
+<div class="form-check form-switch mb-4">
+    <input asp-for="IsActive" class="form-check-input" />
+    <label asp-for="IsActive" class="form-check-label">Áp dụng mẫu này</label>
+</div>
+
+<div class="d-flex align-items-center justify-content-between gap-3 mb-2">
+    <h3 class="h5 mb-0">Tiêu chí đo lường</h3>
+    <button id="add-qc-item" class="btn btn-sm btn-outline-primary" type="button">Thêm tiêu chí</button>
+</div>
+<div class="table-responsive">
+    <table class="table align-middle" id="qc-items">
+        <thead>
+            <tr>
+                <th style="min-width: 220px">Tên thông số</th>
+                <th style="min-width: 130px">Tối thiểu</th>
+                <th style="min-width: 130px">Tối đa</th>
+                <th style="min-width: 110px">Đơn vị</th>
+                <th class="text-center">Bắt buộc</th>
+                <th><span class="visually-hidden">Xóa</span></th>
+            </tr>
+        </thead>
+        <tbody>
+        @for (var index = 0; index < Model.Items.Count; index++)
+        {
+            <tr>
+                <td>
+                    <label class="visually-hidden" asp-for="Items[index].ParameterName">Tên thông số</label>
+                    <input asp-for="Items[index].ParameterName" class="form-control" maxlength="150" required />
+                </td>
+                <td>
+                    <label class="visually-hidden" asp-for="Items[index].MinVal">Giá trị tối thiểu</label>
+                    <input asp-for="Items[index].MinVal" type="number" step="0.0001" class="form-control" />
+                </td>
+                <td>
+                    <label class="visually-hidden" asp-for="Items[index].MaxVal">Giá trị tối đa</label>
+                    <input asp-for="Items[index].MaxVal" type="number" step="0.0001" class="form-control" />
+                    <span asp-validation-for="Items[index].MaxVal" class="text-danger"></span>
+                </td>
+                <td>
+                    <label class="visually-hidden" asp-for="Items[index].Unit">Đơn vị</label>
+                    <input asp-for="Items[index].Unit" class="form-control" maxlength="50" />
+                </td>
+                <td class="text-center"><input asp-for="Items[index].IsRequired" class="form-check-input" /></td>
+                <td class="text-end"><button class="btn btn-sm btn-outline-danger remove-qc-item" type="button">Xóa</button></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>
+
+<template id="qc-item-template">
+    <tr>
+        <td><input name="Items[__index__].ParameterName" class="form-control" maxlength="150" required aria-label="Tên thông số" /></td>
+        <td><input name="Items[__index__].MinVal" type="number" step="0.0001" class="form-control" aria-label="Giá trị tối thiểu" /></td>
+        <td><input name="Items[__index__].MaxVal" type="number" step="0.0001" class="form-control" aria-label="Giá trị tối đa" /></td>
+        <td><input name="Items[__index__].Unit" class="form-control" maxlength="50" aria-label="Đơn vị" /></td>
+        <td class="text-center"><input name="Items[__index__].IsRequired" type="checkbox" value="true" checked class="form-check-input" aria-label="Bắt buộc" /></td>
+        <td class="text-end"><button class="btn btn-sm btn-outline-danger remove-qc-item" type="button">Xóa</button></td>
+    </tr>
+</template>
+
+<div class="d-flex gap-2 mt-3">
+    <button class="btn btn-primary" type="submit">Lưu mẫu QC</button>
+    <a class="btn btn-outline-secondary" asp-action="Index">Hủy</a>
+</div>

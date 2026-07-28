@@ -64,7 +64,7 @@ public class QcController : Controller
 
         if (!ModelState.IsValid)
         {
-            model.Result = input.Result; model.Note = input.Note;
+            model.Result = input.Result; model.Note = input.Note; model.EvidencePath = input.EvidencePath;
             foreach (var measurement in model.Measurements) if (values.TryGetValue(measurement.ChecklistItemId, out var value)) measurement.Value = value;
             return View(model);
         }
@@ -76,7 +76,7 @@ public class QcController : Controller
             return RedirectToAction(nameof(Inspect), new { lotId = lot.Id });
         }
 
-        var inspection = new QCInspection { LotId = lot.Id, WorkOrderId = lot.WorkOrderId, GoodsReceiptId = goodsReceiptId, Type = type, Result = input.Result, Note = input.Note?.Trim() ?? string.Empty,
+        var inspection = new QCInspection { LotId = lot.Id, WorkOrderId = lot.WorkOrderId, GoodsReceiptId = goodsReceiptId, Type = type, Result = input.Result, Note = input.Note?.Trim() ?? string.Empty, EvidencePath = input.EvidencePath?.Trim() ?? string.Empty,
             Lines = checklist.Items.Where(item => !string.IsNullOrWhiteSpace(values.GetValueOrDefault(item.Id)))
                 .Select(item => new QCInspectionLine { ParameterName = item.ParameterName, ValueInspected = values[item.Id].Trim() }).ToList() };
         try

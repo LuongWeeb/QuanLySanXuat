@@ -1,0 +1,32 @@
+@model WmsMes.Web.Domain.Entities.QCInspection
+@using WmsMes.Web.Domain.Enums
+@{
+    ViewData["Title"] = "Chi tiết kiểm định QC";
+}
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Kiểm soát chất lượng</p>
+        <h2>Phiếu QC #@Model.Id — @Model.Lot?.LotNo</h2>
+        <p class="text-muted mb-0">@Model.Lot?.Product?.Code — @Model.Lot?.Product?.Name</p>
+    </div>
+    <span class="status-pill @(Model.Result == QCResult.PASS ? "is-active" : "is-muted")">@Model.Result</span>
+</section>
+<section class="data-panel mt-3">
+    <dl class="row mb-4">
+        <dt class="col-sm-3">Loại kiểm định</dt><dd class="col-sm-9">@(Model.Type == QCInspectionType.InwardQC ? "Đầu vào" : "Thành phẩm")</dd>
+        <dt class="col-sm-3">Thời gian</dt><dd class="col-sm-9">@Model.InspectionTime.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</dd>
+        <dt class="col-sm-3">Tham chiếu</dt><dd class="col-sm-9">@(Model.GoodsReceipt?.ReceiptNo ?? Model.WorkOrder?.Code ?? "—")</dd>
+        <dt class="col-sm-3">Ghi chú</dt><dd class="col-sm-9">@(string.IsNullOrWhiteSpace(Model.Note) ? "—" : Model.Note)</dd>
+    </dl>
+    <div class="table-responsive">
+        <table class="table data-table align-middle">
+            <thead><tr><th>Thông số</th><th>Kết quả đo</th><th>Đánh giá</th></tr></thead>
+            <tbody>
+            @foreach (var line in Model.Lines)
+            {
+                <tr><td>@line.ParameterName</td><td>@line.ValueInspected</td><td><span class="status-pill @(line.IsOK ? "is-active" : "is-muted")">@(line.IsOK ? "PASS" : "FAIL")</span></td></tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</section>

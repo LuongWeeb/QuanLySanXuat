@@ -1,0 +1,14 @@
+@model WmsMes.Web.ViewModels.QcChecklistInputModel
+@{
+    ViewData["Title"] = "Tạo mẫu tiêu chuẩn QC";
+}
+<section class="toolbar-row">
+    <div><p class="eyebrow">Kiểm soát chất lượng</p><h2>Tạo mẫu tiêu chuẩn QC</h2></div>
+</section>
+<div class="ops-panel mt-3">
+    <form asp-action="Create" method="post"><partial name="_Form" model="Model" /></form>
+</div>
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script src="~/js/qc-checklist.js" asp-append-version="true"></script>
+}

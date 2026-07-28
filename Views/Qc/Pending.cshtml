@@ -1,0 +1,39 @@
+@model IEnumerable<WmsMes.Web.Domain.Entities.Lot>
+@{
+    ViewData["Title"] = "Đợt kiểm định QC";
+}
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Kiểm soát chất lượng</p>
+        <h2>Lô hàng chờ kiểm định</h2>
+        <p class="text-muted mb-0">Vật tư nhập kho và thành phẩm đang tạm giữ.</p>
+    </div>
+</section>
+@if (TempData["StatusMessage"] is string message)
+{
+    <div class="alert alert-info mt-3" role="status">@message</div>
+}
+<section class="data-panel mt-3">
+    <div class="table-responsive">
+        <table class="table data-table align-middle">
+            <thead><tr><th>Số lô</th><th>Sản phẩm</th><th>Loại QC</th><th class="text-end">Số lượng</th><th>Trạng thái</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var lot in Model)
+            {
+                <tr>
+                    <td><code>@lot.LotNo</code></td>
+                    <td>@lot.Product?.Code — @lot.Product?.Name</td>
+                    <td>@(lot.WorkOrderId.HasValue ? "Thành phẩm" : "Đầu vào")</td>
+                    <td class="text-end">@lot.Qty.ToVietnameseNumber()</td>
+                    <td><span class="status-pill">Tạm giữ</span></td>
+                    <td class="text-end"><a class="btn btn-sm btn-primary" asp-action="CreateInspection" asp-route-lotId="@lot.Id">Kiểm định</a></td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+    @if (!Model.Any())
+    {
+        <div class="empty-state compact"><h3>Không có lô chờ QC</h3><p>Mọi lô hàng đã được xử lý.</p></div>
+    }
+</section>

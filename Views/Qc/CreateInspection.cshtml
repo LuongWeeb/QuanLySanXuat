@@ -1,0 +1,70 @@
+@model WmsMes.Web.ViewModels.QcInspectionInputModel
+@using WmsMes.Web.Domain.Enums
+@{
+    ViewData["Title"] = "Thực hiện kiểm định QC";
+}
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Kiểm soát chất lượng</p>
+        <h2>Kiểm định lô @Model.LotNo</h2>
+        <p class="text-muted mb-0">@Model.ProductDisplay · @Model.ChecklistName</p>
+    </div>
+</section>
+<div class="ops-panel mt-3">
+    <form asp-action="CreateInspection" method="post">
+        <div asp-validation-summary="All" class="text-danger mb-3" role="alert"></div>
+        <input asp-for="LotId" type="hidden" />
+        <input asp-for="ChecklistId" type="hidden" />
+        <fieldset>
+            <legend class="h5">Thông số đo lường</legend>
+            @for (var index = 0; index < Model.Measurements.Count; index++)
+            {
+                <div class="row align-items-end mb-3 qc-measurement"
+                     data-min="@Model.Measurements[index].MinVal"
+                     data-max="@Model.Measurements[index].MaxVal">
+                    <div class="col-lg-9">
+                        <input asp-for="Measurements[index].ChecklistItemId" type="hidden" />
+                        <label asp-for="Measurements[index].Value" class="form-label">
+                            @Model.Measurements[index].ParameterName
+                            @if (Model.Measurements[index].IsRequired) { <span class="text-danger" aria-hidden="true">*</span> }
+                        </label>
+                        <div class="input-group">
+                            <input asp-for="Measurements[index].Value"
+                                   class="form-control qc-value"
+                                   required="@Model.Measurements[index].IsRequired"
+                                   inputmode="decimal" />
+                            <span class="input-group-text">@Model.Measurements[index].Unit</span>
+                        </div>
+                        <div class="form-text">Dải cho phép: @(Model.Measurements[index].MinVal?.ToVietnameseNumber() ?? "—") đến @(Model.Measurements[index].MaxVal?.ToVietnameseNumber() ?? "—")</div>
+                    </div>
+                    <div class="col-lg-3 mt-2 mt-lg-0"><span class="status-pill qc-line-status is-muted" aria-live="polite">Chưa nhập</span></div>
+                </div>
+            }
+        </fieldset>
+        <div class="mb-3">
+            <label asp-for="Result" class="form-label">Kết quả đề xuất</label>
+            <select asp-for="Result" class="form-select">
+                <option value="@QCResult.PASS">PASS — Giải phóng tồn tạm giữ</option>
+                <option value="@QCResult.REJECT">REJECT — Chuyển kho cách ly</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label asp-for="EvidencePath" class="form-label">Đường dẫn ảnh bằng chứng</label>
+            <input asp-for="EvidencePath" class="form-control" maxlength="500" placeholder="/uploads/qc/anh-kiem-dinh.jpg" />
+            <span asp-validation-for="EvidencePath" class="text-danger"></span>
+        </div>
+        <div class="mb-3">
+            <label asp-for="Note" class="form-label">Ghi chú</label>
+            <textarea asp-for="Note" class="form-control" rows="3" maxlength="500"></textarea>
+            <span asp-validation-for="Note" class="text-danger"></span>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Nộp kết quả QC</button>
+            <a class="btn btn-outline-secondary" asp-action="Pending">Hủy</a>
+        </div>
+    </form>
+</div>
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script src="~/js/qc-inspection.js" asp-append-version="true"></script>
+}

@@ -25,7 +25,8 @@ public class SidebarNavigationTests
         AssertLink(layout, "Mrp", "Index", "Lập kế hoạch MRP");
         AssertLink(layout, "Product", "Index", "Sản phẩm (SKU)");
         AssertLink(layout, "Bom", "Index", "Định mức vật tư (BOM)");
-        AssertLink(layout, "Qc", "Index", "Kiểm định chất lượng");
+        AssertLink(layout, "QcChecklist", "Index", "Mẫu tiêu chuẩn QC");
+        AssertLink(layout, "Qc", "Pending", "Đợt kiểm định QC");
         AssertLink(layout, "Traceability", "Index", "Truy vết lô hàng");
     }
 

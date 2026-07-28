@@ -9,6 +9,7 @@ public class QcInspectionInputModel
     [Range(1, int.MaxValue)] public int ChecklistId { get; set; }
     public QCResult Result { get; set; }
     [MaxLength(500)] public string Note { get; set; } = string.Empty;
+    [MaxLength(500)] public string EvidencePath { get; set; } = string.Empty;
     public List<QcMeasurementInputModel> Measurements { get; set; } = [];
 
     public string LotNo { get; set; } = string.Empty;
