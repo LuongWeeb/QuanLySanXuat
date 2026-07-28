@@ -65,6 +65,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<WorkOrderStep> WorkOrderSteps { get; set; }
 
+    public DbSet<ProductionPlan> ProductionPlans { get; set; }
+
+    public DbSet<ProductionPlanItem> ProductionPlanItems { get; set; }
+
     public DbSet<DailyProductionLog> DailyProductionLogs { get; set; }
 
     public DbSet<MaterialReservation> MaterialReservations { get; set; }
