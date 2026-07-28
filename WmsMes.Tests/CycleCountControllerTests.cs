@@ -23,7 +23,7 @@ public class CycleCountControllerTests
                 .GetCustomAttributes<AuthorizeAttribute>());
         Assert.Equal("Admin,Warehouse,Manager", authorize.Roles);
 
-        foreach (var action in new[] { "Create", "SaveScan", "Approve" })
+        foreach (var action in new[] { "Create", "SaveScan", "AddDiscoveredItem", "Approve" })
         {
             var method = typeof(CycleCountController)
                 .GetMethods()

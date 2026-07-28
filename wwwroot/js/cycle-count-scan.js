@@ -10,6 +10,7 @@
     let stream;
     let scanning = false;
     let detector;
+    let selectedLocation = "";
     const normalize = value => value.trim().toUpperCase();
 
     const announce = message => {
@@ -27,6 +28,7 @@
         const locationMatches = rows.filter(row =>
             normalize(row.dataset.locationCode ?? "") === code);
         if (locationMatches.length > 0) {
+            selectedLocation = code;
             locationMatches.forEach(row => row.classList.add("table-warning"));
             locationMatches[0].scrollIntoView({ behavior: "smooth", block: "center" });
             locationMatches[0].querySelector(".counted-qty")?.focus();
@@ -34,7 +36,15 @@
             return;
         }
 
-        const lotRow = rows.find(row => normalize(row.dataset.lotNo ?? "") === code);
+        const lotMatches = rows.filter(row =>
+            normalize(row.dataset.lotNo ?? "") === code &&
+            (!selectedLocation ||
+                normalize(row.dataset.locationCode ?? "") === selectedLocation));
+        if (lotMatches.length > 1 && !selectedLocation) {
+            announce(`Lô ${code} có ở nhiều vị trí. Hãy quét vị trí trước.`);
+            return;
+        }
+        const lotRow = lotMatches[0];
         if (lotRow) {
             lotRow.classList.add("table-warning");
             const quantity = lotRow.querySelector(".counted-qty");

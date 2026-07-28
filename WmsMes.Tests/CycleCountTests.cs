@@ -205,6 +205,7 @@ public class CycleCountTests
             new CountResultDto { CycleCountItemId = item.Id, CountedQty = 7 }
         ]);
         Assert.Equal("Completed", (await context.CycleCountOrders.SingleAsync()).Status);
+        Assert.NotNull((await context.CycleCountOrders.SingleAsync()).CompletedAt);
 
         var approved = await cycleCountService.ApproveAndAdjustStockAsync(order.Id, "approver-1");
 
@@ -222,6 +223,53 @@ public class CycleCountTests
         Assert.Equal("Approved", persistedOrder.Status);
         Assert.Equal("approver-1", persistedOrder.ApprovedBy);
         Assert.NotNull(persistedOrder.CompletedAt);
+    }
+
+    [Fact]
+    public async Task AddDiscoveredItemAndApprove_CreatesMissingBalanceAndLedgerEntry()
+    {
+        await using var context = CreateContext();
+        var (warehouse, _) = await AddWarehouseBalanceAsync(context, qtyAvailable: 10);
+        var location = new Location
+        {
+            Code = "LOC-NEW",
+            Name = "New location",
+            Zone = new Zone
+            {
+                Code = "ZONE-NEW",
+                Name = "New zone",
+                WarehouseId = warehouse.Id
+            }
+        };
+        var product = new Product { Code = "P-NEW", Name = "New product" };
+        var lot = new Lot
+        {
+            LotNo = "LOT-NEW",
+            Product = product,
+            Qty = 4,
+            UnitPrice = 25
+        };
+        context.AddRange(location, lot);
+        await context.SaveChangesAsync();
+        var service = new CycleCountService(context, new InventoryService(context));
+        var order = await service.CreateOrderAsync(warehouse.Id, "counter");
+
+        Assert.True(await service.AddDiscoveredItemAsync(
+            order.Id, location.Code, lot.LotNo, 4));
+        var counts = await context.CycleCountItems
+            .Where(item => item.CycleCountOrderId == order.Id)
+            .ToDictionaryAsync(item => item.Id, item => item.CountedQty ?? item.SystemQty);
+        Assert.True(await service.UpdateCountedQtysAsync(order.Id, counts));
+        Assert.True(await service.ApproveAndAdjustLedgerAsync(order.Id, "manager"));
+
+        var balance = await context.StockBalances.SingleAsync(item =>
+            item.LocationId == location.Id && item.LotId == lot.Id);
+        Assert.Equal(4, balance.QtyAvailable);
+        Assert.Contains(
+            await context.StockTransactions.ToListAsync(),
+            item => item.LotId == lot.Id &&
+                item.Type == TransactionType.Adjust &&
+                item.Qty == 4);
     }
 
     [Fact]

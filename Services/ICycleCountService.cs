@@ -13,6 +13,12 @@ public interface ICycleCountService
         int orderId,
         Dictionary<int, decimal> itemCounts);
 
+    Task<bool> AddDiscoveredItemAsync(
+        int orderId,
+        string locationCode,
+        string lotNo,
+        decimal countedQty);
+
     Task<bool> ApproveAndAdjustLedgerAsync(
         int orderId,
         string managerUserId);

@@ -383,6 +383,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<CycleCountOrder>()
+            .HasIndex(order => order.CountNumber)
+            .IsUnique();
+
+        builder.Entity<CycleCountOrder>()
             .HasMany(order => order.Items)
             .WithOne(item => item.CycleCountOrder)
             .HasForeignKey(item => item.CycleCountOrderId)
@@ -405,6 +409,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .WithMany()
             .HasForeignKey(item => item.LotId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<CycleCountItem>()
+            .Property(item => item.SystemQty)
+            .HasPrecision(18, 3);
+
+        builder.Entity<CycleCountItem>()
+            .Property(item => item.CountedQty)
+            .HasPrecision(18, 3);
 
         builder.Entity<WorkCenter>()
             .HasIndex(w => w.Code)

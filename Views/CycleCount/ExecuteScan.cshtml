@@ -16,6 +16,10 @@
 {
     <div class="alert alert-danger" role="alert">@error</div>
 }
+@if (TempData["StatusMessage"] is string statusMessage)
+{
+    <div class="alert alert-success" role="status">@statusMessage</div>
+}
 
 <section class="ops-panel mb-3">
     <div class="row g-3 align-items-end">
@@ -37,6 +41,28 @@
     <div id="scan-status" class="form-text mt-2" aria-live="polite">Sẵn sàng nhận mã quét.</div>
     <video id="barcode-camera" class="w-100 mt-3 rounded d-none" playsinline muted aria-label="Camera quét mã vạch"></video>
 </section>
+
+<details class="ops-panel mb-3">
+    <summary class="fw-bold">Thêm lô phát hiện ngoài snapshot</summary>
+    <form asp-action="AddDiscoveredItem" method="post" class="row g-3 mt-1">
+        <input name="id" value="@Model.Id" type="hidden" />
+        <div class="col-md-4">
+            <label for="discovered-location" class="form-label">Mã vị trí</label>
+            <input id="discovered-location" name="locationCode" class="form-control" required />
+        </div>
+        <div class="col-md-4">
+            <label for="discovered-lot" class="form-label">Số lô</label>
+            <input id="discovered-lot" name="lotNo" class="form-control" required />
+        </div>
+        <div class="col-md-2">
+            <label for="discovered-qty" class="form-label">Số lượng</label>
+            <input id="discovered-qty" name="countedQty" class="form-control" type="number" min="0" step="0.01" required />
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+            <button class="btn btn-outline-primary w-100" type="submit">Thêm lô</button>
+        </div>
+    </form>
+</details>
 
 <form asp-action="SaveScan" method="post">
     <input name="id" value="@Model.Id" type="hidden" />
@@ -62,8 +88,7 @@
                                    type="number"
                                    min="0"
                                    step="0.01"
-                                   value="@(item.CountedQty?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")"
-                                   required />
+                                   value="@item.CountedQty?.ToString(System.Globalization.CultureInfo.InvariantCulture)" />
                         </td>
                     </tr>
                 }

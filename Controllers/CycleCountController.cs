@@ -95,6 +95,25 @@ public class CycleCountController : Controller
         return RedirectToAction(nameof(Details), new { id });
     }
 
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> AddDiscoveredItem(
+        int id,
+        string locationCode,
+        string lotNo,
+        decimal countedQty)
+    {
+        var added = await _countService.AddDiscoveredItemAsync(
+            id,
+            locationCode,
+            lotNo,
+            countedQty);
+        TempData[added ? "StatusMessage" : "ErrorMessage"] = added
+            ? "Đã thêm lô phát hiện vào đợt kiểm kê."
+            : "Không thể thêm lô. Kiểm tra vị trí, số lô và trạng thái đợt kiểm kê.";
+        return RedirectToAction(nameof(ExecuteScan), new { id });
+    }
+
     [HttpGet]
     public async Task<IActionResult> Details(int id)
     {

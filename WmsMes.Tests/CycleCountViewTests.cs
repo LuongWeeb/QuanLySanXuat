@@ -19,6 +19,8 @@ public class CycleCountViewTests
         Assert.Contains("getUserMedia", script);
         Assert.Contains("data-location-code", view);
         Assert.Contains("data-lot-no", view);
+        Assert.DoesNotContain("CountedQty?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? \"0\"", view);
+        Assert.Contains("selectedLocation", script);
     }
 
     [Fact]
