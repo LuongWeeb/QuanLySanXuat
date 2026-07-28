@@ -318,6 +318,32 @@ public class InventoryService : IInventoryService
                 });
             }
 
+            if (receipt.PurchaseOrderId.HasValue)
+            {
+                var purchaseOrder = await _context.PurchaseOrders
+                    .Include(order => order.Items)
+                    .FirstOrDefaultAsync(order =>
+                        order.Id == receipt.PurchaseOrderId.Value);
+                if (purchaseOrder is not null)
+                {
+                    foreach (var line in receipt.Lines)
+                    {
+                        var orderItem = purchaseOrder.Items
+                            .FirstOrDefault(item => item.ProductId == line.ProductId);
+                        if (orderItem is not null)
+                        {
+                            orderItem.ReceivedQty += line.Qty;
+                        }
+                    }
+
+                    if (purchaseOrder.Items.Count > 0 &&
+                        purchaseOrder.Items.All(item => item.ReceivedQty >= item.Qty))
+                    {
+                        purchaseOrder.Status = DocumentStatus.Completed;
+                    }
+                }
+            }
+
             if (!_context.Database.IsRelational())
             {
                 await SetGoodsReceiptStatusAsync(receipt.Id, DocumentStatus.Completed);
@@ -496,6 +522,32 @@ public class InventoryService : IInventoryService
                     UserId = userId,
                     ReferenceNo = issue.IssueNo
                 });
+            }
+
+            if (issue.SalesOrderId.HasValue)
+            {
+                var salesOrder = await _context.SalesOrders
+                    .Include(order => order.Items)
+                    .FirstOrDefaultAsync(order =>
+                        order.Id == issue.SalesOrderId.Value);
+                if (salesOrder is not null)
+                {
+                    foreach (var line in issue.Lines)
+                    {
+                        var orderItem = salesOrder.Items
+                            .FirstOrDefault(item => item.ProductId == line.ProductId);
+                        if (orderItem is not null)
+                        {
+                            orderItem.DeliveredQty += line.Qty;
+                        }
+                    }
+
+                    if (salesOrder.Items.Count > 0 &&
+                        salesOrder.Items.All(item => item.DeliveredQty >= item.Qty))
+                    {
+                        salesOrder.Status = DocumentStatus.Completed;
+                    }
+                }
             }
 
             if (!_context.Database.IsRelational())
