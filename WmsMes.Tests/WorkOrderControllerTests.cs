@@ -338,6 +338,10 @@ public class WorkOrderControllerTests
         Assert.Equal(
             analysis.MaterialCost.Actual + analysis.LaborCost.Actual + analysis.MachineCost.Actual,
             analysis.TotalCost.Actual);
+        Assert.Equal(1.01m, analysis.TotalCost.Target);
+        Assert.Equal(1.02m, analysis.TotalCost.Actual);
+        Assert.Equal(1.01m, analysis.UnitCost.Target);
+        Assert.Equal(1.02m, analysis.UnitCost.Actual);
     }
 
     [Fact]

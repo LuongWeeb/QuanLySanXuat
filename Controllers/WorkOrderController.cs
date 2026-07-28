@@ -357,21 +357,25 @@ public class WorkOrderController : Controller
                 step.WorkCenter.HourlyMachineRate;
         }
 
-        var materialComparison = new CostComparisonViewModel(
+        var targetBreakdown = RoundCostBreakdown(
             targetMaterialCost,
-            actualMaterialCost);
-        var laborComparison = new CostComparisonViewModel(
             targetLaborCost,
-            actualLaborCost);
-        var machineComparison = new CostComparisonViewModel(
-            targetMachineCost,
+            targetMachineCost);
+        var actualBreakdown = RoundCostBreakdown(
+            actualMaterialCost,
+            actualLaborCost,
             actualMachineCost);
-        var targetTotalCost = materialComparison.Target
-            + laborComparison.Target
-            + machineComparison.Target;
-        var actualTotalCost = materialComparison.Actual
-            + laborComparison.Actual
-            + machineComparison.Actual;
+        var materialComparison = new CostComparisonViewModel(
+            targetBreakdown.Material,
+            actualBreakdown.Material);
+        var laborComparison = new CostComparisonViewModel(
+            targetBreakdown.Labor,
+            actualBreakdown.Labor);
+        var machineComparison = new CostComparisonViewModel(
+            targetBreakdown.Machine,
+            actualBreakdown.Machine);
+        var targetTotalCost = targetBreakdown.Total;
+        var actualTotalCost = actualBreakdown.Total;
         var finishedOutputQuantity = order.Steps
             .OrderByDescending(step => step.StepNumber)
             .ThenByDescending(step => step.Id)
@@ -392,6 +396,36 @@ public class WorkOrderController : Controller
             TotalCost = new CostComparisonViewModel(targetTotalCost, actualTotalCost),
             UnitCost = new CostComparisonViewModel(targetUnitCost, actualUnitCost)
         };
+    }
+
+    private static (
+        decimal Material,
+        decimal Labor,
+        decimal Machine,
+        decimal Total) RoundCostBreakdown(
+        decimal material,
+        decimal labor,
+        decimal machine)
+    {
+        var rounded = new[]
+        {
+            Math.Round(material, 2, MidpointRounding.AwayFromZero),
+            Math.Round(labor, 2, MidpointRounding.AwayFromZero),
+            Math.Round(machine, 2, MidpointRounding.AwayFromZero)
+        };
+        var raw = new[] { material, labor, machine };
+        var total = Math.Round(
+            material + labor + machine,
+            2,
+            MidpointRounding.AwayFromZero);
+        var residual = total - rounded.Sum();
+        if (residual != 0m)
+        {
+            var largestIndex = Array.IndexOf(raw, raw.Max());
+            rounded[largestIndex] += residual;
+        }
+
+        return (rounded[0], rounded[1], rounded[2], total);
     }
 
     private enum DailyLogSaveResult

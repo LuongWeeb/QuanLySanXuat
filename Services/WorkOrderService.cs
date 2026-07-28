@@ -302,6 +302,7 @@ public class WorkOrderService : IWorkOrderService
                 {
                     var standardTimeMinutes = activeRouting?.Steps
                         .Where(routingStep => routingStep.StepNumber == step.StepNumber)
+                        .OrderByDescending(routingStep => routingStep.Id)
                         .Select(routingStep => routingStep.StandardTimeMinutes)
                         .FirstOrDefault() ?? 0m;
                     durationMinutes = standardTimeMinutes > 0m

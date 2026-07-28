@@ -14,6 +14,7 @@ public class WorkOrderCostAnalysisViewTests
         Assert.Contains("@model WmsMes.Web.ViewModels.WorkOrderDetailsViewModel", view);
         Assert.Contains("Bảng Phân tích Giá thành Sản xuất", view);
         Assert.Contains("aria-labelledby=\"production-cost-analysis-heading\"", view);
+        Assert.Contains("card-header bg-info text-dark", view);
         Assert.Contains("Khoản mục chi phí", view);
         Assert.Contains("Định mức (Target)", view);
         Assert.Contains("Thực tế (Actual)", view);

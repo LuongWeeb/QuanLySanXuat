@@ -141,6 +141,41 @@ public class WorkOrderActualCostingTests
     }
 
     [Fact]
+    public async Task CompleteWorkOrderAsync_WhenRoutingHasDuplicateStepNumbers_UsesHighestStepId()
+    {
+        await using var context = CreateContext();
+        await SeedCompletionAsync(
+            context,
+            finalQty: 2m,
+            laborRate: 12m,
+            machineRate: 0m,
+            startTime: null,
+            endTime: null);
+        AddRouting(context, standardTimeMinutes: 60m);
+        await context.SaveChangesAsync();
+        var routing = await context.Routings.Include(candidate => candidate.Steps).SingleAsync();
+        var olderStepId = Assert.Single(routing.Steps).Id;
+        var newerStep = new RoutingStep
+        {
+            RoutingId = routing.Id,
+            StepNumber = 10,
+            StepName = "Corrected standard",
+            WorkCenterId = 1,
+            StandardTimeMinutes = 30m
+        };
+        context.RoutingSteps.Add(newerStep);
+        await context.SaveChangesAsync();
+        Assert.True(newerStep.Id > olderStepId);
+        context.ChangeTracker.Clear();
+
+        Assert.True(await new WorkOrderService(context)
+            .CompleteWorkOrderAsync(WorkOrderId, "worker"));
+
+        var finishedLot = await context.Lots.SingleAsync(lot => lot.WorkOrderId == WorkOrderId);
+        Assert.Equal(3m, finishedLot.UnitPrice);
+    }
+
+    [Fact]
     public async Task CompleteWorkOrderAsync_WhenFinalQuantityIsZero_StoresZeroUnitCost()
     {
         await using var context = CreateContext();
