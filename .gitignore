@@ -48,3 +48,7 @@ appsettings.Production.json
 # Local container secrets (copy from the tracked .env.example)
 .env
 secrets/
+
+# Subagent temporary artifacts
+.superpowers/
+
