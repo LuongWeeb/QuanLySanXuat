@@ -17,6 +17,11 @@ public class GoodsReceipt
     [ForeignKey(nameof(SupplierId))]
     public virtual Supplier? Supplier { get; set; }
 
+    public int? PurchaseOrderId { get; set; }
+
+    [ForeignKey(nameof(PurchaseOrderId))]
+    public virtual PurchaseOrder? PurchaseOrder { get; set; }
+
     [Required]
     public DateTime ReceiptDate { get; set; } = DateTime.UtcNow;
 

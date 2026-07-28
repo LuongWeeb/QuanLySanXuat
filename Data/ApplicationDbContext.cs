@@ -39,6 +39,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<GoodsIssueLine> GoodsIssueLines { get; set; }
 
+    public DbSet<SalesOrder> SalesOrders { get; set; }
+
+    public DbSet<SalesOrderItem> SalesOrderItems { get; set; }
+
+    public DbSet<PurchaseRequest> PurchaseRequests { get; set; }
+
+    public DbSet<PurchaseRequestItem> PurchaseRequestItems { get; set; }
+
+    public DbSet<PurchaseOrder> PurchaseOrders { get; set; }
+
+    public DbSet<PurchaseOrderItem> PurchaseOrderItems { get; set; }
+
     public DbSet<StockTransfer> StockTransfers { get; set; }
 
     public DbSet<StockTransferLine> StockTransferLines { get; set; }
@@ -172,10 +184,70 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasIndex(i => i.IssueNo)
             .IsUnique();
 
+        builder.Entity<SalesOrder>()
+            .HasIndex(order => order.OrderNo)
+            .IsUnique();
+
+        builder.Entity<PurchaseRequest>()
+            .HasIndex(request => request.RequestNo)
+            .IsUnique();
+
+        builder.Entity<PurchaseOrder>()
+            .HasIndex(order => order.OrderNo)
+            .IsUnique();
+
         builder.Entity<GoodsIssue>()
             .HasOne(issue => issue.Customer)
             .WithMany(customer => customer.GoodsIssues)
             .HasForeignKey(issue => issue.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<SalesOrder>()
+            .HasOne(order => order.Customer)
+            .WithMany()
+            .HasForeignKey(order => order.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<SalesOrderItem>()
+            .HasOne(item => item.SalesOrder)
+            .WithMany(order => order.Items)
+            .HasForeignKey(item => item.SalesOrderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<SalesOrderItem>()
+            .HasOne(item => item.Product)
+            .WithMany()
+            .HasForeignKey(item => item.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<PurchaseRequestItem>()
+            .HasOne(item => item.PurchaseRequest)
+            .WithMany(request => request.Items)
+            .HasForeignKey(item => item.PurchaseRequestId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<PurchaseRequestItem>()
+            .HasOne(item => item.Product)
+            .WithMany()
+            .HasForeignKey(item => item.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<PurchaseOrder>()
+            .HasOne(order => order.Supplier)
+            .WithMany()
+            .HasForeignKey(order => order.SupplierId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<PurchaseOrderItem>()
+            .HasOne(item => item.PurchaseOrder)
+            .WithMany(order => order.Items)
+            .HasForeignKey(item => item.PurchaseOrderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<PurchaseOrderItem>()
+            .HasOne(item => item.Product)
+            .WithMany()
+            .HasForeignKey(item => item.ProductId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<GoodsReceiptLine>()

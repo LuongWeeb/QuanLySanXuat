@@ -24,5 +24,10 @@ public class GoodsIssue
     [ForeignKey(nameof(CustomerId))]
     public virtual Customer? Customer { get; set; }
 
+    public int? SalesOrderId { get; set; }
+
+    [ForeignKey(nameof(SalesOrderId))]
+    public virtual SalesOrder? SalesOrder { get; set; }
+
     public virtual ICollection<GoodsIssueLine> Lines { get; set; } = new List<GoodsIssueLine>();
 }
