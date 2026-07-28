@@ -157,6 +157,102 @@ public class MesCoreServiceTests
     }
 
     [Fact]
+    public async Task ApproveWorkOrderAsync_SelectsHighestActiveIdsAndStoresTargetCostSnapshot()
+    {
+        await using var context = CreateContext();
+        await SeedCommonDataAsync(context);
+        var workCenter = await context.WorkCenters.SingleAsync();
+        workCenter.HourlyLaborRate = 3m;
+        workCenter.HourlyMachineRate = 4m;
+        context.WorkOrders.Add(new WorkOrder
+        {
+            Id = 100,
+            Code = "WO-001",
+            ProductId = 1,
+            Qty = 10m,
+            DueDate = DateTime.Today,
+            Status = WorkOrderStatus.Draft
+        });
+        context.BOMs.AddRange(
+            new BOM
+            {
+                Id = 201,
+                ProductId = 1,
+                Version = "B-OLD",
+                IsActive = true,
+                TotalMaterialCost = 99m,
+                Items = { new BOMItem { ComponentProductId = 2, QtyPer = 1m } }
+            },
+            new BOM
+            {
+                Id = 202,
+                ProductId = 1,
+                Version = "B-NEW",
+                IsActive = true,
+                TotalMaterialCost = 2m,
+                Items = { new BOMItem { ComponentProductId = 2, QtyPer = 1m } }
+            });
+        context.Routings.AddRange(
+            new Routing
+            {
+                Id = 301,
+                ProductId = 1,
+                Name = "Old",
+                Version = "R-OLD",
+                IsActive = true,
+                Steps =
+                {
+                    new RoutingStep
+                    {
+                        StepNumber = 10,
+                        StepName = "Old",
+                        WorkCenterId = 1,
+                        StandardTimeMinutes = 120m
+                    }
+                }
+            },
+            new Routing
+            {
+                Id = 302,
+                ProductId = 1,
+                Name = "New",
+                Version = "R-NEW",
+                IsActive = true,
+                Steps =
+                {
+                    new RoutingStep
+                    {
+                        StepNumber = 10,
+                        StepName = "New",
+                        WorkCenterId = 1,
+                        StandardTimeMinutes = 60m
+                    }
+                }
+            });
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 2,
+            LotId = 10,
+            LocationId = 77,
+            QtyAvailable = 10m
+        });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        Assert.True(await new WorkOrderService(context)
+            .ApproveWorkOrderAsync(100, "planner"));
+
+        var order = await context.WorkOrders.Include(candidate => candidate.Steps)
+            .SingleAsync(candidate => candidate.Id == 100);
+        Assert.Equal("B-NEW", order.BomVersion);
+        Assert.Equal("R-NEW", order.RoutingVersion);
+        Assert.Equal("New", Assert.Single(order.Steps).StepName);
+        Assert.Equal(20m, order.TargetMaterialCost);
+        Assert.Equal(30m, order.TargetLaborCost);
+        Assert.Equal(40m, order.TargetMachineCost);
+    }
+
+    [Fact]
     public async Task ApproveWorkOrderAsync_ThrowsWhenAvailableMaterialIsInsufficient()
     {
         await using var context = CreateContext();

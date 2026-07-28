@@ -64,17 +64,51 @@ public class WorkOrderController : Controller
             .Include(x => x.Location)
             .Where(x => x.WorkOrderId == id)
             .ToListAsync();
-        var activeBomMaterialCost = await _context.BOMs.AsNoTracking()
-            .Where(bom => bom.ProductId == order.ProductId && bom.IsActive)
-            .OrderByDescending(bom => bom.Id)
-            .Select(bom => (decimal?)bom.TotalMaterialCost)
-            .FirstOrDefaultAsync() ?? 0m;
-        var activeRouting = await _context.Routings.AsNoTracking()
-            .Include(routing => routing.Steps)
-                .ThenInclude(step => step.WorkCenter)
-            .Where(routing => routing.ProductId == order.ProductId && routing.IsActive)
-            .OrderByDescending(routing => routing.Id)
-            .FirstOrDefaultAsync();
+        var targetSnapshotPresent =
+            order.TargetMaterialCost.HasValue &&
+            order.TargetLaborCost.HasValue &&
+            order.TargetMachineCost.HasValue;
+        var actualSnapshotPresent =
+            order.ActualMaterialCost.HasValue &&
+            order.ActualLaborCost.HasValue &&
+            order.ActualMachineCost.HasValue;
+        decimal? selectedBomMaterialCost = null;
+        if (!targetSnapshotPresent)
+        {
+            var bomQuery = _context.BOMs.AsNoTracking()
+                .Where(bom => bom.ProductId == order.ProductId);
+            bomQuery = string.IsNullOrWhiteSpace(order.BomVersion)
+                ? bomQuery.Where(bom => bom.IsActive)
+                : bomQuery.Where(bom => bom.Version == order.BomVersion);
+            selectedBomMaterialCost = await bomQuery
+                .OrderByDescending(bom => bom.Id)
+                .Select(bom => (decimal?)bom.TotalMaterialCost)
+                .FirstOrDefaultAsync();
+        }
+
+        Routing? selectedRouting = null;
+        if (!targetSnapshotPresent || !actualSnapshotPresent)
+        {
+            var routingQuery = _context.Routings.AsNoTracking()
+                .Include(routing => routing.Steps)
+                    .ThenInclude(step => step.WorkCenter)
+                .Where(routing => routing.ProductId == order.ProductId);
+            routingQuery = string.IsNullOrWhiteSpace(order.RoutingVersion)
+                ? routingQuery.Where(routing => routing.IsActive)
+                : routingQuery.Where(routing => routing.Version == order.RoutingVersion);
+            selectedRouting = await routingQuery
+                .OrderByDescending(routing => routing.Id)
+                .FirstOrDefaultAsync();
+        }
+        decimal? actualUnitCostSnapshot = null;
+        if (actualSnapshotPresent)
+        {
+            actualUnitCostSnapshot = await _context.Lots.AsNoTracking()
+                .Where(lot => lot.WorkOrderId == order.Id)
+                .OrderByDescending(lot => lot.Id)
+                .Select(lot => (decimal?)lot.UnitPrice)
+                .FirstOrDefaultAsync();
+        }
 
         return View(new WorkOrderDetailsViewModel
         {
@@ -83,8 +117,9 @@ public class WorkOrderController : Controller
             CostAnalysis = BuildCostAnalysis(
                 order,
                 reservations,
-                activeBomMaterialCost,
-                activeRouting)
+                selectedBomMaterialCost ?? 0m,
+                selectedRouting,
+                actualUnitCostSnapshot)
         });
     }
 
@@ -312,61 +347,86 @@ public class WorkOrderController : Controller
         WorkOrder order,
         IReadOnlyCollection<MaterialReservation> reservations,
         decimal targetMaterialCostPerUnit,
-        Routing? activeRouting)
+        Routing? activeRouting,
+        decimal? actualUnitCostSnapshot)
     {
         var plannedQuantity = order.Qty > 0m ? order.Qty : 0m;
-        var targetMaterialCost = targetMaterialCostPerUnit * plannedQuantity;
-        var targetLaborCostPerUnit = activeRouting?.Steps.Sum(step =>
-            step.StandardTimeMinutes / 60m *
-            (step.WorkCenter?.HourlyLaborRate ?? 0m)) ?? 0m;
-        var targetMachineCostPerUnit = activeRouting?.Steps.Sum(step =>
-            step.StandardTimeMinutes / 60m *
-            (step.WorkCenter?.HourlyMachineRate ?? 0m)) ?? 0m;
-        var targetLaborCost = targetLaborCostPerUnit * plannedQuantity;
-        var targetMachineCost = targetMachineCostPerUnit * plannedQuantity;
+        var targetSnapshotPresent =
+            order.TargetMaterialCost.HasValue &&
+            order.TargetLaborCost.HasValue &&
+            order.TargetMachineCost.HasValue;
+        var targetMaterialCost = order.TargetMaterialCost ??
+            targetMaterialCostPerUnit * plannedQuantity;
+        var targetLaborCost = order.TargetLaborCost ??
+            (activeRouting?.Steps.Sum(step =>
+                step.StandardTimeMinutes / 60m *
+                (step.WorkCenter?.HourlyLaborRate ?? 0m)) ?? 0m) * plannedQuantity;
+        var targetMachineCost = order.TargetMachineCost ??
+            (activeRouting?.Steps.Sum(step =>
+                step.StandardTimeMinutes / 60m *
+                (step.WorkCenter?.HourlyMachineRate ?? 0m)) ?? 0m) * plannedQuantity;
 
-        var actualMaterialCost = reservations.Sum(reservation =>
+        var actualSnapshotPresent =
+            order.ActualMaterialCost.HasValue &&
+            order.ActualLaborCost.HasValue &&
+            order.ActualMachineCost.HasValue;
+        var actualMaterialCost = order.ActualMaterialCost ?? reservations.Sum(reservation =>
             reservation.QtyReserved * (reservation.Lot?.UnitPrice ?? 0m));
-        var actualLaborCost = 0m;
-        var actualMachineCost = 0m;
-        foreach (var step in order.Steps)
+        var actualLaborCost = order.ActualLaborCost ?? 0m;
+        var actualMachineCost = order.ActualMachineCost ?? 0m;
+        if (!actualSnapshotPresent)
         {
-            if (step.WorkCenter is null)
+            foreach (var step in order.Steps)
             {
-                continue;
-            }
+                if (step.WorkCenter is null)
+                {
+                    continue;
+                }
 
-            var durationMinutes = step.StartTime.HasValue && step.EndTime.HasValue
-                ? (decimal)(step.EndTime.Value - step.StartTime.Value).TotalMinutes
-                : 0m;
-            if (durationMinutes <= 0m)
-            {
-                var standardTimeMinutes = activeRouting?.Steps
-                    .Where(routingStep => routingStep.StepNumber == step.StepNumber)
-                    .OrderByDescending(routingStep => routingStep.Id)
-                    .Select(routingStep => routingStep.StandardTimeMinutes)
-                    .FirstOrDefault() ?? 0m;
-                durationMinutes = standardTimeMinutes > 0m
-                    ? standardTimeMinutes
+                var durationMinutes = step.StartTime.HasValue && step.EndTime.HasValue
+                    ? (decimal)(step.EndTime.Value - step.StartTime.Value).TotalMinutes
                     : 0m;
-            }
+                if (durationMinutes <= 0m)
+                {
+                    var standardTimeMinutes = activeRouting?.Steps
+                        .Where(routingStep => routingStep.StepNumber == step.StepNumber)
+                        .OrderByDescending(routingStep => routingStep.Id)
+                        .Select(routingStep => routingStep.StandardTimeMinutes)
+                        .FirstOrDefault() ?? 0m;
+                    durationMinutes = standardTimeMinutes > 0m
+                        ? standardTimeMinutes
+                        : 0m;
+                }
 
-            actualLaborCost += durationMinutes / 60m *
-                step.WorkCenter.HourlyLaborRate;
-            actualMachineCost += durationMinutes / 60m *
-                step.WorkCenter.HourlyMachineRate;
+                actualLaborCost += durationMinutes / 60m *
+                    step.WorkCenter.HourlyLaborRate;
+                actualMachineCost += durationMinutes / 60m *
+                    step.WorkCenter.HourlyMachineRate;
+            }
         }
 
         var rawTargetTotalCost = targetMaterialCost + targetLaborCost + targetMachineCost;
         var rawActualTotalCost = actualMaterialCost + actualLaborCost + actualMachineCost;
-        var targetBreakdown = RoundCostBreakdown(
-            targetMaterialCost,
-            targetLaborCost,
-            targetMachineCost);
-        var actualBreakdown = RoundCostBreakdown(
-            actualMaterialCost,
-            actualLaborCost,
-            actualMachineCost);
+        var targetBreakdown = targetSnapshotPresent
+            ? new ProductionCostBreakdown(
+                targetMaterialCost,
+                targetLaborCost,
+                targetMachineCost,
+                rawTargetTotalCost)
+            : ProductionCostBreakdown.FromRaw(
+                targetMaterialCost,
+                targetLaborCost,
+                targetMachineCost);
+        var actualBreakdown = actualSnapshotPresent
+            ? new ProductionCostBreakdown(
+                actualMaterialCost,
+                actualLaborCost,
+                actualMachineCost,
+                rawActualTotalCost)
+            : ProductionCostBreakdown.FromRaw(
+                actualMaterialCost,
+                actualLaborCost,
+                actualMachineCost);
         var materialComparison = new CostComparisonViewModel(
             targetBreakdown.Material,
             actualBreakdown.Material);
@@ -386,9 +446,10 @@ public class WorkOrderController : Controller
         var targetUnitCost = plannedQuantity > 0m
             ? rawTargetTotalCost / plannedQuantity
             : 0m;
-        var actualUnitCost = finishedOutputQuantity > 0m
+        var actualUnitCost = actualUnitCostSnapshot ??
+            (finishedOutputQuantity > 0m
             ? rawActualTotalCost / finishedOutputQuantity
-            : 0m;
+            : 0m);
 
         return new ProductionCostAnalysisViewModel
         {
@@ -398,36 +459,6 @@ public class WorkOrderController : Controller
             TotalCost = new CostComparisonViewModel(targetTotalCost, actualTotalCost),
             UnitCost = new CostComparisonViewModel(targetUnitCost, actualUnitCost)
         };
-    }
-
-    private static (
-        decimal Material,
-        decimal Labor,
-        decimal Machine,
-        decimal Total) RoundCostBreakdown(
-        decimal material,
-        decimal labor,
-        decimal machine)
-    {
-        var rounded = new[]
-        {
-            Math.Round(material, 2, MidpointRounding.AwayFromZero),
-            Math.Round(labor, 2, MidpointRounding.AwayFromZero),
-            Math.Round(machine, 2, MidpointRounding.AwayFromZero)
-        };
-        var raw = new[] { material, labor, machine };
-        var total = Math.Round(
-            material + labor + machine,
-            2,
-            MidpointRounding.AwayFromZero);
-        var residual = total - rounded.Sum();
-        if (residual != 0m)
-        {
-            var largestIndex = Array.IndexOf(raw, raw.Max());
-            rounded[largestIndex] += residual;
-        }
-
-        return (rounded[0], rounded[1], rounded[2], total);
     }
 
     private enum DailyLogSaveResult

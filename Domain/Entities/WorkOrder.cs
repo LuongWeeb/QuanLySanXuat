@@ -35,6 +35,24 @@ public class WorkOrder
     [MaxLength(50)]
     public string RoutingVersion { get; set; } = string.Empty;
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? TargetMaterialCost { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? TargetLaborCost { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? TargetMachineCost { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ActualMaterialCost { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ActualLaborCost { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ActualMachineCost { get; set; }
+
     public virtual ICollection<WorkOrderStep> Steps { get; set; } = new List<WorkOrderStep>();
 
     public virtual ICollection<DailyProductionLog> DailyProductionLogs { get; set; } = new List<DailyProductionLog>();

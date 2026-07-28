@@ -34,6 +34,10 @@ public class WorkOrderActualCostingTests
         var receipt = await context.StockTransactions.SingleAsync(transaction =>
             transaction.Type == TransactionType.Receipt &&
             transaction.LotId == finishedLot.Id);
+        var order = await context.WorkOrders.SingleAsync(candidate => candidate.Id == WorkOrderId);
+        Assert.Equal(4.35m, order.ActualMaterialCost);
+        Assert.Equal(1m, order.ActualLaborCost);
+        Assert.Equal(0m, order.ActualMachineCost);
         Assert.Equal(2.68m, finishedLot.UnitPrice);
         Assert.Equal(finishedLot.UnitPrice, receipt.ValuationRate);
     }
@@ -175,14 +179,17 @@ public class WorkOrderActualCostingTests
         Assert.Equal(3m, finishedLot.UnitPrice);
     }
 
-    [Fact]
-    public async Task CompleteWorkOrderAsync_WhenFinalQuantityIsZero_StoresZeroUnitCost()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task CompleteWorkOrderAsync_WhenFinalQuantityIsNotPositive_RejectsBeforeInventoryWrites(
+        decimal finalQty)
     {
         await using var context = CreateContext();
         var start = new DateTime(2026, 7, 27, 1, 0, 0, DateTimeKind.Utc);
         await SeedCompletionAsync(
             context,
-            finalQty: 0m,
+            finalQty: finalQty,
             laborRate: 12m,
             machineRate: 0m,
             startTime: start,
@@ -191,16 +198,70 @@ public class WorkOrderActualCostingTests
             materialUnitPrice: 4m);
         context.ChangeTracker.Clear();
 
-        var completed = await new WorkOrderService(context)
-            .CompleteWorkOrderAsync(WorkOrderId, "worker");
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new WorkOrderService(context).CompleteWorkOrderAsync(WorkOrderId, "worker"));
 
-        Assert.True(completed);
+        Assert.Contains("greater than zero", exception.Message);
+        Assert.Empty(await context.Lots.Where(lot => lot.WorkOrderId == WorkOrderId).ToListAsync());
+        Assert.Empty(await context.StockTransactions.ToListAsync());
+        Assert.Empty(await context.LotGenealogies.ToListAsync());
+        Assert.Equal(
+            1m,
+            (await context.StockBalances.SingleAsync(balance => balance.LotId == 10)).QtyReserved);
+        Assert.Equal(
+            1m,
+            (await context.MaterialReservations.SingleAsync()).QtyReserved);
+        Assert.Equal(
+            WorkOrderStatus.InProgress,
+            (await context.WorkOrders.SingleAsync(order => order.Id == WorkOrderId)).Status);
+    }
+
+    [Fact]
+    public async Task CompleteWorkOrderAsync_UsesCapturedRoutingAndStoresActualCostSnapshot()
+    {
+        await using var context = CreateContext();
+        await SeedCompletionAsync(
+            context,
+            finalQty: 2m,
+            laborRate: 12m,
+            machineRate: 6m,
+            startTime: null,
+            endTime: null,
+            materialQty: 1m,
+            materialUnitPrice: 4m);
+        AddRouting(context, standardTimeMinutes: 60m);
+        await context.SaveChangesAsync();
+        context.WorkOrders.Single(order => order.Id == WorkOrderId).RoutingVersion = "R-60";
+        context.Routings.Add(new Routing
+        {
+            ProductId = 1,
+            Name = "Corrected captured routing",
+            Version = "R-60",
+            IsActive = true,
+            Steps =
+            {
+                new RoutingStep
+                {
+                    StepNumber = 10,
+                    StepName = "Operation",
+                    WorkCenterId = 1,
+                    StandardTimeMinutes = 30m
+                }
+            }
+        });
+        AddRouting(context, standardTimeMinutes: 15m);
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        Assert.True(await new WorkOrderService(context)
+            .CompleteWorkOrderAsync(WorkOrderId, "worker"));
+
+        var order = await context.WorkOrders.SingleAsync(candidate => candidate.Id == WorkOrderId);
         var finishedLot = await context.Lots.SingleAsync(lot => lot.WorkOrderId == WorkOrderId);
-        var receipt = await context.StockTransactions.SingleAsync(transaction =>
-            transaction.Type == TransactionType.Receipt &&
-            transaction.LotId == finishedLot.Id);
-        Assert.Equal(0m, finishedLot.UnitPrice);
-        Assert.Equal(0m, receipt.ValuationRate);
+        Assert.Equal(4m, order.ActualMaterialCost);
+        Assert.Equal(6m, order.ActualLaborCost);
+        Assert.Equal(3m, order.ActualMachineCost);
+        Assert.Equal(6.5m, finishedLot.UnitPrice);
     }
 
     [Fact]

@@ -71,7 +71,9 @@ public class WorkOrderService : IWorkOrderService
 
             var bom = await _context.BOMs
                 .Include(b => b.Items)
-                .FirstOrDefaultAsync(b => b.ProductId == workOrder.ProductId && b.IsActive);
+                .Where(b => b.ProductId == workOrder.ProductId && b.IsActive)
+                .OrderByDescending(b => b.Id)
+                .FirstOrDefaultAsync();
             if (bom == null)
             {
                 throw new InvalidOperationException("Active BOM was not found for the work order product.");
@@ -79,7 +81,10 @@ public class WorkOrderService : IWorkOrderService
 
             var routing = await _context.Routings
                 .Include(r => r.Steps)
-                .FirstOrDefaultAsync(r => r.ProductId == workOrder.ProductId && r.IsActive);
+                    .ThenInclude(step => step.WorkCenter)
+                .Where(r => r.ProductId == workOrder.ProductId && r.IsActive)
+                .OrderByDescending(r => r.Id)
+                .FirstOrDefaultAsync();
             if (routing == null)
             {
                 throw new InvalidOperationException("Active routing was not found for the work order product.");
@@ -157,6 +162,20 @@ public class WorkOrderService : IWorkOrderService
 
             workOrder.BomVersion = bom.Version;
             workOrder.RoutingVersion = routing.Version;
+            var rawTargetMaterialCost = bom.TotalMaterialCost * workOrder.Qty;
+            var rawTargetLaborCost = routing.Steps.Sum(step =>
+                step.StandardTimeMinutes / 60m *
+                (step.WorkCenter?.HourlyLaborRate ?? 0m)) * workOrder.Qty;
+            var rawTargetMachineCost = routing.Steps.Sum(step =>
+                step.StandardTimeMinutes / 60m *
+                (step.WorkCenter?.HourlyMachineRate ?? 0m)) * workOrder.Qty;
+            var targetBreakdown = ProductionCostBreakdown.FromRaw(
+                rawTargetMaterialCost,
+                rawTargetLaborCost,
+                rawTargetMachineCost);
+            workOrder.TargetMaterialCost = targetBreakdown.Material;
+            workOrder.TargetLaborCost = targetBreakdown.Labor;
+            workOrder.TargetMachineCost = targetBreakdown.Machine;
             workOrder.Status = WorkOrderStatus.Approved;
 
             await _context.SaveChangesAsync();
@@ -271,6 +290,12 @@ public class WorkOrderService : IWorkOrderService
                 .ThenByDescending(step => step.Id)
                 .First()
                 .QtyOK;
+            if (finalQty <= 0m)
+            {
+                throw new InvalidOperationException(
+                    "Final accepted quantity must be greater than zero.");
+            }
+
             var reservations = await _context.MaterialReservations
                 .Include(reservation => reservation.Lot)
                 .Where(reservation => reservation.WorkOrderId == workOrder.Id)
@@ -281,13 +306,18 @@ public class WorkOrderService : IWorkOrderService
                     ?? throw new InvalidOperationException(
                         "The backflush valuation lot no longer exists.")));
 
-            var activeRouting = await _context.Routings
+            var routingQuery = _context.Routings
                 .AsNoTracking()
                 .Include(routing => routing.Steps)
-                .Where(routing => routing.ProductId == workOrder.ProductId && routing.IsActive)
+                .Where(routing => routing.ProductId == workOrder.ProductId);
+            routingQuery = string.IsNullOrWhiteSpace(workOrder.RoutingVersion)
+                ? routingQuery.Where(routing => routing.IsActive)
+                : routingQuery.Where(routing => routing.Version == workOrder.RoutingVersion);
+            var capturedRouting = await routingQuery
                 .OrderByDescending(routing => routing.Id)
                 .FirstOrDefaultAsync();
-            var actualOperationCost = 0m;
+            var actualLaborCost = 0m;
+            var actualMachineCost = 0m;
             foreach (var step in workOrder.Steps)
             {
                 if (step.WorkCenter is null)
@@ -300,7 +330,7 @@ public class WorkOrderService : IWorkOrderService
                     : 0m;
                 if (durationMinutes <= 0m)
                 {
-                    var standardTimeMinutes = activeRouting?.Steps
+                    var standardTimeMinutes = capturedRouting?.Steps
                         .Where(routingStep => routingStep.StepNumber == step.StepNumber)
                         .OrderByDescending(routingStep => routingStep.Id)
                         .Select(routingStep => routingStep.StandardTimeMinutes)
@@ -310,14 +340,24 @@ public class WorkOrderService : IWorkOrderService
                         : 0m;
                 }
 
-                actualOperationCost += durationMinutes / 60m *
-                    (step.WorkCenter.HourlyLaborRate + step.WorkCenter.HourlyMachineRate);
+                actualLaborCost += durationMinutes / 60m *
+                    step.WorkCenter.HourlyLaborRate;
+                actualMachineCost += durationMinutes / 60m *
+                    step.WorkCenter.HourlyMachineRate;
             }
 
-            var totalActualCost = actualMaterialCost + actualOperationCost;
-            var unitActualCost = finalQty > 0m
-                ? Math.Round(totalActualCost / finalQty, 2, MidpointRounding.AwayFromZero)
-                : 0m;
+            var totalActualCost = actualMaterialCost + actualLaborCost + actualMachineCost;
+            var unitActualCost = Math.Round(
+                totalActualCost / finalQty,
+                2,
+                MidpointRounding.AwayFromZero);
+            var actualBreakdown = ProductionCostBreakdown.FromRaw(
+                actualMaterialCost,
+                actualLaborCost,
+                actualMachineCost);
+            workOrder.ActualMaterialCost = actualBreakdown.Material;
+            workOrder.ActualLaborCost = actualBreakdown.Labor;
+            workOrder.ActualMachineCost = actualBreakdown.Machine;
             var qcLocationId = await _context.Locations
                 .Where(location => location.Code == FinishedGoodsQcLocationCode && location.IsActive)
                 .Select(location => (int?)location.Id)

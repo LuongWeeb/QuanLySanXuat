@@ -125,6 +125,8 @@ public class WorkOrderControllerTests
         };
         var order = Order(product, "WO-COST", DateTime.UtcNow);
         order.Qty = 10m;
+        order.BomVersion = string.Empty;
+        order.RoutingVersion = string.Empty;
         order.Steps.Add(new WorkOrderStep
         {
             Id = 201,
@@ -244,6 +246,7 @@ public class WorkOrderControllerTests
         var material = Product("RM-ROUND", manufactured: false);
         var order = Order(product, "WO-ROUND", DateTime.UtcNow);
         order.Qty = 1m;
+        order.BomVersion = string.Empty;
         context.WorkOrders.Add(order);
         context.BOMs.Add(new BOM
         {
@@ -291,6 +294,8 @@ public class WorkOrderControllerTests
         };
         var order = Order(product, "WO-COMPONENT-ROUND", DateTime.UtcNow);
         order.Qty = 1m;
+        order.BomVersion = string.Empty;
+        order.RoutingVersion = string.Empty;
         order.Steps.Add(new WorkOrderStep
         {
             StepNumber = 10,
@@ -353,6 +358,8 @@ public class WorkOrderControllerTests
         var material = Product("RM-UNIT-ROUND", manufactured: false);
         var order = Order(product, "WO-UNIT-ROUND", DateTime.UtcNow);
         order.Qty = 2m;
+        order.BomVersion = string.Empty;
+        order.RoutingVersion = string.Empty;
         order.Steps.Add(new WorkOrderStep
         {
             StepNumber = 10,
@@ -386,6 +393,196 @@ public class WorkOrderControllerTests
 
         Assert.Equal(0.01m, analysis.TotalCost.Actual);
         Assert.Equal(0m, analysis.UnitCost.Actual);
+    }
+
+    [Fact]
+    public async Task Details_UsesCapturedVersionsForLegacyLiveCalculation()
+    {
+        await using var context = new ApplicationDbContext(
+            Options($"WO_CapturedVersions_{Guid.NewGuid()}"));
+        var product = Product("FG-CAPTURED");
+        var center = new WorkCenter
+        {
+            Code = "WC-CAPTURED",
+            Name = "Captured",
+            HourlyLaborRate = 2m,
+            HourlyMachineRate = 4m
+        };
+        var order = Order(product, "WO-CAPTURED", DateTime.UtcNow);
+        order.Qty = 10m;
+        order.BomVersion = "B-APPROVED";
+        order.RoutingVersion = "R-APPROVED";
+        context.WorkOrders.Add(order);
+        context.BOMs.AddRange(
+            new BOM
+            {
+                Id = 301,
+                Product = product,
+                Version = "B-APPROVED",
+                IsActive = false,
+                TotalMaterialCost = 2m
+            },
+            new BOM
+            {
+                Id = 302,
+                Product = product,
+                Version = "B-CURRENT",
+                IsActive = true,
+                TotalMaterialCost = 99m
+            });
+        context.Routings.AddRange(
+            new Routing
+            {
+                Id = 401,
+                Product = product,
+                Name = "Approved",
+                Version = "R-APPROVED",
+                IsActive = false,
+                Steps =
+                {
+                    new RoutingStep
+                    {
+                        StepNumber = 10,
+                        StepName = "Approved",
+                        WorkCenter = center,
+                        StandardTimeMinutes = 60m
+                    }
+                }
+            },
+            new Routing
+            {
+                Id = 402,
+                Product = product,
+                Name = "Current",
+                Version = "R-CURRENT",
+                IsActive = true,
+                Steps =
+                {
+                    new RoutingStep
+                    {
+                        StepNumber = 10,
+                        StepName = "Current",
+                        WorkCenter = center,
+                        StandardTimeMinutes = 120m
+                    }
+                }
+            });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        var view = Assert.IsType<ViewResult>(await Controller(context).Details(order.Id));
+        var analysis = Assert.IsType<WorkOrderDetailsViewModel>(view.Model).CostAnalysis;
+
+        Assert.Equal(20m, analysis.MaterialCost.Target);
+        Assert.Equal(20m, analysis.LaborCost.Target);
+        Assert.Equal(40m, analysis.MachineCost.Target);
+    }
+
+    [Fact]
+    public async Task Details_UsesHistoricalSnapshotsAfterCostInputsMutate()
+    {
+        await using var context = new ApplicationDbContext(
+            Options($"WO_HistoricalSnapshots_{Guid.NewGuid()}"));
+        var product = Product("FG-HISTORY");
+        var material = Product("RM-HISTORY", manufactured: false);
+        var center = new WorkCenter
+        {
+            Code = "WC-HISTORY",
+            Name = "History",
+            HourlyLaborRate = 3m,
+            HourlyMachineRate = 4m
+        };
+        var order = Order(product, "WO-HISTORY", DateTime.UtcNow);
+        order.Status = WorkOrderStatus.Completed;
+        order.Qty = 10m;
+        order.TargetMaterialCost = 20m;
+        order.TargetLaborCost = 30m;
+        order.TargetMachineCost = 40m;
+        order.ActualMaterialCost = 4m;
+        order.ActualLaborCost = 12m;
+        order.ActualMachineCost = 6m;
+        order.Steps.Add(new WorkOrderStep
+        {
+            StepNumber = 10,
+            StepName = "Output",
+            WorkCenter = center,
+            StartTime = DateTime.UtcNow.AddHours(-1),
+            EndTime = DateTime.UtcNow,
+            QtyOK = 2m,
+            Status = WorkOrderStepStatus.Completed
+        });
+        context.WorkOrders.Add(order);
+        var bom = new BOM
+        {
+            Product = product,
+            Version = "B1",
+            IsActive = true,
+            TotalMaterialCost = 2m
+        };
+        var routing = new Routing
+        {
+            Product = product,
+            Name = "Approved",
+            Version = "R1",
+            IsActive = true,
+            Steps =
+            {
+                new RoutingStep
+                {
+                    StepNumber = 10,
+                    StepName = "Approved",
+                    WorkCenter = center,
+                    StandardTimeMinutes = 60m
+                }
+            }
+        };
+        context.BOMs.Add(bom);
+        context.Routings.Add(routing);
+        var inputLot = new Lot
+        {
+            LotNo = "INPUT-HISTORY",
+            Product = material,
+            UnitPrice = 4m
+        };
+        context.MaterialReservations.Add(new MaterialReservation
+        {
+            WorkOrder = order,
+            Product = material,
+            Lot = inputLot,
+            Location = new Location
+            {
+                Code = "HISTORY",
+                Name = "History",
+                Zone = new Zone { Code = "H", Name = "History" }
+            },
+            QtyReserved = 1m
+        });
+        context.Lots.Add(new Lot
+        {
+            LotNo = "OUTPUT-HISTORY",
+            Product = product,
+            WorkOrder = order,
+            Qty = 2m,
+            UnitPrice = 11m
+        });
+        await context.SaveChangesAsync();
+
+        bom.TotalMaterialCost = 999m;
+        routing.Steps.Single().StandardTimeMinutes = 600m;
+        center.HourlyLaborRate = 999m;
+        center.HourlyMachineRate = 999m;
+        inputLot.UnitPrice = 999m;
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        var view = Assert.IsType<ViewResult>(await Controller(context).Details(order.Id));
+        var analysis = Assert.IsType<WorkOrderDetailsViewModel>(view.Model).CostAnalysis;
+
+        Assert.Equal(new CostComparisonViewModel(20m, 4m), analysis.MaterialCost);
+        Assert.Equal(new CostComparisonViewModel(30m, 12m), analysis.LaborCost);
+        Assert.Equal(new CostComparisonViewModel(40m, 6m), analysis.MachineCost);
+        Assert.Equal(new CostComparisonViewModel(90m, 22m), analysis.TotalCost);
+        Assert.Equal(new CostComparisonViewModel(9m, 11m), analysis.UnitCost);
     }
 
     [Fact]
