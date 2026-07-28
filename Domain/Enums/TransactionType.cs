@@ -6,5 +6,6 @@ public enum TransactionType
     Issue = 1,
     Transfer = 2,
     Adjust = 3,
-    Backflush = 4
+    Backflush = 4,
+    Release = 5
 }

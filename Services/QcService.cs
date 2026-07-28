@@ -74,7 +74,16 @@ public class QcService : IQcService
 
             await _context.QCInspections.AddAsync(inspection);
 
-            if (inspection.Result == QCResult.REJECT)
+            if (inspection.Result == QCResult.PASS)
+            {
+                await _context.SaveChangesAsync();
+                AddPassReleaseTransactions(
+                    inspection,
+                    balances,
+                    lot.UnitPrice,
+                    userId);
+            }
+            else if (inspection.Result == QCResult.REJECT)
             {
                 await ConsolidateHoldInQuarantineAsync(
                     balances,
@@ -107,7 +116,10 @@ public class QcService : IQcService
         foreach (var line in inspection.Lines)
         {
             var item = checklist?.Items.FirstOrDefault(i =>
-                string.Equals(i.ParameterName, line.ParameterName, StringComparison.OrdinalIgnoreCase));
+                string.Equals(
+                    i.ParameterName.Trim(),
+                    line.ParameterName.Trim(),
+                    StringComparison.OrdinalIgnoreCase));
 
             if (item is null)
             {
@@ -124,6 +136,30 @@ public class QcService : IQcService
             }
 
             line.IsOK = IsAffirmative(line.ValueInspected);
+        }
+    }
+
+    private void AddPassReleaseTransactions(
+        QCInspection inspection,
+        IEnumerable<StockBalance> balances,
+        decimal valuationRate,
+        string userId)
+    {
+        foreach (var balance in balances)
+        {
+            _context.StockTransactions.Add(new StockTransaction
+            {
+                Type = TransactionType.Release,
+                ProductId = balance.ProductId,
+                LotId = balance.LotId,
+                LocationId = balance.LocationId,
+                Qty = balance.QtyOnHold,
+                QtyAfter = balance.QtyAvailable + balance.QtyOnHold,
+                ValuationRate = valuationRate,
+                TransactionDate = DateTime.UtcNow,
+                UserId = userId,
+                ReferenceNo = $"QC-PASS-{inspection.Id}"
+            });
         }
     }
 
