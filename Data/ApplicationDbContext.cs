@@ -192,8 +192,30 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasIndex(request => request.RequestNo)
             .IsUnique();
 
+        builder.Entity<PurchaseRequest>()
+            .HasIndex(request => request.ProductionPlanId)
+            .IsUnique()
+            .HasFilter("[ProductionPlanId] IS NOT NULL");
+
         builder.Entity<PurchaseOrder>()
             .HasIndex(order => order.OrderNo)
+            .IsUnique();
+
+        builder.Entity<PurchaseOrder>()
+            .HasIndex(order => order.PurchaseRequestId)
+            .IsUnique()
+            .HasFilter("[PurchaseRequestId] IS NOT NULL");
+
+        builder.Entity<SalesOrderItem>()
+            .HasIndex(item => new { item.SalesOrderId, item.ProductId })
+            .IsUnique();
+
+        builder.Entity<PurchaseRequestItem>()
+            .HasIndex(item => new { item.PurchaseRequestId, item.ProductId })
+            .IsUnique();
+
+        builder.Entity<PurchaseOrderItem>()
+            .HasIndex(item => new { item.PurchaseOrderId, item.ProductId })
             .IsUnique();
 
         builder.Entity<GoodsIssue>()

@@ -54,6 +54,12 @@ public class PurchaseRequestService : IPurchaseRequestService
         var neededItems = (await _planService
                 .CalculatePlanRequirementsAsync(productionPlanId))
             .Where(result => result.NetDemand > 0)
+            .GroupBy(result => result.ComponentProductId)
+            .Select(group => new
+            {
+                ComponentProductId = group.Key,
+                NetDemand = group.Sum(result => result.NetDemand)
+            })
             .ToList();
         if (neededItems.Count == 0)
         {

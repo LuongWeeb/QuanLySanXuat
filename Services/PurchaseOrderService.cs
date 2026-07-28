@@ -42,21 +42,36 @@ public class PurchaseOrderService : IPurchaseOrderService
         string userId)
     {
         _ = userId;
+        var existingOrder = await _context.PurchaseOrders
+            .Include(order => order.Items)
+            .FirstOrDefaultAsync(order => order.PurchaseRequestId == requestId);
+        if (existingOrder is not null)
+        {
+            return existingOrder;
+        }
+
         var request = await _context.PurchaseRequests
             .Include(candidate => candidate.Items)
                 .ThenInclude(item => item.Product)
             .FirstOrDefaultAsync(candidate => candidate.Id == requestId);
         if (request is null ||
             request.Status != DocumentStatus.Draft ||
-            !await _context.Suppliers.AnyAsync(supplier => supplier.Id == supplierId))
+            !await _context.Suppliers.AnyAsync(supplier =>
+                supplier.Id == supplierId && supplier.IsActive))
         {
             return null;
         }
 
         var today = DateTime.UtcNow;
         var prefix = $"PO-{today:yyyyMMdd}-";
-        var sequence = await _context.PurchaseOrders
-            .CountAsync(order => order.OrderNo.StartsWith(prefix)) + 1;
+        var existingNumbers = await _context.PurchaseOrders
+            .Where(order => order.OrderNo.StartsWith(prefix))
+            .Select(order => order.OrderNo)
+            .ToListAsync();
+        var sequence = existingNumbers
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty()
+            .Max() + 1;
         var order = new PurchaseOrder
         {
             OrderNo = $"{prefix}{sequence:000}",

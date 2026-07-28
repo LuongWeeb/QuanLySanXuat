@@ -326,14 +326,29 @@ public class InventoryService : IInventoryService
                         order.Id == receipt.PurchaseOrderId.Value);
                 if (purchaseOrder is not null)
                 {
-                    foreach (var line in receipt.Lines)
+                    var orderItems = purchaseOrder.Items
+                        .GroupBy(item => item.ProductId)
+                        .ToDictionary(group => group.Key, group =>
+                            group.Count() == 1
+                                ? group.Single()
+                                : throw new InvalidOperationException(
+                                    "A purchase order cannot contain duplicate product lines."));
+                    foreach (var lineGroup in receipt.Lines.GroupBy(line => line.ProductId))
                     {
-                        var orderItem = purchaseOrder.Items
-                            .FirstOrDefault(item => item.ProductId == line.ProductId);
-                        if (orderItem is not null)
+                        if (!orderItems.TryGetValue(lineGroup.Key, out var orderItem))
                         {
-                            orderItem.ReceivedQty += line.Qty;
+                            throw new InvalidOperationException(
+                                "The receipt contains a product that is not on the linked purchase order.");
                         }
+
+                        var receivedQty = lineGroup.Sum(line => line.Qty);
+                        if (receivedQty > orderItem.Qty - orderItem.ReceivedQty)
+                        {
+                            throw new InvalidOperationException(
+                                "The receipt quantity exceeds the remaining purchase order quantity.");
+                        }
+
+                        orderItem.ReceivedQty += receivedQty;
                     }
 
                     if (purchaseOrder.Items.Count > 0 &&
@@ -532,14 +547,29 @@ public class InventoryService : IInventoryService
                         order.Id == issue.SalesOrderId.Value);
                 if (salesOrder is not null)
                 {
-                    foreach (var line in issue.Lines)
+                    var orderItems = salesOrder.Items
+                        .GroupBy(item => item.ProductId)
+                        .ToDictionary(group => group.Key, group =>
+                            group.Count() == 1
+                                ? group.Single()
+                                : throw new InvalidOperationException(
+                                    "A sales order cannot contain duplicate product lines."));
+                    foreach (var lineGroup in issue.Lines.GroupBy(line => line.ProductId))
                     {
-                        var orderItem = salesOrder.Items
-                            .FirstOrDefault(item => item.ProductId == line.ProductId);
-                        if (orderItem is not null)
+                        if (!orderItems.TryGetValue(lineGroup.Key, out var orderItem))
                         {
-                            orderItem.DeliveredQty += line.Qty;
+                            throw new InvalidOperationException(
+                                "The issue contains a product that is not on the linked sales order.");
                         }
+
+                        var deliveredQty = lineGroup.Sum(line => line.Qty);
+                        if (deliveredQty > orderItem.Qty - orderItem.DeliveredQty)
+                        {
+                            throw new InvalidOperationException(
+                                "The issue quantity exceeds the remaining sales order quantity.");
+                        }
+
+                        orderItem.DeliveredQty += deliveredQty;
                     }
 
                     if (salesOrder.Items.Count > 0 &&
@@ -729,6 +759,28 @@ public class InventoryService : IInventoryService
                 });
             }
 
+            if (receipt.PurchaseOrderId.HasValue)
+            {
+                var purchaseOrder = await _context.PurchaseOrders
+                    .Include(order => order.Items)
+                    .SingleAsync(order => order.Id == receipt.PurchaseOrderId.Value);
+                foreach (var lineGroup in receipt.Lines.GroupBy(line => line.ProductId))
+                {
+                    var orderItem = purchaseOrder.Items.Single(item =>
+                        item.ProductId == lineGroup.Key);
+                    orderItem.ReceivedQty -= lineGroup.Sum(line => line.Qty);
+                    if (orderItem.ReceivedQty < 0m)
+                    {
+                        throw new InvalidOperationException(
+                            "Cancelling the receipt would make the received quantity negative.");
+                    }
+                }
+                purchaseOrder.Status = purchaseOrder.Items.All(item =>
+                    item.ReceivedQty >= item.Qty)
+                    ? DocumentStatus.Completed
+                    : DocumentStatus.Draft;
+            }
+
             if (!_context.Database.IsRelational())
             {
                 await SetGoodsReceiptStatusAsync(receipt.Id, DocumentStatus.Cancelled);
@@ -871,6 +923,28 @@ public class InventoryService : IInventoryService
                     UserId = userId,
                     ReferenceNo = issue.IssueNo
                 });
+            }
+
+            if (issue.SalesOrderId.HasValue)
+            {
+                var salesOrder = await _context.SalesOrders
+                    .Include(order => order.Items)
+                    .SingleAsync(order => order.Id == issue.SalesOrderId.Value);
+                foreach (var lineGroup in issue.Lines.GroupBy(line => line.ProductId))
+                {
+                    var orderItem = salesOrder.Items.Single(item =>
+                        item.ProductId == lineGroup.Key);
+                    orderItem.DeliveredQty -= lineGroup.Sum(line => line.Qty);
+                    if (orderItem.DeliveredQty < 0m)
+                    {
+                        throw new InvalidOperationException(
+                            "Cancelling the issue would make the delivered quantity negative.");
+                    }
+                }
+                salesOrder.Status = salesOrder.Items.All(item =>
+                    item.DeliveredQty >= item.Qty)
+                    ? DocumentStatus.Completed
+                    : DocumentStatus.Draft;
             }
 
             if (!_context.Database.IsRelational())

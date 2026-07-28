@@ -142,6 +142,13 @@ public class BuyingSellingIntegrationTests
         var order = await context.PurchaseOrders.Include(candidate => candidate.Items).SingleAsync();
         Assert.Equal(5m, Assert.Single(order.Items).ReceivedQty);
         Assert.Equal(DocumentStatus.Completed, order.Status);
+
+        Assert.True(await new InventoryService(context)
+            .CancelGoodsReceiptAsync(1, "warehouse"));
+        context.ChangeTracker.Clear();
+        order = await context.PurchaseOrders.Include(candidate => candidate.Items).SingleAsync();
+        Assert.Equal(2m, Assert.Single(order.Items).ReceivedQty);
+        Assert.Equal(DocumentStatus.Draft, order.Status);
     }
 
     [Fact]
@@ -205,6 +212,13 @@ public class BuyingSellingIntegrationTests
         var order = await context.SalesOrders.Include(candidate => candidate.Items).SingleAsync();
         Assert.Equal(5m, Assert.Single(order.Items).DeliveredQty);
         Assert.Equal(DocumentStatus.Completed, order.Status);
+
+        Assert.True(await new InventoryService(context)
+            .CancelGoodsIssueAsync(1, "warehouse"));
+        context.ChangeTracker.Clear();
+        order = await context.SalesOrders.Include(candidate => candidate.Items).SingleAsync();
+        Assert.Equal(2m, Assert.Single(order.Items).DeliveredQty);
+        Assert.Equal(DocumentStatus.Draft, order.Status);
     }
 
     private static object CreateService(string typeName, params object[] arguments)

@@ -40,15 +40,29 @@ public class SalesOrderService : ISalesOrderService
         _ = userId;
         if (order.Items.Count == 0 ||
             order.Items.Any(item => item.Qty <= 0) ||
-            !await _context.Customers.AnyAsync(customer => customer.Id == order.CustomerId))
+            !await _context.Customers.AnyAsync(customer =>
+                customer.Id == order.CustomerId && customer.IsActive))
+        {
+            return null;
+        }
+        var productIds = order.Items.Select(item => item.ProductId).ToList();
+        if (productIds.Distinct().Count() != productIds.Count ||
+            await _context.Products.CountAsync(product =>
+                productIds.Contains(product.Id) && product.IsActive) != productIds.Count)
         {
             return null;
         }
 
         var today = DateTime.UtcNow;
         var prefix = $"SO-{today:yyyyMMdd}-";
-        var sequence = await _context.SalesOrders
-            .CountAsync(candidate => candidate.OrderNo.StartsWith(prefix)) + 1;
+        var existingNumbers = await _context.SalesOrders
+            .Where(candidate => candidate.OrderNo.StartsWith(prefix))
+            .Select(candidate => candidate.OrderNo)
+            .ToListAsync();
+        var sequence = existingNumbers
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty()
+            .Max() + 1;
         order.Id = 0;
         order.OrderNo = $"{prefix}{sequence:000}";
         order.OrderDate = today;
