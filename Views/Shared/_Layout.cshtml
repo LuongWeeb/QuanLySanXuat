@@ -34,6 +34,7 @@
             @if (User.IsInRole("Admin") || User.IsInRole("Planner") || User.IsInRole("Manager"))
             {
                 <a asp-controller="WorkOrder" asp-action="Index">Lệnh sản xuất</a>
+                <a asp-controller="ProductionPlan" asp-action="Index">Kế hoạch sản xuất (MRP)</a>
                 <a asp-controller="Mrp" asp-action="Index">Lập kế hoạch MRP</a>
                 <a asp-controller="Bom" asp-action="Index">Định mức vật tư (BOM)</a>
                 <a asp-controller="WorkCenter" asp-action="Index">Trạm sản xuất & chi phí</a>

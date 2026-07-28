@@ -1,0 +1,152 @@
+@model WmsMes.Web.Domain.Entities.ProductionPlan
+@using WmsMes.Web.Domain.Entities
+@{
+    ViewData["Title"] = "Tạo kế hoạch sản xuất";
+    var products = ViewData["Products"] as IEnumerable<Product> ?? Enumerable.Empty<Product>();
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">MES · Kế hoạch sản xuất</p>
+        <h2>Tạo kế hoạch mới</h2>
+    </div>
+    <a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a>
+</section>
+
+<form asp-action="Create" method="post" class="mt-3">
+    <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
+
+    <section class="ops-panel" aria-labelledby="plan-general-heading">
+        <h3 class="h5 mb-3" id="plan-general-heading">Thông tin chung</h3>
+        <div class="row g-3">
+            <div class="col-12 col-md-6">
+                <label asp-for="PlanNo" class="form-label">Số kế hoạch</label>
+                <input asp-for="PlanNo" class="form-control" maxlength="50" required />
+                <span asp-validation-for="PlanNo" class="text-danger"></span>
+            </div>
+            <div class="col-12 col-md-6">
+                <label asp-for="PlanDate" class="form-label">Ngày kế hoạch</label>
+                <input asp-for="PlanDate" class="form-control" type="date" required />
+                <span asp-validation-for="PlanDate" class="text-danger"></span>
+            </div>
+        </div>
+    </section>
+
+    <section class="data-panel mt-3" aria-labelledby="plan-items-heading">
+        <div class="p-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+                <h3 class="h5 mb-1" id="plan-items-heading">Sản phẩm cần sản xuất</h3>
+                <p class="text-muted small mb-0">Thêm các thành phẩm và số lượng cần lập kế hoạch.</p>
+            </div>
+            <button class="btn btn-sm btn-outline-primary" id="add-plan-item" type="button">
+                Thêm dòng sản phẩm
+            </button>
+        </div>
+        <div class="table-responsive">
+            <table class="table data-table align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Sản phẩm</th>
+                        <th scope="col" style="width: 14rem;">Số lượng kế hoạch</th>
+                        <th scope="col" class="text-end" style="width: 6rem;">Xóa</th>
+                    </tr>
+                </thead>
+                <tbody id="plan-items-body">
+                    <tr>
+                        <td>
+                            <label class="visually-hidden" for="product-0">Sản phẩm dòng 1</label>
+                            <select class="form-select product-select" id="product-0" name="productIds" required>
+                                <option value="">-- Chọn sản phẩm --</option>
+                                @foreach (var product in products)
+                                {
+                                    <option value="@product.Id">@product.Code - @product.Name</option>
+                                }
+                            </select>
+                        </td>
+                        <td>
+                            <label class="visually-hidden" for="quantity-0">Số lượng kế hoạch dòng 1</label>
+                            <input class="form-control quantity-input" id="quantity-0" name="plannedQtys"
+                                   type="number" min="0.01" step="0.01" required />
+                        </td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-outline-danger remove-plan-item" type="button"
+                                    aria-label="Xóa dòng sản phẩm">Xóa</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <div class="d-flex gap-2 mt-3">
+        <button class="btn btn-primary" type="submit">Lưu kế hoạch nháp</button>
+        <a class="btn btn-outline-secondary" asp-action="Index">Hủy</a>
+    </div>
+</form>
+
+<template id="plan-item-template">
+    <tr>
+        <td>
+            <label class="visually-hidden product-label" for="product-__index__">Sản phẩm</label>
+            <select class="form-select product-select" id="product-__index__" name="productIds" required>
+                <option value="">-- Chọn sản phẩm --</option>
+                @foreach (var product in products)
+                {
+                    <option value="@product.Id">@product.Code - @product.Name</option>
+                }
+            </select>
+        </td>
+        <td>
+            <label class="visually-hidden quantity-label" for="quantity-__index__">Số lượng kế hoạch</label>
+            <input class="form-control quantity-input" id="quantity-__index__" name="plannedQtys"
+                   type="number" min="0.01" step="0.01" required />
+        </td>
+        <td class="text-end">
+            <button class="btn btn-sm btn-outline-danger remove-plan-item" type="button"
+                    aria-label="Xóa dòng sản phẩm">Xóa</button>
+        </td>
+    </tr>
+</template>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script>
+        (() => {
+            const body = document.getElementById('plan-items-body');
+            const template = document.getElementById('plan-item-template');
+
+            function reindexRows() {
+                [...body.rows].forEach((row, index) => {
+                    const product = row.querySelector('.product-select');
+                    const quantity = row.querySelector('.quantity-input');
+                    const productLabel = row.querySelector('.product-label, label[for^="product-"]');
+                    const quantityLabel = row.querySelector('.quantity-label, label[for^="quantity-"]');
+                    product.id = `product-${index}`;
+                    quantity.id = `quantity-${index}`;
+                    productLabel.htmlFor = product.id;
+                    quantityLabel.htmlFor = quantity.id;
+                    productLabel.textContent = `Sản phẩm dòng ${index + 1}`;
+                    quantityLabel.textContent = `Số lượng kế hoạch dòng ${index + 1}`;
+                });
+            }
+
+            document.getElementById('add-plan-item').addEventListener('click', () => {
+                const index = body.rows.length;
+                body.insertAdjacentHTML('beforeend', template.innerHTML.replaceAll('__index__', index));
+                reindexRows();
+            });
+
+            body.addEventListener('click', event => {
+                const button = event.target.closest('.remove-plan-item');
+                if (!button) return;
+                if (body.rows.length === 1) {
+                    body.querySelector('.product-select').value = '';
+                    body.querySelector('.quantity-input').value = '';
+                    return;
+                }
+                button.closest('tr').remove();
+                reindexRows();
+            });
+        })();
+    </script>
+}

@@ -1,0 +1,164 @@
+@model WmsMes.Web.Domain.Entities.ProductionPlan
+@using WmsMes.Web.Domain.Enums
+@using WmsMes.Web.DTOs
+@{
+    ViewData["Title"] = $"Kế hoạch {Model.PlanNo}";
+    var mrpResults = ViewData["MrpResults"] as IEnumerable<MrpResultDto>;
+    var mrpRun = ViewData["MrpRun"] as bool? == true;
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">MES · Kế hoạch sản xuất</p>
+        <h2>@Model.PlanNo</h2>
+    </div>
+    <a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a>
+</section>
+
+@if (TempData["StatusMessage"] is string statusMessage)
+{
+    <div class="alert alert-info mt-3" role="status">@statusMessage</div>
+}
+@if (TempData["ErrorMessage"] is string errorMessage)
+{
+    <div class="alert alert-danger mt-3" role="alert">@errorMessage</div>
+}
+
+<section class="ops-panel mt-3" aria-labelledby="plan-summary-heading">
+    <h3 class="h5 mb-3" id="plan-summary-heading">Thông tin kế hoạch</h3>
+    <dl class="row mb-0">
+        <dt class="col-sm-3">Số kế hoạch</dt>
+        <dd class="col-sm-9"><code>@Model.PlanNo</code></dd>
+        <dt class="col-sm-3">Ngày kế hoạch</dt>
+        <dd class="col-sm-9">@Model.PlanDate.ToVietnameseDate()</dd>
+        <dt class="col-sm-3">Trạng thái</dt>
+        <dd class="col-sm-9"><span class="status-pill">@Model.Status.ToVietnameseString()</span></dd>
+        <dt class="col-sm-3">Số dòng sản phẩm</dt>
+        <dd class="col-sm-9">@Model.Items.Count.ToVietnameseNumber()</dd>
+    </dl>
+</section>
+
+<section class="ops-panel mt-3" aria-labelledby="plan-actions-heading">
+    <h3 class="h5 mb-3" id="plan-actions-heading">Thao tác kế hoạch</h3>
+    <div class="d-flex flex-wrap gap-2">
+        <form asp-action="RunMrp" asp-route-id="@Model.Id" method="post">
+            <button class="btn btn-outline-primary" type="submit">Tính nhu cầu vật tư (MRP)</button>
+        </form>
+        @if (Model.Status == DocumentStatus.Draft)
+        {
+            <form asp-action="GenerateWorkOrders" asp-route-id="@Model.Id" method="post">
+                <button class="btn btn-primary" type="submit">Tạo Lệnh sản xuất</button>
+            </form>
+            <form asp-action="Complete" asp-route-id="@Model.Id" method="post">
+                <button class="btn btn-success" type="submit">Xác nhận Kế hoạch</button>
+            </form>
+        }
+    </div>
+</section>
+
+<section class="data-panel mt-3" aria-labelledby="plan-lines-heading">
+    <div class="p-3"><h3 class="h5 mb-0" id="plan-lines-heading">Sản phẩm trong kế hoạch</h3></div>
+    <div class="table-responsive">
+        <table class="table data-table align-middle mb-0">
+            <thead>
+                <tr>
+                    <th scope="col">Sản phẩm</th>
+                    <th scope="col" class="text-end">Số lượng kế hoạch</th>
+                    <th scope="col">Lệnh sản xuất</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var item in Model.Items)
+            {
+                <tr>
+                    <td><code>@item.Product?.Code</code> - @item.Product?.Name</td>
+                    <td class="text-end fw-semibold">@item.PlannedQty.ToVietnameseNumber()</td>
+                    <td>
+                        @if (item.WorkOrder is not null)
+                        {
+                            <a asp-controller="WorkOrder" asp-action="Details" asp-route-id="@item.WorkOrder.Id">
+                                @item.WorkOrder.Code
+                            </a>
+                            <span class="status-pill ms-2">@item.WorkOrder.Status.ToVietnameseString()</span>
+                        }
+                        else
+                        {
+                            <span class="text-muted">Chưa tạo</span>
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@if (mrpRun)
+{
+    <section class="data-panel mt-3" aria-labelledby="mrp-result-heading">
+        <div class="p-3">
+            <h3 class="h5 mb-1" id="mrp-result-heading">Kết quả MRP tổng hợp</h3>
+            <p class="text-muted small mb-0">Tồn khả dụng được tổng hợp trên toàn hệ thống kho.</p>
+        </div>
+        <div class="table-responsive">
+            <table class="table data-table align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Vật tư</th>
+                        <th scope="col" class="text-end">Nhu cầu thô</th>
+                        <th scope="col" class="text-end">Tồn khả dụng</th>
+                        <th scope="col" class="text-end">Thiếu hụt</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var result in mrpResults ?? Enumerable.Empty<MrpResultDto>())
+                {
+                    <tr>
+                        <td><code>@result.ComponentCode</code> - @result.ComponentName</td>
+                        <td class="text-end">@result.GrossDemand.ToVietnameseNumber()</td>
+                        <td class="text-end">@result.StockAvailable.ToVietnameseNumber()</td>
+                        <td class="text-end fw-semibold @(result.NetDemand > 0 ? "text-danger" : "text-success")">
+                            @result.NetDemand.ToVietnameseNumber()
+                        </td>
+                    </tr>
+                }
+                @if (mrpResults is null || !mrpResults.Any())
+                {
+                    <tr>
+                        <td colspan="4" class="text-center text-muted py-3">
+                            Không có nhu cầu vật tư để hiển thị.
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+<section class="data-panel mt-3" aria-labelledby="linked-orders-heading">
+    <div class="p-3"><h3 class="h5 mb-0" id="linked-orders-heading">Lệnh sản xuất liên kết</h3></div>
+    <div class="table-responsive">
+        <table class="table data-table align-middle mb-0">
+            <thead><tr><th scope="col">Mã lệnh</th><th scope="col">Sản phẩm</th><th scope="col">Trạng thái</th></tr></thead>
+            <tbody>
+            @foreach (var item in Model.Items.Where(item => item.WorkOrder is not null))
+            {
+                <tr>
+                    <td>
+                        <a asp-controller="WorkOrder" asp-action="Details" asp-route-id="@item.WorkOrderId">
+                            @item.WorkOrder!.Code
+                        </a>
+                    </td>
+                    <td>@item.Product?.Code - @item.Product?.Name</td>
+                    <td><span class="status-pill">@item.WorkOrder!.Status.ToVietnameseString()</span></td>
+                </tr>
+            }
+            @if (!Model.Items.Any(item => item.WorkOrder is not null))
+            {
+                <tr><td colspan="3" class="text-center text-muted py-3">Chưa có lệnh sản xuất liên kết.</td></tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</section>
