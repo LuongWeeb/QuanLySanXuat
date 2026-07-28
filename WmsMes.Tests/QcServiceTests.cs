@@ -65,6 +65,19 @@ public class QcServiceTests
         Assert.Equal(50m, balances.Single(item => item.LocationId == 2).QtyOnHold);
     }
 
+    [Fact]
+    public async Task SubmitInspection_WhenSourceDoesNotMatchType_ReturnsFalse()
+    {
+        await using var context = CreateContext();
+        await SeedAsync(context);
+        var inspection = CreateInspection("15");
+        inspection.Type = QCInspectionType.FinalFGQC;
+
+        Assert.False(await new QcService(context)
+            .SubmitQCInspectionAsync(inspection, "qc-user"));
+        Assert.Empty(await context.QCInspections.ToListAsync());
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

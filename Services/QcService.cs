@@ -48,6 +48,10 @@ public class QcService : IQcService
             {
                 return false;
             }
+            if (!HasValidSource(inspection))
+            {
+                return false;
+            }
 
             var balances = await _context.StockBalances
                 .Where(sb => sb.LotId == inspection.LotId && sb.QtyOnHold > 0 && sb.Location!.Code != QuarantineLocationCode)
@@ -283,6 +287,20 @@ public class QcService : IQcService
         return value.Equals("PASS", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("TRUE", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("OK", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasValidSource(QCInspection inspection)
+    {
+        return inspection.Type switch
+        {
+            QCInspectionType.InwardQC =>
+                inspection.GoodsReceiptId.HasValue &&
+                !inspection.WorkOrderId.HasValue,
+            QCInspectionType.FinalFGQC =>
+                inspection.WorkOrderId.HasValue &&
+                !inspection.GoodsReceiptId.HasValue,
+            _ => false
+        };
     }
 
     private async Task<IDbContextTransaction?> BeginTransactionIfRelationalAsync()

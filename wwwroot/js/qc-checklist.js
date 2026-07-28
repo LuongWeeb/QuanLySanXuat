@@ -4,10 +4,21 @@
     const addButton = document.querySelector("#add-qc-item");
     if (!tableBody || !template || !addButton) return;
 
+    const reindex = () => {
+        [...tableBody.rows].forEach((row, index) => {
+            row.querySelectorAll("[name]").forEach(field => {
+                field.name = field.name.replace(/Items\[\d+\]/, `Items[${index}]`);
+            });
+        });
+    };
+
     const bindRemove = () => {
         tableBody.querySelectorAll(".remove-qc-item").forEach(button => {
             button.onclick = () => {
-                if (tableBody.rows.length > 1) button.closest("tr")?.remove();
+                if (tableBody.rows.length > 1) {
+                    button.closest("tr")?.remove();
+                    reindex();
+                }
             };
         });
     };
@@ -17,6 +28,7 @@
         tableBody.insertAdjacentHTML(
             "beforeend",
             template.innerHTML.replaceAll("__index__", index.toString()));
+        reindex();
         bindRemove();
     });
     bindRemove();

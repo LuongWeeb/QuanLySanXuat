@@ -11,7 +11,7 @@
     </div>
 </section>
 <div class="ops-panel mt-3">
-    <form asp-action="CreateInspection" method="post">
+    <form asp-action="CreateInspection" method="post" enctype="multipart/form-data">
         <div asp-validation-summary="All" class="text-danger mb-3" role="alert"></div>
         <input asp-for="LotId" type="hidden" />
         <input asp-for="ChecklistId" type="hidden" />
@@ -49,9 +49,10 @@
             </select>
         </div>
         <div class="mb-3">
-            <label asp-for="EvidencePath" class="form-label">Đường dẫn ảnh bằng chứng</label>
-            <input asp-for="EvidencePath" class="form-control" maxlength="500" placeholder="/uploads/qc/anh-kiem-dinh.jpg" />
-            <span asp-validation-for="EvidencePath" class="text-danger"></span>
+            <label asp-for="EvidenceFile" class="form-label">Ảnh bằng chứng</label>
+            <input asp-for="EvidenceFile" type="file" class="form-control" accept="image/jpeg,image/png,image/webp" />
+            <div class="form-text">JPG, PNG hoặc WebP; tối đa 5 MB.</div>
+            <span asp-validation-for="EvidenceFile" class="text-danger"></span>
         </div>
         <div class="mb-3">
             <label asp-for="Note" class="form-label">Ghi chú</label>

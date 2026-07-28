@@ -1,4 +1,5 @@
-@model IEnumerable<WmsMes.Web.Domain.Entities.Lot>
+@model IEnumerable<WmsMes.Web.ViewModels.QcPendingLotViewModel>
+@using WmsMes.Web.Domain.Enums
 @{
     ViewData["Title"] = "Đợt kiểm định QC";
 }
@@ -22,11 +23,11 @@
             {
                 <tr>
                     <td><code>@lot.LotNo</code></td>
-                    <td>@lot.Product?.Code — @lot.Product?.Name</td>
-                    <td>@(lot.WorkOrderId.HasValue ? "Thành phẩm" : "Đầu vào")</td>
-                    <td class="text-end">@lot.Qty.ToVietnameseNumber()</td>
+                    <td>@lot.ProductDisplay</td>
+                    <td>@(lot.Type == QCInspectionType.FinalFGQC ? "Thành phẩm" : "Đầu vào")</td>
+                    <td class="text-end">@lot.QtyOnHold.ToVietnameseNumber()</td>
                     <td><span class="status-pill">Tạm giữ</span></td>
-                    <td class="text-end"><a class="btn btn-sm btn-primary" asp-action="CreateInspection" asp-route-lotId="@lot.Id">Kiểm định</a></td>
+                    <td class="text-end"><a class="btn btn-sm btn-primary" asp-action="CreateInspection" asp-route-lotId="@lot.LotId">Kiểm định</a></td>
                 </tr>
             }
             </tbody>

@@ -72,6 +72,29 @@ public class QcChecklistControllerTests
         Assert.Empty(await context.QCChecklists.ToListAsync());
     }
 
+    [Fact]
+    public async Task Create_WhenParameterNamesAreDuplicated_ReturnsValidationError()
+    {
+        await using var context = CreateContext();
+        await SeedProductAsync(context);
+        var controller = new QcChecklistController(context);
+        var input = new QcChecklistInputModel
+        {
+            ProductId = 1,
+            Name = "Kiểm tra",
+            Items =
+            {
+                new QcChecklistItemInputModel { ParameterName = "Độ ẩm" },
+                new QcChecklistItemInputModel { ParameterName = " độ ẨM " }
+            }
+        };
+
+        Assert.IsType<ViewResult>(await controller.Create(input));
+
+        Assert.False(controller.ModelState.IsValid);
+        Assert.Empty(await context.QCChecklists.ToListAsync());
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

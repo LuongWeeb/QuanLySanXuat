@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Http;
 using WmsMes.Web.Domain.Enums;
 
 namespace WmsMes.Web.ViewModels;
@@ -10,6 +11,7 @@ public class QcInspectionInputModel
     public QCResult Result { get; set; }
     [MaxLength(500)] public string Note { get; set; } = string.Empty;
     [MaxLength(500)] public string EvidencePath { get; set; } = string.Empty;
+    public IFormFile? EvidenceFile { get; set; }
     public List<QcMeasurementInputModel> Measurements { get; set; } = [];
 
     public string LotNo { get; set; } = string.Empty;

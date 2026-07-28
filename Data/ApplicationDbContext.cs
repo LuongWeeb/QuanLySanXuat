@@ -550,6 +550,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasForeignKey(i => i.LotId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.Entity<QCInspection>()
+            .ToTable(table => table.HasCheckConstraint(
+                "CK_QCInspections_SourceMatchesType",
+                "([Type] = 1 AND [GoodsReceiptId] IS NOT NULL AND [WorkOrderId] IS NULL) OR ([Type] = 2 AND [WorkOrderId] IS NOT NULL AND [GoodsReceiptId] IS NULL)"));
+
         builder.Entity<Zone>()
             .HasOne(z => z.Warehouse)
             .WithMany(w => w.Zones)

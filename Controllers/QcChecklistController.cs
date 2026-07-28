@@ -148,6 +148,18 @@ public class QcChecklistController : Controller
             ModelState.AddModelError(nameof(input.Items), "Mẫu kiểm định phải có ít nhất một tiêu chí.");
         }
 
+        foreach (var duplicate in items
+            .GroupBy(entry => entry.Item.ParameterName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1))
+        {
+            foreach (var entry in duplicate)
+            {
+                ModelState.AddModelError(
+                    $"Items[{entry.Index}].{nameof(entry.Item.ParameterName)}",
+                    "Tên thông số không được trùng trong cùng một mẫu.");
+            }
+        }
+
         foreach (var entry in items)
         {
             if (entry.Item.MinVal.HasValue &&
