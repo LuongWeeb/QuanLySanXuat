@@ -46,6 +46,12 @@
         </form>
         @if (Model.Status == DocumentStatus.Draft)
         {
+            @if (mrpRun && mrpResults?.Any(result => result.NetDemand > 0) == true)
+            {
+                <form asp-action="GeneratePurchaseRequest" asp-route-id="@Model.Id" method="post">
+                    <button class="btn btn-outline-success" type="submit">Tạo Yêu cầu mua hàng từ MRP</button>
+                </form>
+            }
             <form asp-action="GenerateWorkOrders" asp-route-id="@Model.Id" method="post">
                 <button class="btn btn-primary" type="submit">Tạo Lệnh sản xuất</button>
             </form>

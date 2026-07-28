@@ -4,6 +4,7 @@ namespace WmsMes.Web.ViewModels;
 
 public class CreateReceiptViewModel
 {
+    public int? PurchaseOrderId { get; set; }
     public int SupplierId { get; set; }
     public List<ReceiptLineInput> Lines { get; set; } = new();
 }
@@ -19,6 +20,7 @@ public class ReceiptLineInput
 
 public class CreateIssueViewModel
 {
+    public int? SalesOrderId { get; set; }
     public int CustomerId { get; set; }
     public List<IssueLineInput> Lines { get; set; } = new();
 }

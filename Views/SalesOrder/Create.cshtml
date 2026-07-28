@@ -1,0 +1,35 @@
+@model WmsMes.Web.Domain.Entities.SalesOrder
+@using WmsMes.Web.Domain.Entities
+@{
+    ViewData["Title"] = "Tạo đơn bán hàng";
+    var customers = (IEnumerable<Customer>)ViewData["Customers"]!;
+    var products = (IEnumerable<Product>)ViewData["Products"]!;
+}
+<section class="toolbar-row"><div><p class="eyebrow">Bán hàng · SO</p><h2>Tạo Đơn bán hàng</h2></div><a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a></section>
+<form asp-action="Create" method="post" class="ops-panel mt-3">
+    <div asp-validation-summary="ModelOnly" class="alert alert-danger"></div>
+    <div class="row g-3">
+        <div class="col-md-6"><label asp-for="CustomerId" class="form-label">Khách hàng</label><select asp-for="CustomerId" class="form-select" required><option value="">-- Chọn khách hàng --</option>@foreach (var customer in customers) { <option value="@customer.Id">@customer.Code - @customer.Name</option> }</select></div>
+        <div class="col-md-6"><label asp-for="DeliveryDate" class="form-label">Ngày giao dự kiến</label><input asp-for="DeliveryDate" type="date" class="form-control" required /></div>
+    </div>
+    <div class="table-responsive mt-4">
+        <table class="table align-middle"><thead><tr><th>Sản phẩm</th><th>Số lượng</th><th>Đơn giá</th><th></th></tr></thead><tbody id="so-lines"></tbody></table>
+    </div>
+    <button type="button" class="btn btn-outline-primary" id="add-so-line">Thêm dòng</button>
+    <div class="d-flex gap-2 mt-3"><button class="btn btn-primary" type="submit">Lưu đơn bán hàng</button><a class="btn btn-outline-secondary" asp-action="Index">Hủy</a></div>
+</form>
+<template id="so-line-template"><tr>
+    <td><select name="productIds" class="form-select" aria-label="Sản phẩm" required><option value="">-- Chọn sản phẩm --</option>@foreach (var product in products) { <option value="@product.Id">@product.Code - @product.Name</option> }</select></td>
+    <td><input name="quantities" class="form-control" type="number" min="0.01" step="0.01" aria-label="Số lượng" required /></td>
+    <td><input name="unitPrices" class="form-control" type="number" min="0" step="0.01" aria-label="Đơn giá" required /></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove>Xóa</button></td>
+</tr></template>
+<script>
+(() => {
+ const body=document.getElementById('so-lines'), template=document.getElementById('so-line-template');
+ const add=()=>body.insertAdjacentHTML('beforeend',template.innerHTML);
+ document.getElementById('add-so-line').addEventListener('click',add);
+ body.addEventListener('click',e=>{if(e.target.matches('[data-remove]')){e.target.closest('tr').remove();if(!body.children.length)add();}});
+ add();
+})();
+</script>

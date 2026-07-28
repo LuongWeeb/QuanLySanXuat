@@ -266,6 +266,16 @@ public class InventoryController : Controller
         {
             ModelState.AddModelError(nameof(model.CustomerId), "Khách hàng không hợp lệ hoặc đã ngừng hoạt động.");
         }
+        if (model.SalesOrderId.HasValue &&
+            !await _context.SalesOrders.AsNoTracking().AnyAsync(order =>
+                order.Id == model.SalesOrderId.Value &&
+                order.CustomerId == model.CustomerId &&
+                order.Status == DocumentStatus.Draft))
+        {
+            ModelState.AddModelError(
+                nameof(model.SalesOrderId),
+                "Đơn bán hàng không hợp lệ, đã hoàn tất hoặc không thuộc khách hàng đã chọn.");
+        }
 
         if (model.Lines.Count == 0)
         {
@@ -398,6 +408,7 @@ public class InventoryController : Controller
             IssueDate = DateTime.UtcNow,
             Status = DocumentStatus.Draft,
             CustomerId = model.CustomerId,
+            SalesOrderId = model.SalesOrderId,
             Lines = model.Lines.Select(line => new GoodsIssueLine
             {
                 ProductId = line.ProductId,
@@ -464,6 +475,16 @@ public class InventoryController : Controller
             ModelState.AddModelError(string.Empty, "Không xác định được người dùng đang đăng nhập.");
         if (!await _context.Suppliers.AsNoTracking().AnyAsync(x => x.Id == model.SupplierId && x.IsActive))
             ModelState.AddModelError(nameof(model.SupplierId), "Nhà cung cấp không hợp lệ hoặc đã ngừng hoạt động.");
+        if (model.PurchaseOrderId.HasValue &&
+            !await _context.PurchaseOrders.AsNoTracking().AnyAsync(order =>
+                order.Id == model.PurchaseOrderId.Value &&
+                order.SupplierId == model.SupplierId &&
+                order.Status == DocumentStatus.Draft))
+        {
+            ModelState.AddModelError(
+                nameof(model.PurchaseOrderId),
+                "Đơn mua hàng không hợp lệ, đã hoàn tất hoặc không thuộc nhà cung cấp đã chọn.");
+        }
         if (model.Lines.Count == 0)
             ModelState.AddModelError(nameof(model.Lines), "Phiếu nhập kho phải có ít nhất một dòng.");
 
@@ -520,6 +541,7 @@ public class InventoryController : Controller
             ReceiptNo = $"GR-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
             ReceiptDate = DateTime.UtcNow,
             SupplierId = model.SupplierId,
+            PurchaseOrderId = model.PurchaseOrderId,
             Status = DocumentStatus.Draft,
             Lines = model.Lines.Select(line => new GoodsReceiptLine
             {
@@ -588,6 +610,14 @@ public class InventoryController : Controller
             .OrderBy(location => location.Code)
             .AsNoTracking()
             .ToListAsync();
+        ViewBag.PurchaseOrders = await _context.PurchaseOrders
+            .Where(order => order.Status == DocumentStatus.Draft)
+            .Include(order => order.Supplier)
+            .Include(order => order.Items)
+                .ThenInclude(item => item.Product)
+            .OrderBy(order => order.OrderNo)
+            .AsNoTracking()
+            .ToListAsync();
     }
 
     private async Task LoadIssueSelectionsAsync()
@@ -612,6 +642,14 @@ public class InventoryController : Controller
         ViewBag.Customers = await _context.Customers
             .Where(customer => customer.IsActive)
             .OrderBy(customer => customer.Code)
+            .AsNoTracking()
+            .ToListAsync();
+        ViewBag.SalesOrders = await _context.SalesOrders
+            .Where(order => order.Status == DocumentStatus.Draft)
+            .Include(order => order.Customer)
+            .Include(order => order.Items)
+                .ThenInclude(item => item.Product)
+            .OrderBy(order => order.OrderNo)
             .AsNoTracking()
             .ToListAsync();
     }

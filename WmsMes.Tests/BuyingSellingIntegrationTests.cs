@@ -13,6 +13,15 @@ namespace WmsMes.Tests;
 public class BuyingSellingIntegrationTests
 {
     [Fact]
+    public void InventoryVoucherInputs_ExposePurchaseAndSalesOrderLinks()
+    {
+        Assert.NotNull(typeof(WmsMes.Web.ViewModels.CreateReceiptViewModel)
+            .GetProperty("PurchaseOrderId"));
+        Assert.NotNull(typeof(WmsMes.Web.ViewModels.CreateIssueViewModel)
+            .GetProperty("SalesOrderId"));
+    }
+
+    [Fact]
     public async Task GenerateFromMrpAsync_CreatesPurchaseRequestForNetDemandOnly()
     {
         await using var context = CreateInMemoryContext();

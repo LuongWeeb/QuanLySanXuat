@@ -5,6 +5,7 @@
     ViewData["Title"] = "Tạo phiếu xuất kho";
     var balances = (IEnumerable<StockBalance>)ViewBag.AvailableBalances;
     var customers = (IEnumerable<Customer>)ViewBag.Customers;
+    var salesOrders = (IEnumerable<SalesOrder>)ViewBag.SalesOrders;
 }
 
 <section class="toolbar-row"><div><p class="eyebrow">Phiếu xuất kho</p><h2>Tạo Phiếu Xuất kho mới</h2></div></section>
@@ -24,6 +25,18 @@
     </div>
     <form asp-action="CreateIssue" method="post">
         <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+        <div class="mb-3 col-md-6">
+            <label asp-for="SalesOrderId" class="form-label">Đơn bán hàng (SO)</label>
+            <select asp-for="SalesOrderId" id="sales-order-select" class="form-select">
+                <option value="">-- Xuất kho không theo SO --</option>
+                @foreach (var order in salesOrders)
+                {
+                    <option value="@order.Id">@order.OrderNo · @order.Customer?.Name</option>
+                }
+            </select>
+            <div class="form-text">Chọn SO để nạp khách hàng và thành phẩm còn phải giao.</div>
+            <span asp-validation-for="SalesOrderId" class="text-danger"></span>
+        </div>
         <div class="mb-3 col-md-6">
             <label asp-for="CustomerId" class="form-label">Khách hàng</label>
             <select asp-for="CustomerId" class="form-select" required>
@@ -57,6 +70,7 @@
                                         var selected = balance.ProductId == line.ProductId && balance.LotId == line.LotId && balance.LocationId == line.LocationId;
                                         <option value="@balance.ProductId|@balance.LotId|@balance.LocationId"
                                                 data-product-id="@balance.ProductId" data-lot-id="@balance.LotId" data-location-id="@balance.LocationId"
+                                                data-available="@balance.QtyAvailable.ToString(System.Globalization.CultureInfo.InvariantCulture)"
                                                 data-product-code="@balance.Product?.Code" data-lot-no="@balance.Lot?.LotNo" data-location-code="@balance.Location?.Code"
                                                 selected="@(selected ? "selected" : null)">
                                             @balance.Product?.Code - @balance.Product?.Name | @balance.Lot?.LotNo | HSD: @(balance.Lot?.ExpiryDate?.ToVietnameseDate() ?? "FIFO") | @balance.Location?.Code | Có thể xuất: @balance.QtyAvailable.ToVietnameseNumber()
@@ -112,6 +126,7 @@
                 {
                     <option value="@balance.ProductId|@balance.LotId|@balance.LocationId"
                             data-product-id="@balance.ProductId" data-lot-id="@balance.LotId" data-location-id="@balance.LocationId"
+                            data-available="@balance.QtyAvailable.ToString(System.Globalization.CultureInfo.InvariantCulture)"
                             data-product-code="@balance.Product?.Code" data-lot-no="@balance.Lot?.LotNo" data-location-code="@balance.Location?.Code">
                         @balance.Product?.Code - @balance.Product?.Name | @balance.Lot?.LotNo | HSD: @(balance.Lot?.ExpiryDate?.ToVietnameseDate() ?? "FIFO") | @balance.Location?.Code | Có thể xuất: @balance.QtyAvailable.ToVietnameseNumber()
                     </option>
@@ -130,6 +145,15 @@
     (() => {
         const lines = document.getElementById('issue-lines');
         const template = document.getElementById('issue-line-template');
+        const salesOrders = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+            salesOrders.Select(order => new {
+                id = order.Id,
+                customerId = order.CustomerId,
+                items = order.Items.Select(item => new {
+                    productId = item.ProductId,
+                    qty = Math.Max(0m, item.Qty - item.DeliveredQty)
+                })
+            })));
 
         function copyStockSelection(row) {
             const selection = row.querySelector('[data-stock-selection]');
@@ -189,6 +213,27 @@
                 return;
             }
             row.remove();
+            reindexLines();
+        });
+
+        document.getElementById('sales-order-select').addEventListener('change', event => {
+            const order = salesOrders.find(candidate => String(candidate.id) === event.target.value);
+            if (!order) return;
+            document.getElementById('CustomerId').value = String(order.customerId);
+            lines.innerHTML = '';
+            order.items.filter(item => item.qty > 0).forEach(item => {
+                document.getElementById('add-issue-line').click();
+                const row = lines.lastElementChild;
+                const option = Array.from(row.querySelector('[data-stock-selection]').options)
+                    .find(candidate => String(candidate.dataset.productId) === String(item.productId));
+                if (!option) return;
+                const selection = row.querySelector('[data-stock-selection]');
+                selection.value = option.value;
+                copyStockSelection(row);
+                row.querySelector('[data-field="Qty"]').value =
+                    Math.min(item.qty, Number(option.dataset.available || item.qty));
+            });
+            if (!lines.children.length) document.getElementById('add-issue-line').click();
             reindexLines();
         });
 

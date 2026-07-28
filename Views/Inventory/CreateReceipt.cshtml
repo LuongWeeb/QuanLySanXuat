@@ -5,6 +5,7 @@
     ViewData["Title"] = "Tạo phiếu nhập kho";
     var products = (IEnumerable<Product>)ViewBag.Products;
     var locations = (IEnumerable<Location>)ViewBag.Locations;
+    var purchaseOrders = (IEnumerable<PurchaseOrder>)ViewBag.PurchaseOrders;
 }
 
 <section class="toolbar-row">
@@ -29,6 +30,18 @@
     </div>
     <form asp-action="CreateReceipt" method="post">
         <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+        <div class="mb-3 col-md-6">
+            <label asp-for="PurchaseOrderId" class="form-label">Đơn mua hàng (PO)</label>
+            <select asp-for="PurchaseOrderId" id="purchase-order-select" class="form-select">
+                <option value="">-- Nhập kho không theo PO --</option>
+                @foreach (var order in purchaseOrders)
+                {
+                    <option value="@order.Id">@order.OrderNo · @order.Supplier?.Name</option>
+                }
+            </select>
+            <div class="form-text">Chọn PO để nạp nhà cung cấp và số lượng còn phải nhận.</div>
+            <span asp-validation-for="PurchaseOrderId" class="text-danger"></span>
+        </div>
         <div class="mb-3 col-md-6">
             <label asp-for="SupplierId" class="form-label">Nhà cung cấp</label>
             <select asp-for="SupplierId" class="form-select" required>
@@ -166,6 +179,17 @@
     (() => {
         const lines = document.getElementById('receipt-lines');
         const template = document.getElementById('receipt-line-template');
+        const purchaseOrders = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+            purchaseOrders.Select(order => new {
+                id = order.Id,
+                supplierId = order.SupplierId,
+                orderNo = order.OrderNo,
+                items = order.Items.Select(item => new {
+                    productId = item.ProductId,
+                    qty = Math.Max(0m, item.Qty - item.ReceivedQty),
+                    unitPrice = item.UnitPrice
+                })
+            })));
 
         function reindexLines() {
             const rows = lines.querySelectorAll('[data-line-row]');
@@ -205,6 +229,23 @@
                 return;
             }
             row.remove();
+            reindexLines();
+        });
+
+        document.getElementById('purchase-order-select').addEventListener('change', event => {
+            const order = purchaseOrders.find(candidate => String(candidate.id) === event.target.value);
+            if (!order) return;
+            document.getElementById('SupplierId').value = String(order.supplierId);
+            lines.innerHTML = '';
+            order.items.filter(item => item.qty > 0).forEach(item => {
+                document.getElementById('add-receipt-line').click();
+                const row = lines.lastElementChild;
+                row.querySelector('[data-field="ProductId"]').value = String(item.productId);
+                row.querySelector('[data-field="Qty"]').value = item.qty;
+                row.querySelector('[data-field="UnitPrice"]').value = item.unitPrice;
+                row.querySelector('[data-field="LotNo"]').value = `${order.orderNo}-${item.productId}`;
+            });
+            if (!lines.children.length) document.getElementById('add-receipt-line').click();
             reindexLines();
         });
 

@@ -1,0 +1,10 @@
+@model WmsMes.Web.Domain.Entities.SalesOrder
+@using WmsMes.Web.Domain.Enums
+@{
+    ViewData["Title"] = $"Đơn bán hàng {Model.OrderNo}";
+}
+<section class="toolbar-row"><div><p class="eyebrow">Bán hàng · SO</p><h2>@Model.OrderNo</h2></div><a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a></section>
+<section class="ops-panel mt-3"><dl class="row mb-0"><dt class="col-sm-3">Khách hàng</dt><dd class="col-sm-9">@Model.Customer?.Code - @Model.Customer?.Name</dd><dt class="col-sm-3">Ngày giao</dt><dd class="col-sm-9">@Model.DeliveryDate.ToVietnameseDate()</dd><dt class="col-sm-3">Trạng thái</dt><dd class="col-sm-9"><span class="status-pill">@Model.Status.ToVietnameseString()</span></dd></dl></section>
+<section class="data-panel mt-3"><div class="table-responsive"><table class="table data-table align-middle mb-0"><thead><tr><th>Sản phẩm</th><th class="text-end">Đặt</th><th class="text-end">Đã giao</th><th class="text-end">Đơn giá</th><th class="text-end">Thành tiền</th></tr></thead><tbody>
+@foreach (var item in Model.Items) { <tr><td>@item.Product?.Code - @item.Product?.Name</td><td class="text-end">@item.Qty.ToVietnameseNumber()</td><td class="text-end">@item.DeliveredQty.ToVietnameseNumber()</td><td class="text-end">@item.UnitPrice.ToVietnameseNumber()</td><td class="text-end fw-semibold">@((item.Qty * item.UnitPrice).ToVietnameseNumber())</td></tr> }
+</tbody></table></div></section>

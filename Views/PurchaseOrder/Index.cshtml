@@ -1,0 +1,9 @@
+@model IReadOnlyList<WmsMes.Web.Domain.Entities.PurchaseOrder>
+@using WmsMes.Web.Domain.Enums
+@{ ViewData["Title"] = "Đơn mua hàng"; }
+<section class="toolbar-row"><div><p class="eyebrow">Mua hàng · PO</p><h2>Đơn mua hàng</h2></div><div class="d-flex gap-2"><a class="btn btn-outline-primary" asp-action="Requests">Yêu cầu mua hàng</a><a class="btn btn-primary" asp-action="Create">Tạo PO từ PR</a></div></section>
+@if (TempData["StatusMessage"] is string message) { <div class="alert alert-info mt-3">@message</div> }
+<section class="data-panel mt-3"><div class="table-responsive"><table class="table data-table align-middle mb-0"><thead><tr><th>Mã PO</th><th>Nhà cung cấp</th><th>Ngày giao dự kiến</th><th class="text-end">Giá trị</th><th>Trạng thái</th><th></th></tr></thead><tbody>
+@foreach (var order in Model) { <tr><td><code>@order.OrderNo</code></td><td>@order.Supplier?.Code - @order.Supplier?.Name</td><td>@order.ExpectedDeliveryDate.ToVietnameseDate()</td><td class="text-end">@order.Items.Sum(item => item.Qty * item.UnitPrice).ToVietnameseNumber()</td><td><span class="status-pill">@order.Status.ToVietnameseString()</span></td><td class="text-end"><a class="btn btn-sm btn-outline-primary" asp-action="Details" asp-route-id="@order.Id">Chi tiết</a></td></tr> }
+@if (Model.Count == 0) { <tr><td colspan="6" class="text-center text-muted py-4">Chưa có đơn mua hàng.</td></tr> }
+</tbody></table></div></section>

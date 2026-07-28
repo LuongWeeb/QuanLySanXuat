@@ -1,0 +1,8 @@
+@model IReadOnlyList<WmsMes.Web.Domain.Entities.PurchaseRequest>
+@using WmsMes.Web.Domain.Enums
+@{ ViewData["Title"] = "Yêu cầu mua hàng"; }
+<section class="toolbar-row"><div><p class="eyebrow">Mua hàng · PR</p><h2>Yêu cầu mua hàng từ MRP</h2></div><a class="btn btn-outline-secondary" asp-action="Index">Đơn mua hàng</a></section>
+<section class="data-panel mt-3"><div class="table-responsive"><table class="table data-table align-middle mb-0"><thead><tr><th>Mã PR</th><th>Kế hoạch</th><th>Ngày cần</th><th>Số dòng</th><th>Trạng thái</th><th></th></tr></thead><tbody>
+@foreach (var request in Model) { <tr><td><code>@request.RequestNo</code></td><td>@request.ProductionPlan?.PlanNo</td><td>@request.RequiredDate.ToVietnameseDate()</td><td>@request.Items.Count</td><td><span class="status-pill">@request.Status.ToVietnameseString()</span></td><td class="text-end">@if(request.Status == DocumentStatus.Draft){<a class="btn btn-sm btn-primary" asp-action="Create" asp-route-requestId="@request.Id">Tạo PO</a>}</td></tr> }
+@if (Model.Count == 0) { <tr><td colspan="6" class="text-center text-muted py-4">Chưa có yêu cầu mua hàng.</td></tr> }
+</tbody></table></div></section>

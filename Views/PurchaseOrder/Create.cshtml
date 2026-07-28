@@ -1,0 +1,14 @@
+@using WmsMes.Web.Domain.Entities
+@{
+    ViewData["Title"] = "Tạo đơn mua hàng";
+    var request = ViewData["Request"] as PurchaseRequest;
+    var requests = (IReadOnlyList<PurchaseRequest>)ViewData["Requests"]!;
+    var suppliers = (IEnumerable<Supplier>)ViewData["Suppliers"]!;
+}
+<section class="toolbar-row"><div><p class="eyebrow">Mua hàng · PO</p><h2>Tạo PO từ Yêu cầu mua hàng</h2></div><a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a></section>
+<form asp-action="CreateFromRequest" method="post" class="ops-panel mt-3">
+    <div class="row g-3"><div class="col-md-6"><label for="requestId" class="form-label">Yêu cầu mua hàng</label><select id="requestId" name="requestId" class="form-select" required><option value="">-- Chọn PR --</option>@foreach(var item in requests.Where(item => item.Status == WmsMes.Web.Domain.Enums.DocumentStatus.Draft)){<option value="@item.Id" selected="@(request?.Id == item.Id ? "selected" : null)">@item.RequestNo · @item.Items.Count dòng</option>}</select></div>
+    <div class="col-md-6"><label for="supplierId" class="form-label">Nhà cung cấp</label><select id="supplierId" name="supplierId" class="form-select" required><option value="">-- Chọn nhà cung cấp --</option>@foreach(var supplier in suppliers){<option value="@supplier.Id">@supplier.Code - @supplier.Name</option>}</select></div></div>
+    @if(request is not null){<div class="alert alert-light border mt-3 mb-0">Ngày cần: <strong>@request.RequiredDate.ToVietnameseDate()</strong> · @request.Items.Count dòng vật tư</div>}
+    <button class="btn btn-primary mt-3" type="submit">Tạo đơn mua hàng</button>
+</form>
