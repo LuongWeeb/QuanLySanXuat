@@ -539,6 +539,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<QCInspection>()
+            .HasOne(i => i.GoodsReceipt)
+            .WithMany()
+            .HasForeignKey(i => i.GoodsReceiptId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<QCInspection>()
             .HasOne(i => i.Lot)
             .WithMany()
             .HasForeignKey(i => i.LotId)

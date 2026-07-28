@@ -8,11 +8,18 @@ public class QCInspection
 {
     public int Id { get; set; }
 
-    [Required]
-    public int WorkOrderId { get; set; }
+    public int? WorkOrderId { get; set; }
 
     [ForeignKey(nameof(WorkOrderId))]
     public virtual WorkOrder? WorkOrder { get; set; }
+
+    public int? GoodsReceiptId { get; set; }
+
+    [ForeignKey(nameof(GoodsReceiptId))]
+    public virtual GoodsReceipt? GoodsReceipt { get; set; }
+
+    [Required]
+    public QCInspectionType Type { get; set; } = QCInspectionType.FinalFGQC;
 
     [Required]
     public int LotId { get; set; }
