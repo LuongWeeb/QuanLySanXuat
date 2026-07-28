@@ -1,0 +1,62 @@
+@model WmsMes.Web.Domain.Entities.CycleCountOrder
+@{
+    ViewData["Title"] = "Đối chiếu kiểm kê";
+    var totalVarianceValue = Model.Items.Sum(item => item.VarianceQty * (item.Lot?.UnitPrice ?? 0m));
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Báo cáo chênh lệch</p>
+        <h2>@Model.CountNumber</h2>
+        <p class="text-muted mb-0">@Model.Warehouse?.Code — @Model.Warehouse?.Name</p>
+    </div>
+    <span class="status-pill @(Model.Status == "Approved" ? "is-active" : "is-muted")">@Model.Status</span>
+</section>
+
+@if (TempData["StatusMessage"] is string status)
+{
+    <div class="alert alert-success" role="status">@status</div>
+}
+@if (TempData["ErrorMessage"] is string error)
+{
+    <div class="alert alert-danger" role="alert">@error</div>
+}
+
+<div class="metric-grid">
+    <article class="metric-card"><span>Dòng kiểm kê</span><strong>@Model.Items.Count.ToVietnameseNumber()</strong></article>
+    <article class="metric-card"><span>Dòng chênh lệch</span><strong>@Model.Items.Count(item => item.VarianceQty != 0).ToVietnameseNumber()</strong></article>
+    <article class="metric-card"><span>Tổng giá trị chênh lệch</span><strong>@totalVarianceValue.ToVietnameseNumber() VNĐ</strong></article>
+</div>
+
+<section class="data-panel">
+    <div class="table-responsive">
+        <table class="table data-table align-middle">
+            <thead><tr><th>Vị trí</th><th>Sản phẩm / Lô</th><th class="text-end">Hệ thống</th><th class="text-end">Thực tế</th><th class="text-end">Chênh lệch</th><th class="text-end">Giá trị</th></tr></thead>
+            <tbody>
+            @foreach (var item in Model.Items)
+            {
+                var rowClass = item.VarianceQty > 0 ? "text-success" : item.VarianceQty < 0 ? "text-danger" : string.Empty;
+                <tr class="@rowClass">
+                    <td><code>@item.Location?.Code</code></td>
+                    <td>@item.Product?.Code — @item.Product?.Name <span class="table-subtext">@item.Lot?.LotNo</span></td>
+                    <td class="text-end">@item.SystemQty.ToVietnameseNumber()</td>
+                    <td class="text-end">@((item.CountedQty ?? item.SystemQty).ToVietnameseNumber())</td>
+                    <td class="text-end fw-bold">@item.VarianceQty.ToVietnameseNumber()</td>
+                    <td class="text-end">@((item.VarianceQty * (item.Lot?.UnitPrice ?? 0m)).ToVietnameseNumber()) VNĐ</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<div class="d-flex flex-wrap gap-2 mt-3">
+    @if (Model.Status == "Completed" && (User.IsInRole("Manager") || User.IsInRole("Admin")))
+    {
+        <form asp-action="Approve" method="post">
+            <input name="id" value="@Model.Id" type="hidden" />
+            <button class="btn btn-primary" type="submit">Duyệt &amp; Điều chỉnh Sổ cái</button>
+        </form>
+    }
+    <a class="btn btn-outline-secondary" asp-action="Index">Về danh sách</a>
+</div>

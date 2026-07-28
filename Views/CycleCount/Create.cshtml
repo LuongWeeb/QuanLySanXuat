@@ -1,0 +1,32 @@
+@using WmsMes.Web.Domain.Entities
+@{
+    ViewData["Title"] = "Tạo đợt kiểm kê";
+    var warehouses = ViewBag.Warehouses as IEnumerable<Warehouse> ?? [];
+    int? selectedId = ViewBag.SelectedWarehouseId;
+}
+
+<section class="toolbar-row">
+    <div><p class="eyebrow">Đối chiếu tồn kho</p><h2>Tạo snapshot kiểm kê</h2></div>
+</section>
+<div class="ops-panel">
+    <form asp-action="Create" method="post">
+        <div asp-validation-summary="All" class="text-danger mb-3" role="alert"></div>
+        <div class="mb-3">
+            <label for="warehouseId" class="form-label">Kho cần kiểm kê</label>
+            <select id="warehouseId" name="warehouseId" class="form-select" required>
+                <option value="">-- Chọn kho --</option>
+                @foreach (var warehouse in warehouses)
+                {
+                    <option value="@warehouse.Id" selected="@(selectedId == warehouse.Id)">
+                        @warehouse.Code — @warehouse.Name
+                    </option>
+                }
+            </select>
+            <div class="form-text">Hệ thống sẽ chụp số lượng khả dụng hiện tại cho từng vị trí và lô.</div>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Tạo và bắt đầu đếm</button>
+            <a class="btn btn-outline-secondary" asp-action="Index">Hủy</a>
+        </div>
+    </form>
+</div>
