@@ -1,78 +1,92 @@
-# Task 1 Report: DTOs and OeeService
+# Task 1 Report: FEFO/FIFO Picking Recommendation
 
 ## Scope delivered
 
-- Added `OeeMetricsDto` and `InventoryAgingDto`.
-- Added `IOeeService` and EF Core-backed `OeeService`.
-- Registered `IOeeService` as scoped in `Program.cs`.
-- Added focused OEE and inventory-aging tests.
+Implemented only Task 1 from `task-1-brief.md`:
+
+- Added `PickingStrategy` (`FEFO`, `FIFO`) and `PickingRecommendationDto`.
+- Added `IInventoryService.GetPickingRecommendationsAsync(int, decimal, PickingStrategy)`.
+- Implemented non-mutating recommendations from available stock, excluding `QcService.QuarantineLocationCode`.
+- FEFO orders by expiry (missing expiry last) then manufacture date; FIFO orders by manufacture date then `StockBalance.Id`.
+- Allocates `RecommendedQty` until `requiredQty` is fulfilled, while retaining actual `AvailableQty`.
+- Added `GET api/inventory/picking-recommendations` returning `200 OK` with service results.
+- Did not implement or modify any Cycle Counting / Task 2 behavior.
+
+`Lot.ManufactureDate` is nullable in the existing entity while the required DTO property is not; the mapping uses `DateTime.MinValue` when no manufacture date exists.
+
+## Files changed
+
+- `DTOs/PickingRecommendationDto.cs` (new)
+- `Services/IInventoryService.cs`
+- `Services/InventoryService.cs`
+- `Controllers/InventoryController.cs`
+- `WmsMes.Tests/FifoFefoPickingTests.cs` (new)
 
 ## TDD evidence
 
-### RED
+### RED: service contract/algorithm tests
 
 Command:
 
 ```powershell
-dotnet test WmsMes.Tests/WmsMes.Tests.csproj --filter FullyQualifiedName~OeeServiceTests --no-restore
+dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
 ```
 
-Output summary:
+Result: exit code `1`; compilation failed at each service test with expected `CS1061`: `InventoryService` did not contain `GetPickingRecommendationsAsync`.
 
-```text
-error CS0246: The type or namespace name 'OeeService' could not be found
-```
-
-The tests referenced the required service before that production type existed.
-
-### GREEN
+### GREEN: service implementation
 
 Command:
 
 ```powershell
-dotnet test WmsMes.Tests/WmsMes.Tests.csproj --filter FullyQualifiedName~OeeServiceTests --no-restore
+dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
 ```
 
-Output summary:
+Result: exit code `0`; `Passed: 3, Failed: 0`.
 
-```text
-Passed!  - Failed:     0, Passed:     3, Skipped:     0, Total:     3
-```
-
-Focused tests cover: completed-step period filtering and rounded OEE formula, active work-center filtering with success/warning thresholds, and the inclusive 30/60/90-day inventory-value buckets.
-
-### Full verification
+### RED: API endpoint test
 
 Command:
 
 ```powershell
-dotnet test WmsMes.sln --no-restore
+dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
 ```
 
-Output summary:
+Result: exit code `1`; compilation failed with expected `CS1061`: `InventoryController` did not contain `GetPickingRecommendations`.
 
-```text
-Passed!  - Failed:     0, Passed:   521, Skipped:     0, Total:   521
+### GREEN: endpoint implementation and review coverage
+
+Commands:
+
+```powershell
+dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
+dotnet test WmsMes.sln
 ```
 
-The test-host output included pre-existing expected JWT options-validation log entries from negative host-start tests; the suite exit code was 0.
+Results:
 
-## Files
+- Focused post-endpoint run: exit code `0`; `Passed: 4, Failed: 0`.
+- After adding review-requested tie-breaker/null-expiry coverage: focused run exit code `0`; `Passed: 6, Failed: 0`.
+- Fresh full-suite run: exit code `0`; `Passed: 120, Failed: 0, Skipped: 0`.
 
-- `DTOs/OeeMetricsDto.cs`
-- `Services/IOeeService.cs`
-- `Services/OeeService.cs`
-- `Program.cs`
-- `WmsMes.Tests/OeeServiceTests.cs`
+The final full-suite command was run outside the filesystem sandbox after the sandboxed process was denied read access to the user NuGet config; the same command then restored successfully and ran all tests.
+
+## Test coverage
+
+- FEFO chooses earliest expiry and splits a quantity request across balances.
+- FIFO chooses earliest manufacture date.
+- FEFO uses manufacture date when expiry dates tie and places no-expiry lots last.
+- FIFO uses `StockBalance.Id` when manufacture dates tie.
+- Quarantine balances are excluded.
+- Controller delegates exact inputs to `IInventoryService` and returns `Ok` with its result.
 
 ## Self-review
 
-- Uses `WorkOrderStep.Status == Completed`, `EndTime` inside the inclusive requested period, and valid start/end timestamps.
-- Planned operating time is 480 minutes per inclusive calendar day, with a one-day minimum.
-- Uses the matching work order's captured routing version and its standard minutes per item for performance, caps all percentages at 100, uses 100 quality when nothing was produced, rounds returned percentages to one decimal, and maps rounded OEE to success/warning/danger.
-- Inventory aging values use the full on-hand stock balance (`available + reserved + on-hold`) times the lot unit price, consistent with the existing dashboard inventory-volume convention.
-- `git diff --check` produced no whitespace errors.
+- Confirmed signature, DTO fields, route, FEFO/FIFO sort clauses, allocation, and quarantine exclusion against every Task 1 requirement.
+- Confirmed the recommendation query uses `AsNoTracking`, so an API call cannot mutate inventory.
+- Ran `git diff --check`: no whitespace errors.
+- Independent review reported no Critical or Important issues. Its Minor test-coverage finding (tie-breakers and null expiry) was addressed by the final two tests.
 
 ## Concerns
 
-- Lots with no `ManufactureDate` are excluded from aging buckets because the schema permits a null date and an age cannot be calculated. Existing produced lots set the date, but historical data should be backfilled if it needs aging analytics.
+None. The endpoint follows existing controller behavior by throwing a clear exception only if the optional constructor dependency is omitted; normal DI registration supplies `IInventoryService`.
