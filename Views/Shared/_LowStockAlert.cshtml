@@ -1,0 +1,60 @@
+@model IReadOnlyList<WmsMes.Web.ViewModels.LowStockItemViewModel>
+
+@if (Model.Any())
+{
+    <section class="alert alert-warning" role="alert" aria-labelledby="low-stock-alert-title">
+        <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-3">
+            <div>
+                <h3 class="h5 alert-heading mb-1" id="low-stock-alert-title">Cảnh báo tồn kho thấp</h3>
+                <p class="mb-0">Các sản phẩm đang dưới mức tồn kho tối thiểu.</p>
+            </div>
+            @if (User.IsInRole("Admin") || User.IsInRole("Manager") || User.IsInRole("Planner"))
+            {
+                <form asp-controller="PurchaseOrder"
+                      asp-action="CreateRequestFromLowStock"
+                      method="post"
+                      asp-antiforgery="true">
+                    <button type="submit" class="btn btn-warning">
+                        Tạo Yêu cầu Mua hàng tự động (PR)
+                    </button>
+                </form>
+            }
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Mã sản phẩm</th>
+                        <th scope="col">Tên sản phẩm</th>
+                        <th scope="col" class="text-end">Khả dụng</th>
+                        <th scope="col" class="text-end">Tồn tối thiểu</th>
+                        <th scope="col" class="text-end">Tồn tối đa</th>
+                        <th scope="col" class="text-end">Đề xuất mua</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var item in Model)
+                {
+                    <tr>
+                        <td><code>@item.ProductCode</code></td>
+                        <td>@item.ProductName</td>
+                        <td class="text-end">@item.TotalAvailable.ToVietnameseNumber()</td>
+                        <td class="text-end">@item.MinStock.ToVietnameseNumber()</td>
+                        <td class="text-end">@item.MaxStock.ToVietnameseNumber()</td>
+                        <td class="text-end fw-semibold">
+                            @if (item.SuggestedQty > 0)
+                            {
+                                @item.SuggestedQty.ToVietnameseNumber()
+                            }
+                            else
+                            {
+                                <span class="text-danger">Cấu hình MaxStock không hợp lệ</span>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}

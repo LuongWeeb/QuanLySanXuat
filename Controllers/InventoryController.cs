@@ -22,17 +22,20 @@ public class InventoryController : Controller
     private readonly IInventoryService? _inventoryService;
     private readonly IReportExportService _reportExportService;
     private readonly ILogger<InventoryController> _logger;
+    private readonly ILowStockService _lowStockService;
 
     public InventoryController(
         ApplicationDbContext context,
         IReportExportService reportExportService,
         IInventoryService? inventoryService = null,
-        ILogger<InventoryController>? logger = null)
+        ILogger<InventoryController>? logger = null,
+        ILowStockService? lowStockService = null)
     {
         _context = context;
         _inventoryService = inventoryService;
         _reportExportService = reportExportService ?? throw new ArgumentNullException(nameof(reportExportService));
         _logger = logger ?? NullLogger<InventoryController>.Instance;
+        _lowStockService = lowStockService ?? new LowStockService(context);
     }
 
     public async Task<IActionResult> Index()
@@ -48,7 +51,11 @@ public class InventoryController : Controller
             .AsNoTracking()
             .ToListAsync();
 
-        return View(balances);
+        return View(new InventoryIndexViewModel
+        {
+            Balances = balances,
+            LowStockItems = await _lowStockService.GetLowStockItemsAsync()
+        });
     }
 
     [HttpGet("[controller]/[action]")]

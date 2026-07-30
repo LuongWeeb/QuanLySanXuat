@@ -1,3 +1,4 @@
+@model WmsMes.Web.ViewModels.DashboardViewModel
 @{
     ViewData["Title"] = "Dashboard Nhà máy & OEE";
 }
@@ -120,6 +121,8 @@
             <span id="dashboard-connection-label">Đang kết nối thời gian thực</span>
         </div>
     </section>
+
+    <partial name="_LowStockAlert" model="Model.LowStockItems" />
 
     <div id="dashboard-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
         Đang tải dữ liệu dashboard.

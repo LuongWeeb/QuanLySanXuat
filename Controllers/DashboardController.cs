@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WmsMes.Web.Services;
+using WmsMes.Web.ViewModels;
 
 namespace WmsMes.Web.Controllers;
 
@@ -10,20 +11,26 @@ public class DashboardController : Controller
     private readonly IOeeService _oeeService;
     private readonly TimeProvider _timeProvider;
     private readonly TimeZoneInfo _businessTimeZone;
+    private readonly ILowStockService _lowStockService;
 
     public DashboardController(
         IOeeService oeeService,
         TimeProvider timeProvider,
-        TimeZoneInfo businessTimeZone)
+        TimeZoneInfo businessTimeZone,
+        ILowStockService lowStockService)
     {
         _oeeService = oeeService;
         _timeProvider = timeProvider;
         _businessTimeZone = businessTimeZone;
+        _lowStockService = lowStockService;
     }
 
-    public IActionResult Index()
+    public async Task<IActionResult> Index()
     {
-        return View();
+        return View(new DashboardViewModel
+        {
+            LowStockItems = await _lowStockService.GetLowStockItemsAsync()
+        });
     }
 
     [HttpGet]

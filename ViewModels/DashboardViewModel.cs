@@ -2,6 +2,9 @@ namespace WmsMes.Web.ViewModels;
 
 public sealed class DashboardViewModel
 {
+    public IReadOnlyList<LowStockItemViewModel> LowStockItems { get; init; } =
+        Array.Empty<LowStockItemViewModel>();
+
     // Chỉ số vận hành chung
     public int ActiveWorkOrders { get; init; }
     public int PendingQcLots { get; init; }

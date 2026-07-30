@@ -35,11 +35,11 @@ public class DashboardControllerTests
     }
 
     [Fact]
-    public void Index_ReturnsView()
+    public async Task Index_ReturnsView()
     {
         var controller = Controller(Mock.Of<IOeeService>());
 
-        Assert.IsType<ViewResult>(controller.Index());
+        Assert.IsType<ViewResult>(await controller.Index());
     }
 
     [Fact]
@@ -150,7 +150,8 @@ public class DashboardControllerTests
                 "Asia/Ho_Chi_Minh",
                 TimeSpan.FromHours(7),
                 "Vietnam",
-                "Vietnam"));
+                "Vietnam"),
+            Mock.Of<ILowStockService>());
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

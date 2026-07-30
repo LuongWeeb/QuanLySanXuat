@@ -3,6 +3,15 @@ using WmsMes.Web.Domain.Enums;
 
 namespace WmsMes.Web.ViewModels;
 
+public sealed class InventoryIndexViewModel
+{
+    public IReadOnlyList<WmsMes.Web.Domain.Entities.StockBalance> Balances { get; init; } =
+        Array.Empty<WmsMes.Web.Domain.Entities.StockBalance>();
+
+    public IReadOnlyList<LowStockItemViewModel> LowStockItems { get; init; } =
+        Array.Empty<LowStockItemViewModel>();
+}
+
 public class CreateReceiptViewModel
 {
     public int? PurchaseOrderId { get; set; }

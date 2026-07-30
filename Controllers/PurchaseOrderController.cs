@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using WmsMes.Web.Data;
+using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Services;
 
 namespace WmsMes.Web.Controllers;
@@ -13,15 +15,21 @@ public class PurchaseOrderController : Controller
     private readonly ApplicationDbContext _context;
     private readonly IPurchaseRequestService _requestService;
     private readonly IPurchaseOrderService _orderService;
+    private readonly ILowStockService _lowStockService;
+    private readonly TimeProvider _timeProvider;
 
     public PurchaseOrderController(
         ApplicationDbContext context,
         IPurchaseRequestService requestService,
-        IPurchaseOrderService orderService)
+        IPurchaseOrderService orderService,
+        ILowStockService lowStockService,
+        TimeProvider timeProvider)
     {
         _context = context;
         _requestService = requestService;
         _orderService = orderService;
+        _lowStockService = lowStockService;
+        _timeProvider = timeProvider;
     }
 
     public async Task<IActionResult> Index()
@@ -77,6 +85,47 @@ public class PurchaseOrderController : Controller
 
         TempData["StatusMessage"] = $"Đã tạo Đơn mua hàng {order.OrderNo}.";
         return RedirectToAction(nameof(Details), new { id = order.Id });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> CreateRequestFromLowStock()
+    {
+        var lowStockItems = await _lowStockService.GetLowStockItemsAsync(
+            HttpContext.RequestAborted);
+        var eligibleItems = lowStockItems
+            .Where(item => item.SuggestedQty > 0)
+            .ToList();
+        if (eligibleItems.Count == 0)
+        {
+            TempData["ErrorMessage"] =
+                "Không có sản phẩm tồn kho thấp với số lượng đề xuất hợp lệ để tạo yêu cầu.";
+            return RedirectToAction(nameof(Requests));
+        }
+
+        var utcNow = _timeProvider.GetUtcNow().UtcDateTime;
+        var request = new PurchaseRequest
+        {
+            RequestNo =
+                $"PR-LOWSTOCK-{utcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}"[..38],
+            RequestDate = utcNow,
+            RequiredDate = utcNow.AddDays(3),
+            Status = DocumentStatus.Draft,
+            Items = eligibleItems.Select(item => new PurchaseRequestItem
+            {
+                ProductId = item.ProductId,
+                Qty = item.SuggestedQty
+            }).ToList()
+        };
+
+        _context.PurchaseRequests.Add(request);
+        await _context.SaveChangesAsync(HttpContext.RequestAborted);
+
+        var skippedCount = lowStockItems.Count - eligibleItems.Count;
+        TempData["StatusMessage"] = skippedCount > 0
+            ? $"Đã tạo Yêu cầu mua hàng {request.RequestNo}; bỏ qua {skippedCount} sản phẩm có cấu hình MaxStock không hợp lệ."
+            : $"Đã tạo Yêu cầu mua hàng {request.RequestNo} từ cảnh báo tồn kho thấp.";
+        return RedirectToAction(nameof(Requests));
     }
 
     private async Task LoadSuppliersAsync()

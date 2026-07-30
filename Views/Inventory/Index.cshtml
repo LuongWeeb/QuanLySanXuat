@@ -1,7 +1,7 @@
-@model IEnumerable<WmsMes.Web.Domain.Entities.StockBalance>
+@model WmsMes.Web.ViewModels.InventoryIndexViewModel
 @{
     ViewData["Title"] = "Tồn kho thực tế";
-    var balances = Model.ToList();
+    var balances = Model.Balances.ToList();
     var totalAvailable = balances.Sum(item => item.QtyAvailable);
     var totalReserved = balances.Sum(item => item.QtyReserved);
     var totalOnHold = balances.Sum(item => item.QtyOnHold);
@@ -17,6 +17,8 @@
         Đang kết nối
     </div>
 </section>
+
+<partial name="_LowStockAlert" model="Model.LowStockItems" />
 
 <section class="metric-grid" aria-label="Tóm tắt tồn kho">
     <article class="metric-card">

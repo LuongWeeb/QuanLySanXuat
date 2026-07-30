@@ -112,6 +112,7 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
+builder.Services.AddScoped<ILowStockService, LowStockService>();
 builder.Services.AddScoped<ICycleCountService, CycleCountService>();
 builder.Services.AddScoped<IMrpService, MrpService>();
 builder.Services.AddScoped<IProductionPlanService, ProductionPlanService>();
