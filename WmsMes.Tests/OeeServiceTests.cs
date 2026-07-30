@@ -9,6 +9,36 @@ namespace WmsMes.Tests;
 public class OeeServiceTests
 {
     [Fact]
+    public async Task CalculateOee_ReturnsCorrectPercentages()
+    {
+        await using var context = CreateContext();
+        var workCenter = new WorkCenter { Id = 1, Code = "WC-01", Name = "Assembly" };
+        context.WorkCenters.Add(workCenter);
+        context.WorkOrders.Add(new WorkOrder
+        {
+            Id = 1,
+            Code = "WO-01",
+            ProductId = 1,
+            DueDate = new DateTime(2026, 7, 31),
+            BomVersion = "V1",
+            RoutingVersion = "V1"
+        });
+        context.Routings.Add(CreateRouting(1, 1, workCenter.Id, 2.4m));
+        context.WorkOrderSteps.Add(CreateCompletedStep(1, workCenter.Id, 1, 240, 90, 10));
+        await context.SaveChangesAsync();
+
+        var metrics = await new OeeService(context).GetWorkCenterOeeAsync(
+            workCenter.Id,
+            new DateTime(2026, 7, 1),
+            new DateTime(2026, 7, 1, 23, 59, 59));
+
+        Assert.Equal(50m, metrics.Availability);
+        Assert.Equal(100m, metrics.Performance);
+        Assert.Equal(90m, metrics.Quality);
+        Assert.Equal(45m, metrics.Oee);
+    }
+
+    [Fact]
     public async Task GetWorkCenterOeeAsync_CalculatesRoundedMetricsFromCompletedStepsInPeriod()
     {
         await using var context = CreateContext();
@@ -145,7 +175,11 @@ public class OeeServiceTests
         Assert.Equal(50m, aging.MoreThan90Days);
     }
 
-    private static Routing CreateRouting(int routingId, int productId, int workCenterId) => new()
+    private static Routing CreateRouting(
+        int routingId,
+        int productId,
+        int workCenterId,
+        decimal standardTimeMinutes = 1m) => new()
     {
         Id = routingId,
         ProductId = productId,
@@ -158,7 +192,7 @@ public class OeeServiceTests
                 StepNumber = 10,
                 StepName = "Step 10",
                 WorkCenterId = workCenterId,
-                StandardTimeMinutes = 1m
+                StandardTimeMinutes = standardTimeMinutes
             }
         }
     };
