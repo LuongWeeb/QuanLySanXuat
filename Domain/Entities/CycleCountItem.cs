@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace WmsMes.Web.Domain.Entities;
 
 public class CycleCountItem
@@ -14,4 +16,7 @@ public class CycleCountItem
     public decimal SystemQty { get; set; }
     public decimal? CountedQty { get; set; }
     public decimal VarianceQty => (CountedQty ?? SystemQty) - SystemQty;
+
+    [MaxLength(250)]
+    public string? ReasonNote { get; set; }
 }

@@ -33,4 +33,7 @@ public class GoodsIssueLine
 
     [ForeignKey(nameof(LocationId))]
     public virtual Location? Location { get; set; }
+
+    [MaxLength(250)]
+    public string? VarianceReason { get; set; }
 }
