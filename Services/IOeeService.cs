@@ -9,4 +9,6 @@ public interface IOeeService
     Task<IEnumerable<OeeMetricsDto>> GetAllWorkCentersOeeAsync(DateTime startDate, DateTime endDate);
 
     Task<InventoryAgingDto> GetInventoryAgingAnalyticsAsync();
+
+    Task<IEnumerable<ProductionProgressDto>> GetProductionProgressAnalyticsAsync();
 }

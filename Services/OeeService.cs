@@ -96,6 +96,24 @@ public class OeeService : IOeeService
         return aging;
     }
 
+    public async Task<IEnumerable<ProductionProgressDto>> GetProductionProgressAnalyticsAsync()
+    {
+        return await _context.WorkOrders
+            .AsNoTracking()
+            .Where(order => order.Status == WorkOrderStatus.InProgress)
+            .OrderBy(order => order.DueDate)
+            .ThenBy(order => order.Code)
+            .Select(order => new ProductionProgressDto
+            {
+                WorkOrderId = order.Id,
+                WorkOrderCode = order.Code,
+                PlannedQuantity = order.Qty,
+                ActualProducedQuantity = order.DailyProductionLogs
+                    .Sum(log => (decimal?)log.QtyProduced) ?? 0m
+            })
+            .ToListAsync();
+    }
+
     private async Task<OeeMetricsDto> CalculateMetricsAsync(
         WorkCenter workCenter,
         DateTime startDate,

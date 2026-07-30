@@ -175,6 +175,98 @@ public class OeeServiceTests
         Assert.Equal(50m, aging.MoreThan90Days);
     }
 
+    [Fact]
+    public async Task GetProductionProgressAnalyticsAsync_SumsDailyOutputForInProgressOrdersWithoutCountingStepOutput()
+    {
+        await using var context = CreateContext();
+        context.WorkOrders.AddRange(
+            new WorkOrder
+            {
+                Id = 1,
+                Code = "WO-ACTIVE",
+                ProductId = 1,
+                Qty = 20m,
+                DueDate = new DateTime(2026, 8, 1),
+                Status = WorkOrderStatus.InProgress,
+                DailyProductionLogs =
+                {
+                    new DailyProductionLog
+                    {
+                        Date = new DateTime(2026, 7, 29),
+                        QtyProduced = 4m
+                    },
+                    new DailyProductionLog
+                    {
+                        Date = new DateTime(2026, 7, 30),
+                        QtyProduced = 6m
+                    }
+                },
+                Steps =
+                {
+                    new WorkOrderStep
+                    {
+                        StepNumber = 10,
+                        StepName = "Cut",
+                        WorkCenterId = 1,
+                        QtyOK = 10m,
+                        Status = WorkOrderStepStatus.Completed
+                    },
+                    new WorkOrderStep
+                    {
+                        StepNumber = 20,
+                        StepName = "Pack",
+                        WorkCenterId = 1,
+                        QtyOK = 10m,
+                        Status = WorkOrderStepStatus.Completed
+                    }
+                }
+            },
+            new WorkOrder
+            {
+                Id = 2,
+                Code = "WO-APPROVED",
+                ProductId = 1,
+                Qty = 15m,
+                DueDate = new DateTime(2026, 8, 2),
+                Status = WorkOrderStatus.Approved,
+                DailyProductionLogs =
+                {
+                    new DailyProductionLog
+                    {
+                        Date = new DateTime(2026, 7, 30),
+                        QtyProduced = 5m
+                    }
+                }
+            },
+            new WorkOrder
+            {
+                Id = 3,
+                Code = "WO-COMPLETE",
+                ProductId = 1,
+                Qty = 30m,
+                DueDate = new DateTime(2026, 8, 3),
+                Status = WorkOrderStatus.Completed,
+                DailyProductionLogs =
+                {
+                    new DailyProductionLog
+                    {
+                        Date = new DateTime(2026, 7, 30),
+                        QtyProduced = 30m
+                    }
+                }
+            });
+        await context.SaveChangesAsync();
+
+        var progress = (await new OeeService(context)
+            .GetProductionProgressAnalyticsAsync()).ToArray();
+
+        var active = Assert.Single(progress);
+        Assert.Equal(1, active.WorkOrderId);
+        Assert.Equal("WO-ACTIVE", active.WorkOrderCode);
+        Assert.Equal(20m, active.PlannedQuantity);
+        Assert.Equal(10m, active.ActualProducedQuantity);
+    }
+
     private static Routing CreateRouting(
         int routingId,
         int productId,
