@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -6,6 +8,8 @@ using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 using WmsMes.Web.Data;
+using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.Services;
 
 namespace WmsMes.Web.Controllers;
 
@@ -14,6 +18,13 @@ namespace WmsMes.Web.Controllers;
 [ApiController]
 public class PrintController : ControllerBase
 {
+    private const string CycleCountTitle = "BIÊN BẢN KIỂM KÊ VÀ ĐỐI CHIẾU TỒN KHO";
+    private const string ReceiptTitle = "PHIẾU NHẬP KHO";
+    private const string IssueTitle = "PHIẾU XUẤT KHO";
+    private const string VarianceReasonHeader = "Lý do chênh lệch";
+    private const string CounterSignatureTitle = "Người kiểm đếm (Thủ kho)";
+    private const string AuditorSignatureTitle = "Nhân viên Kiểm toán/QC";
+    private const string ApproverSignatureTitle = "Trưởng kho/Giám đốc duyệt";
     private readonly ApplicationDbContext _context;
 
     public PrintController(ApplicationDbContext context)
@@ -120,6 +131,438 @@ public class PrintController : ControllerBase
 
         return File(document.GeneratePdf(), "application/pdf");
     }
+
+    [HttpGet("cyclecount/{id:int}")]
+    [Authorize(Roles = "Admin,Warehouse,Manager")]
+    public async Task<IActionResult> PrintCycleCount(int id)
+    {
+        var count = await _context.CycleCountOrders
+            .AsNoTracking()
+            .Include(order => order.Warehouse)
+            .Include(order => order.Items)
+                .ThenInclude(item => item.Product)
+            .Include(order => order.Items)
+                .ThenInclude(item => item.Location)
+            .Include(order => order.Items)
+                .ThenInclude(item => item.Lot)
+            .SingleOrDefaultAsync(order => order.Id == id);
+
+        if (count is null)
+        {
+            return NotFound("Phiếu kiểm kê không tồn tại.");
+        }
+
+        return File(
+            CreateCycleCountDocument(count).GeneratePdf(),
+            "application/pdf",
+            $"BienBanKiemKe_{SanitizeFileNameIdentifier(count.CountNumber)}.pdf");
+    }
+
+    [HttpGet("receipt/{id:int}")]
+    [Authorize(Roles = "Admin,Warehouse,Manager")]
+    public async Task<IActionResult> PrintReceipt(int id)
+    {
+        var receipt = await _context.GoodsReceipts
+            .AsNoTracking()
+            .Include(document => document.Supplier)
+            .Include(document => document.Lines)
+                .ThenInclude(line => line.Product)
+            .Include(document => document.Lines)
+                .ThenInclude(line => line.Location)
+            .SingleOrDefaultAsync(document => document.Id == id);
+
+        if (receipt is null)
+        {
+            return NotFound("Phiếu nhập kho không tồn tại.");
+        }
+
+        return File(
+            CreateReceiptDocument(receipt).GeneratePdf(),
+            "application/pdf",
+            $"PhieuNhapKho_{SanitizeFileNameIdentifier(receipt.ReceiptNo)}.pdf");
+    }
+
+    [HttpGet("issue/{id:int}")]
+    [Authorize(Roles = "Admin,Warehouse,Manager")]
+    public async Task<IActionResult> PrintIssue(int id)
+    {
+        var issue = await _context.GoodsIssues
+            .AsNoTracking()
+            .Include(document => document.Customer)
+            .Include(document => document.Lines)
+                .ThenInclude(line => line.Product)
+            .Include(document => document.Lines)
+                .ThenInclude(line => line.Lot)
+            .Include(document => document.Lines)
+                .ThenInclude(line => line.Location)
+            .SingleOrDefaultAsync(document => document.Id == id);
+
+        if (issue is null)
+        {
+            return NotFound("Phiếu xuất kho không tồn tại.");
+        }
+
+        return File(
+            CreateIssueDocument(issue).GeneratePdf(),
+            "application/pdf",
+            $"PhieuXuatKho_{SanitizeFileNameIdentifier(issue.IssueNo)}.pdf");
+    }
+
+    private static IDocument CreateCycleCountDocument(CycleCountOrder count)
+    {
+        return Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                ConfigureA4Page(page);
+                page.Header().AlignCenter().Text(CycleCountTitle)
+                    .Bold()
+                    .FontSize(16)
+                    .FontColor(Colors.Blue.Darken3);
+
+                page.Content().PaddingVertical(14).Column(column =>
+                {
+                    column.Spacing(12);
+                    column.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(columns =>
+                        {
+                            columns.ConstantColumn(85);
+                            columns.RelativeColumn();
+                            columns.ConstantColumn(85);
+                            columns.RelativeColumn();
+                        });
+
+                        AddDetail(table, "Số phiếu", count.CountNumber);
+                        AddDetail(table, "Kho", count.Warehouse?.Name ?? string.Empty);
+                        AddDetail(
+                            table,
+                            count.CompletedAt.HasValue ? "Ngày đếm" : "Ngày lập",
+                            (count.CompletedAt ?? count.CreatedAt).ToString("dd/MM/yyyy"));
+                        AddDetail(table, "Người tạo", count.CreatedBy);
+                        AddDetail(table, "Người duyệt", count.ApprovedBy ?? string.Empty);
+                    });
+
+                    column.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(columns =>
+                        {
+                            columns.RelativeColumn(1.05f);
+                            columns.RelativeColumn(1.45f);
+                            columns.RelativeColumn(0.85f);
+                            columns.RelativeColumn(1.05f);
+                            columns.RelativeColumn(0.65f);
+                            columns.RelativeColumn(0.65f);
+                            columns.RelativeColumn(0.65f);
+                            columns.RelativeColumn(1.35f);
+                            columns.RelativeColumn(1.05f);
+                        });
+
+                        table.Header(header =>
+                        {
+                            AddHeaderCell(header, "SKU");
+                            AddHeaderCell(header, "Tên sản phẩm");
+                            AddHeaderCell(header, "Vị trí");
+                            AddHeaderCell(header, "Số lô");
+                            AddHeaderCell(header, "SL hệ thống");
+                            AddHeaderCell(header, "SL thực đếm");
+                            AddHeaderCell(header, "Chênh lệch");
+                            AddHeaderCell(header, VarianceReasonHeader);
+                            AddHeaderCell(header, "Giá trị chênh lệch (VNĐ)");
+                        });
+
+                        foreach (var item in count.Items.OrderBy(item => item.Product?.Code))
+                        {
+                            AddBodyCell(table, item.Product?.Code ?? string.Empty);
+                            AddBodyCell(table, item.Product?.Name ?? string.Empty);
+                            AddBodyCell(table, item.Location?.Code ?? string.Empty);
+                            AddBodyCell(table, item.Lot?.LotNo ?? string.Empty);
+                            AddNumberCell(table, FormatQuantity(item.SystemQty));
+                            if (item.CountedQty.HasValue)
+                            {
+                                AddNumberCell(table, FormatQuantity(item.CountedQty.Value));
+                            }
+                            else
+                            {
+                                AddBodyCell(table, "Chưa kiểm đếm");
+                            }
+                            AddNumberCell(table, FormatQuantity(item.VarianceQty));
+                            AddBodyCell(table, item.ReasonNote ?? string.Empty);
+                            AddNumberCell(table, FormatCurrency(item.VarianceQty * (item.Lot?.UnitPrice ?? 0m)));
+                        }
+                    });
+
+                    column.Item().PaddingTop(22).Row(row =>
+                    {
+                        AddSignature(row, CounterSignatureTitle);
+                        AddSignature(row, AuditorSignatureTitle);
+                        AddSignature(row, ApproverSignatureTitle);
+                    });
+                });
+
+                AddPageFooter(page);
+            });
+        });
+    }
+
+    private static IDocument CreateReceiptDocument(GoodsReceipt receipt)
+    {
+        return Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                ConfigureA4Page(page);
+                page.Header().AlignCenter().Text(ReceiptTitle)
+                    .Bold()
+                    .FontSize(18)
+                    .FontColor(Colors.Blue.Darken3);
+
+                page.Content().PaddingVertical(14).Column(column =>
+                {
+                    column.Spacing(12);
+                    column.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(columns =>
+                        {
+                            columns.ConstantColumn(90);
+                            columns.RelativeColumn();
+                            columns.ConstantColumn(90);
+                            columns.RelativeColumn();
+                        });
+
+                        AddDetail(table, "Số phiếu", receipt.ReceiptNo);
+                        AddDetail(table, "Ngày nhập", receipt.ReceiptDate.ToString("dd/MM/yyyy"));
+                        AddDetail(table, "Nhà cung cấp", receipt.Supplier?.Name ?? string.Empty);
+                        AddDetail(table, "Trạng thái", receipt.Status.ToString());
+                    });
+
+                    column.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(columns =>
+                        {
+                            columns.ConstantColumn(24);
+                            columns.RelativeColumn(1.1f);
+                            columns.RelativeColumn(1.5f);
+                            columns.RelativeColumn(1.1f);
+                            columns.RelativeColumn(0.9f);
+                            columns.RelativeColumn(0.7f);
+                            columns.RelativeColumn(0.9f);
+                            columns.RelativeColumn(1.7f);
+                        });
+
+                        table.Header(header =>
+                        {
+                            AddHeaderCell(header, "STT");
+                            AddHeaderCell(header, "SKU");
+                            AddHeaderCell(header, "Tên vật tư");
+                            AddHeaderCell(header, "Số lô");
+                            AddHeaderCell(header, "Vị trí");
+                            AddHeaderCell(header, "Số lượng");
+                            AddHeaderCell(header, "Đơn giá");
+                            AddHeaderCell(header, VarianceReasonHeader);
+                        });
+
+                        var index = 1;
+                        foreach (var line in receipt.Lines.OrderBy(line => line.Id))
+                        {
+                            AddNumberCell(table, index++.ToString(CultureInfo.InvariantCulture));
+                            AddBodyCell(table, line.Product?.Code ?? string.Empty);
+                            AddBodyCell(table, line.Product?.Name ?? string.Empty);
+                            AddBodyCell(table, line.LotNo);
+                            AddBodyCell(table, line.Location?.Code ?? string.Empty);
+                            AddNumberCell(table, FormatQuantity(line.Qty));
+                            AddNumberCell(table, FormatCurrency(line.UnitPrice));
+                            AddBodyCell(table, line.VarianceReason ?? string.Empty);
+                        }
+                    });
+                });
+
+                AddPageFooter(page);
+            });
+        });
+    }
+
+    private static IDocument CreateIssueDocument(GoodsIssue issue)
+    {
+        return Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                ConfigureA4Page(page);
+                page.Header().AlignCenter().Text(IssueTitle)
+                    .Bold()
+                    .FontSize(18)
+                    .FontColor(Colors.Blue.Darken3);
+
+                page.Content().PaddingVertical(14).Column(column =>
+                {
+                    column.Spacing(12);
+                    column.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(columns =>
+                        {
+                            columns.ConstantColumn(90);
+                            columns.RelativeColumn();
+                            columns.ConstantColumn(90);
+                            columns.RelativeColumn();
+                        });
+
+                        AddDetail(table, "Số phiếu", issue.IssueNo);
+                        AddDetail(table, "Ngày xuất", issue.IssueDate.ToString("dd/MM/yyyy"));
+                        AddDetail(table, "Khách hàng", issue.Customer?.Name ?? string.Empty);
+                        AddDetail(table, "Trạng thái", issue.Status.ToString());
+                    });
+
+                    column.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(columns =>
+                        {
+                            columns.ConstantColumn(24);
+                            columns.RelativeColumn(1.1f);
+                            columns.RelativeColumn(1.5f);
+                            columns.RelativeColumn(1.1f);
+                            columns.RelativeColumn(0.9f);
+                            columns.RelativeColumn(0.7f);
+                            columns.RelativeColumn(1.8f);
+                        });
+
+                        table.Header(header =>
+                        {
+                            AddHeaderCell(header, "STT");
+                            AddHeaderCell(header, "SKU");
+                            AddHeaderCell(header, "Tên vật tư");
+                            AddHeaderCell(header, "Số lô");
+                            AddHeaderCell(header, "Vị trí");
+                            AddHeaderCell(header, "Số lượng");
+                            AddHeaderCell(header, VarianceReasonHeader);
+                        });
+
+                        var index = 1;
+                        foreach (var line in issue.Lines.OrderBy(line => line.Id))
+                        {
+                            AddNumberCell(table, index++.ToString(CultureInfo.InvariantCulture));
+                            AddBodyCell(table, line.Product?.Code ?? string.Empty);
+                            AddBodyCell(table, line.Product?.Name ?? string.Empty);
+                            AddBodyCell(table, line.Lot?.LotNo ?? string.Empty);
+                            AddBodyCell(table, line.Location?.Code ?? string.Empty);
+                            AddNumberCell(table, FormatQuantity(line.Qty));
+                            AddBodyCell(table, line.VarianceReason ?? string.Empty);
+                        }
+                    });
+                });
+
+                AddPageFooter(page);
+            });
+        });
+    }
+
+    private static void ConfigureA4Page(PageDescriptor page)
+    {
+        page.Size(PageSizes.A4);
+        page.Margin(24);
+        page.DefaultTextStyle(style => style.FontFamily(PdfFontRegistration.FontFamilyName).FontSize(8));
+    }
+
+    private static void AddDetail(TableDescriptor table, string label, string value)
+    {
+        table.Cell().Element(DetailLabelCell).Text(label);
+        table.Cell().Element(DetailValueCell).Text(value);
+    }
+
+    private static void AddHeaderCell(TableCellDescriptor header, string text)
+    {
+        header.Cell().Element(TableHeaderCell).AlignCenter().Text(text);
+    }
+
+    private static void AddBodyCell(TableDescriptor table, string text)
+    {
+        table.Cell().Element(TableBodyCell).Text(text);
+    }
+
+    private static void AddNumberCell(TableDescriptor table, string text)
+    {
+        table.Cell().Element(TableBodyCell).AlignRight().Text(text);
+    }
+
+    private static void AddSignature(RowDescriptor row, string title)
+    {
+        row.RelativeItem().AlignCenter().Column(column =>
+        {
+            column.Item().AlignCenter().Text(title).SemiBold();
+            column.Item().PaddingTop(42).AlignCenter().Text("(Ký và ghi rõ họ tên)").Italic().FontSize(7);
+        });
+    }
+
+    private static void AddPageFooter(PageDescriptor page)
+    {
+        page.Footer().AlignCenter().Text(text =>
+        {
+            text.Span("Trang ");
+            text.CurrentPageNumber();
+            text.Span(" / ");
+            text.TotalPages();
+        });
+    }
+
+    private static string FormatQuantity(decimal value) =>
+        value.ToString("#,##0.###", CultureInfo.GetCultureInfo("vi-VN"));
+
+    private static string FormatCurrency(decimal value) =>
+        value.ToString("#,##0", CultureInfo.GetCultureInfo("vi-VN"));
+
+    private static string SanitizeFileNameIdentifier(string identifier)
+    {
+        var sanitized = new StringBuilder(Math.Min(identifier.Length, 80));
+        foreach (var character in identifier)
+        {
+            var isAllowed = character is >= 'a' and <= 'z'
+                or >= 'A' and <= 'Z'
+                or >= '0' and <= '9'
+                or '.'
+                or '_'
+                or '-';
+            if (isAllowed)
+            {
+                sanitized.Append(character);
+            }
+            else if (sanitized.Length > 0 && sanitized[^1] != '_')
+            {
+                sanitized.Append('_');
+            }
+
+            if (sanitized.Length == 80)
+            {
+                break;
+            }
+        }
+
+        var result = sanitized.ToString().Trim('.', '_');
+        return string.IsNullOrEmpty(result) ? "document" : result;
+    }
+
+    private static IContainer DetailLabelCell(IContainer container) =>
+        container.Background(Colors.Grey.Lighten3)
+            .Border(0.5f)
+            .BorderColor(Colors.Grey.Lighten1)
+            .Padding(5)
+            .DefaultTextStyle(style => style.SemiBold());
+
+    private static IContainer DetailValueCell(IContainer container) =>
+        container.Border(0.5f).BorderColor(Colors.Grey.Lighten1).Padding(5);
+
+    private static IContainer TableHeaderCell(IContainer container) =>
+        container.Background(Colors.Blue.Darken3)
+            .Border(0.5f)
+            .BorderColor(Colors.White)
+            .Padding(4)
+            .DefaultTextStyle(style => style.FontColor(Colors.White).SemiBold().FontSize(7));
+
+    private static IContainer TableBodyCell(IContainer container) =>
+        container.BorderBottom(0.5f)
+            .BorderColor(Colors.Grey.Lighten1)
+            .PaddingVertical(4)
+            .PaddingHorizontal(3)
+            .DefaultTextStyle(style => style.FontSize(7));
 
     private static byte[] GenerateQrCode(string text)
     {

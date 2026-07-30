@@ -30,4 +30,10 @@
     <ProjectReference Include="..\WmsMes.Web.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\Assets\Fonts\**\*"
+             Link="Assets\Fonts\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

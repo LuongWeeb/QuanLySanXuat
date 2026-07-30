@@ -30,6 +30,7 @@ if (!string.IsNullOrWhiteSpace(jwtSigningKeyFile))
 }
 
 QuestPDF.Settings.License = LicenseType.Community;
+PdfFontRegistration.RegisterFromAppBaseDirectory();
 
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
