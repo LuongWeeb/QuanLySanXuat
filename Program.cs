@@ -118,6 +118,7 @@ builder.Services.AddScoped<IPurchaseRequestService, PurchaseRequestService>();
 builder.Services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();
 builder.Services.AddScoped<ISalesOrderService, SalesOrderService>();
 builder.Services.AddScoped<IWorkOrderService, WorkOrderService>();
+builder.Services.AddScoped<IOeeService, OeeService>();
 builder.Services.AddScoped<ICostingService, CostingService>();
 builder.Services.AddScoped<IQcService, QcService>();
 builder.Services.AddScoped<ITraceabilityService, TraceabilityService>();
