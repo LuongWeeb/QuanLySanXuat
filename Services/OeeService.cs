@@ -63,7 +63,7 @@ public class OeeService : IOeeService
 
     public async Task<InventoryAgingDto> GetInventoryAgingAnalyticsAsync()
     {
-        var today = GetBusinessDate();
+        var today = DateOnly.FromDateTime(GetBusinessDate());
         var balances = await _context.StockBalances
             .AsNoTracking()
             .Where(balance => balance.Lot != null)
@@ -83,7 +83,11 @@ public class OeeService : IOeeService
                 continue;
             }
 
-            var ageInDays = Math.Max(0, (today - manufactureDate.Value.Date).Days);
+            // ManufactureDate is a calendar date. Imported/legacy values may retain a
+            // time or Kind, so age by the recorded date component without converting
+            // it as an instant or relying on database DateTime.Kind round-tripping.
+            var recordedDate = DateOnly.FromDateTime(manufactureDate.Value);
+            var ageInDays = Math.Max(0, today.DayNumber - recordedDate.DayNumber);
 
             if (ageInDays < 30)
             {

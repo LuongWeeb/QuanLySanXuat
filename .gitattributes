@@ -1,1 +1,3 @@
 *.sh text eol=lf
+wwwroot/lib/chart.js/4.4.9/chart.umd.min.js -text
+wwwroot/lib/microsoft-signalr/8.0.0/signalr.min.js -text

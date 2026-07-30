@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace WmsMes.Tests;
 
 public class DashboardViewTests
@@ -163,6 +165,64 @@ public class DashboardViewTests
     }
 
     [Fact]
+    public void DashboardView_UsesExactPinnedLocalAssetsAsSingleOnErrorFallbacks()
+    {
+        var view = ReadDashboardView();
+
+        const string chartLocalUrl = "/lib/chart.js/4.4.9/chart.umd.min.js";
+        const string signalRLocalUrl = "/lib/microsoft-signalr/8.0.0/signalr.min.js";
+        Assert.Equal(1, CountOccurrences(view, chartLocalUrl));
+        Assert.Equal(1, CountOccurrences(view, signalRLocalUrl));
+        Assert.Contains(
+            $"onerror=\"this.onerror=null;this.src='{chartLocalUrl}'\"",
+            view);
+        Assert.Contains(
+            $"onerror=\"this.onerror=null;this.src='{signalRLocalUrl}'\"",
+            view);
+
+        AssertAssetMatchesSri(
+            Path.Combine("wwwroot", "lib", "chart.js", "4.4.9", "chart.umd.min.js"),
+            "b0GXujLkk9eYYSmcSfoyZbfyElGAQnDyY0skCHSG6w3JgTMFnz11ggrTAr7seu9f");
+        AssertAssetMatchesSri(
+            Path.Combine("wwwroot", "lib", "microsoft-signalr", "8.0.0", "signalr.min.js"),
+            "/taWmisziXYpcfnYsumSUmNaiMvG/fF/OJOUCLnqCIYTrpOZy7WbFF6FfIxwOrfL");
+    }
+
+    [Fact]
+    public void DashboardView_AggregatesProductionAndInventoryHubStatesIndependently()
+    {
+        var view = ReadDashboardView();
+
+        Assert.Contains(
+            "const hubStates = new Map([",
+            view);
+        Assert.Contains("[\"production\", \"connecting\"]", view);
+        Assert.Contains("[\"inventory\", \"connecting\"]", view);
+        Assert.Contains("const renderConnectionState = () =>", view);
+        Assert.Contains("const connected = states.filter(state => state === \"connected\").length", view);
+        Assert.Contains("if (connected === states.length)", view);
+        Assert.Contains("else if (connected > 0)", view);
+        Assert.Contains("`${connected}/${states.length} kênh thời gian thực`", view);
+        Assert.Contains("hubStates.set(hubName, state)", view);
+        Assert.Contains("startConnection(hubName, connection)", view);
+        Assert.Equal(
+            1,
+            CountOccurrences(
+                view,
+                "setConnectionState(\"Dữ liệu thời gian thực\", \"is-live\")"));
+    }
+
+    [Theory]
+    [InlineData("wwwroot/lib/chart.js/4.4.9/chart.umd.min.js")]
+    [InlineData("wwwroot/lib/microsoft-signalr/8.0.0/signalr.min.js")]
+    public void PinnedVendorAsset_IsExcludedFromGitTextNormalization(string assetPath)
+    {
+        var attributes = File.ReadAllLines(Path.Combine(ProjectRoot(), ".gitattributes"));
+
+        Assert.Contains($"{assetPath} -text", attributes);
+    }
+
+    [Fact]
     public void DashboardView_DisablesFetchCachingAndOffersVisibleRetry()
     {
         var view = ReadDashboardView();
@@ -177,6 +237,15 @@ public class DashboardViewTests
 
     private static int CountOccurrences(string source, string value) =>
         source.Split(value, StringSplitOptions.None).Length - 1;
+
+    private static void AssertAssetMatchesSri(string relativePath, string expectedSha384)
+    {
+        var assetPath = Path.Combine(ProjectRoot(), relativePath);
+        Assert.True(File.Exists(assetPath), $"Pinned fallback asset was not found at {assetPath}.");
+        var actualSha384 = Convert.ToBase64String(
+            SHA384.HashData(File.ReadAllBytes(assetPath)));
+        Assert.Equal(expectedSha384, actualSha384);
+    }
 
     private static string ProjectRoot() => Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));

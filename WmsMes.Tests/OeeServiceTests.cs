@@ -223,20 +223,23 @@ public class OeeServiceTests
     }
 
     [Fact]
-    public async Task GetInventoryAgingAnalyticsAsync_UsesNonOverlappingBoundariesAndUnknownAge()
+    public async Task GetInventoryAgingAnalyticsAsync_At0030Vietnam_UsesRecordedCalendarDateAtExactBoundaries()
     {
         await using var context = CreateContext();
-        var today = DateTime.UtcNow.Date;
+        var today = new DateTime(2026, 7, 31);
         context.Lots.AddRange(
-            new Lot { Id = 1, ProductId = 1, LotNo = "L-29", ManufactureDate = today.AddDays(-29), UnitPrice = 1m },
-            new Lot { Id = 2, ProductId = 1, LotNo = "L-30", ManufactureDate = today.AddDays(-30), UnitPrice = 2m },
-            new Lot { Id = 3, ProductId = 1, LotNo = "L-59", ManufactureDate = today.AddDays(-59), UnitPrice = 4m },
-            new Lot { Id = 4, ProductId = 1, LotNo = "L-60", ManufactureDate = today.AddDays(-60), UnitPrice = 8m },
-            new Lot { Id = 5, ProductId = 1, LotNo = "L-90", ManufactureDate = today.AddDays(-90), UnitPrice = 16m },
-            new Lot { Id = 6, ProductId = 1, LotNo = "L-91", ManufactureDate = today.AddDays(-91), UnitPrice = 32m },
-            new Lot { Id = 7, ProductId = 1, LotNo = "L-UNKNOWN", ManufactureDate = null, UnitPrice = 64m });
+            // ManufactureDate is a recorded business calendar date. Legacy/imported
+            // time and Kind metadata must not change its aging bucket.
+            new Lot { Id = 1, ProductId = 1, LotNo = "L-29", ManufactureDate = today.AddDays(-29).AddHours(23), UnitPrice = 1m },
+            new Lot { Id = 2, ProductId = 1, LotNo = "L-30", ManufactureDate = DateTime.SpecifyKind(today.AddDays(-30).AddHours(23), DateTimeKind.Utc), UnitPrice = 2m },
+            new Lot { Id = 3, ProductId = 1, LotNo = "L-59", ManufactureDate = DateTime.SpecifyKind(today.AddDays(-59).AddHours(8), DateTimeKind.Local), UnitPrice = 4m },
+            new Lot { Id = 4, ProductId = 1, LotNo = "L-60", ManufactureDate = today.AddDays(-60).AddHours(12), UnitPrice = 8m },
+            new Lot { Id = 5, ProductId = 1, LotNo = "L-90", ManufactureDate = today.AddDays(-90).AddHours(23), UnitPrice = 16m },
+            new Lot { Id = 6, ProductId = 1, LotNo = "L-91", ManufactureDate = today.AddDays(-91).AddHours(1), UnitPrice = 32m },
+            new Lot { Id = 7, ProductId = 1, LotNo = "L-UNKNOWN", ManufactureDate = null, UnitPrice = 64m },
+            new Lot { Id = 8, ProductId = 1, LotNo = "L-FUTURE", ManufactureDate = today.AddDays(1), UnitPrice = 128m });
         context.StockBalances.AddRange(
-            Enumerable.Range(1, 7).Select(id => new StockBalance
+            Enumerable.Range(1, 8).Select(id => new StockBalance
             {
                 ProductId = 1,
                 LotId = id,
@@ -245,14 +248,17 @@ public class OeeServiceTests
             }));
         await context.SaveChangesAsync();
 
-        var aging = await CreateService(context).GetInventoryAgingAnalyticsAsync();
+        var clock = new FixedTimeProvider(
+            new DateTimeOffset(2026, 7, 30, 17, 30, 0, TimeSpan.Zero));
+        var aging = await new OeeService(context, clock, VietnamTimeZone())
+            .GetInventoryAgingAnalyticsAsync();
 
-        Assert.Equal(1m, aging.LessThan30Days);
+        Assert.Equal(129m, aging.LessThan30Days);
         Assert.Equal(6m, aging.Days30To60);
         Assert.Equal(24m, aging.Days60To90);
         Assert.Equal(32m, aging.MoreThan90Days);
         Assert.Equal(64m, aging.UnknownAge);
-        Assert.Equal(127m, aging.TotalValue);
+        Assert.Equal(255m, aging.TotalValue);
     }
 
     [Fact]

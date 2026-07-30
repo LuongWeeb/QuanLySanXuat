@@ -289,10 +289,12 @@
 @section Scripts {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"
             integrity="sha384-/taWmisziXYpcfnYsumSUmNaiMvG/fF/OJOUCLnqCIYTrpOZy7WbFF6FfIxwOrfL"
-            crossorigin="anonymous"></script>
+            crossorigin="anonymous"
+            onerror="this.onerror=null;this.src='/lib/microsoft-signalr/8.0.0/signalr.min.js'"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"
             integrity="sha384-b0GXujLkk9eYYSmcSfoyZbfyElGAQnDyY0skCHSG6w3JgTMFnz11ggrTAr7seu9f"
-            crossorigin="anonymous"></script>
+            crossorigin="anonymous"
+            onerror="this.onerror=null;this.src='/lib/chart.js/4.4.9/chart.umd.min.js'"></script>
     <script>
         (() => {
             const endpoints = {
@@ -351,6 +353,10 @@
             let refreshInProgress = false;
             let refreshPending = false;
             let refreshTimer;
+            const hubStates = new Map([
+                ["production", "connecting"],
+                ["inventory", "connecting"]
+            ]);
 
             const asNumber = value => {
                 const parsed = Number(value);
@@ -760,40 +766,62 @@
                 connectionState.className = `connection-pill ${modifier}`;
             };
 
-            const startConnection = async connection => {
-                setConnectionState("Đang kết nối thời gian thực", "is-waiting");
+            const renderConnectionState = () => {
+                const states = [...hubStates.values()];
+                const connected = states.filter(state => state === "connected").length;
+                if (connected === states.length) {
+                    setConnectionState("Dữ liệu thời gian thực", "is-live");
+                } else if (connected > 0) {
+                    setConnectionState(
+                        `${connected}/${states.length} kênh thời gian thực`,
+                        "is-waiting");
+                } else if (states.some(state => state === "connecting")) {
+                    setConnectionState("Đang kết nối thời gian thực", "is-waiting");
+                } else {
+                    setConnectionState("Mất kết nối thời gian thực", "is-offline");
+                }
+            };
+
+            const updateHubState = (hubName, state) => {
+                hubStates.set(hubName, state);
+                renderConnectionState();
+            };
+
+            const startConnection = async (hubName, connection) => {
+                updateHubState(hubName, "connecting");
                 try {
                     await connection.start();
-                    setConnectionState("Dữ liệu thời gian thực", "is-live");
+                    updateHubState(hubName, "connected");
                 } catch {
-                    setConnectionState("Mất kết nối thời gian thực", "is-offline");
-                    window.setTimeout(() => startConnection(connection), 5000);
+                    updateHubState(hubName, "offline");
+                    window.setTimeout(() => startConnection(hubName, connection), 5000);
                 }
             };
 
             const initializeRealtime = () => {
                 if (!window.signalR) {
-                    setConnectionState("Không có SignalR", "is-offline");
+                    hubStates.forEach((_, hubName) => hubStates.set(hubName, "offline"));
+                    renderConnectionState();
                     return;
                 }
                 [
-                    ["/productionHub", "ReceiveProgressUpdate"],
-                    ["/inventoryHub", "ReceiveStockUpdate"]
-                ].forEach(([hubUrl, eventName]) => {
+                    ["production", "/productionHub", "ReceiveProgressUpdate"],
+                    ["inventory", "/inventoryHub", "ReceiveStockUpdate"]
+                ].forEach(([hubName, hubUrl, eventName]) => {
                     const connection = new signalR.HubConnectionBuilder()
                         .withUrl(hubUrl)
                         .withAutomaticReconnect()
                         .build();
                     connection.on(eventName, scheduleRefresh);
                     connection.onreconnecting(() => {
-                        setConnectionState("Đang kết nối lại", "is-waiting");
+                        updateHubState(hubName, "connecting");
                     });
                     connection.onreconnected(() => {
-                        setConnectionState("Dữ liệu thời gian thực", "is-live");
+                        updateHubState(hubName, "connected");
                         scheduleRefresh();
                     });
-                    connection.onclose(() => startConnection(connection));
-                    startConnection(connection);
+                    connection.onclose(() => startConnection(hubName, connection));
+                    startConnection(hubName, connection);
                 });
             };
 

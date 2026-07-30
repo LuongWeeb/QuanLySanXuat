@@ -296,6 +296,8 @@ public class MesCoreServiceTests
         await using var context = CreateContext();
         await SeedCommonDataAsync(context);
         await SeedBomRoutingAndWorkOrderAsync(context);
+        var clock = new FixedTimeProvider(
+            new DateTimeOffset(2026, 7, 30, 17, 30, 0, TimeSpan.Zero));
         context.WorkOrders.Single(w => w.Id == 100).Status = WorkOrderStatus.InProgress;
         context.Lots.Single(lot => lot.Id == 10).UnitPrice = 6.5m;
         context.WorkOrderSteps.AddRange(
@@ -336,7 +338,10 @@ public class MesCoreServiceTests
         });
         await context.SaveChangesAsync();
 
-        var service = new WorkOrderService(context);
+        var service = new WorkOrderService(
+            context,
+            timeProvider: clock,
+            businessTimeZone: VietnamTimeZone());
 
         var completed = await service.CompleteWorkOrderAsync(100, "worker");
 
@@ -345,7 +350,11 @@ public class MesCoreServiceTests
         Assert.Equal(WorkOrderStatus.Completed, workOrder.Status);
 
         var outputLot = await context.Lots.SingleAsync(l => l.WorkOrderId == 100);
-        Assert.StartsWith("FG-01-" + DateTime.Today.ToString("yyyyMMdd"), outputLot.LotNo);
+        Assert.StartsWith("FG-01-20260731", outputLot.LotNo);
+        Assert.Equal(
+            new DateTime(2026, 7, 31, 0, 0, 0, DateTimeKind.Unspecified),
+            outputLot.ManufactureDate);
+        Assert.Equal(DateTimeKind.Unspecified, outputLot.ManufactureDate!.Value.Kind);
         Assert.Equal(8m, outputLot.Qty);
         var manufacturedBalance = await context.StockBalances
             .SingleAsync(sb => sb.LotId == outputLot.Id);
@@ -367,6 +376,18 @@ public class MesCoreServiceTests
         Assert.Equal(materialBalance.QtyAvailable, backflush.QtyAfter);
         Assert.Equal(6.5m, backflush.ValuationRate);
         Assert.Contains(await context.LotGenealogies.ToListAsync(), g => g.OutputLotId == outputLot.Id && g.InputLotId == 10 && g.QtyConsumed == 12m);
+    }
+
+    private static TimeZoneInfo VietnamTimeZone() =>
+        TimeZoneInfo.CreateCustomTimeZone(
+            "Asia/Ho_Chi_Minh",
+            TimeSpan.FromHours(7),
+            "Vietnam",
+            "Vietnam");
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
     private static async Task SeedCommonDataAsync(ApplicationDbContext context)

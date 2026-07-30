@@ -14,11 +14,19 @@ public class WorkOrderService : IWorkOrderService
     public const string FinishedGoodsQcLocationCode = "LOC-FG-01";
     private readonly ApplicationDbContext _context;
     private readonly IHubContext<ProductionHub>? _productionHub;
+    private readonly TimeProvider _timeProvider;
+    private readonly TimeZoneInfo _businessTimeZone;
 
-    public WorkOrderService(ApplicationDbContext context, IHubContext<ProductionHub>? productionHub = null)
+    public WorkOrderService(
+        ApplicationDbContext context,
+        IHubContext<ProductionHub>? productionHub = null,
+        TimeProvider? timeProvider = null,
+        TimeZoneInfo? businessTimeZone = null)
     {
         _context = context;
         _productionHub = productionHub;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _businessTimeZone = businessTimeZone ?? TimeZoneInfo.Local;
     }
 
     public async Task<WorkOrder?> GetByIdAsync(int id)
@@ -220,7 +228,7 @@ public class WorkOrderService : IWorkOrderService
             throw new InvalidOperationException("Previous routing steps must be completed before this step can start.");
         }
 
-        step.StartTime = DateTime.UtcNow;
+        step.StartTime = _timeProvider.GetUtcNow().UtcDateTime;
         step.Status = WorkOrderStepStatus.InProgress;
         step.WorkOrder.Status = WorkOrderStatus.InProgress;
 
@@ -247,7 +255,7 @@ public class WorkOrderService : IWorkOrderService
         step.QtyOK = qtyOk;
         step.QtyReject = qtyReject;
         step.QtyRework = qtyRework;
-        step.EndTime = DateTime.UtcNow;
+        step.EndTime = _timeProvider.GetUtcNow().UtcDateTime;
         step.Status = WorkOrderStepStatus.Completed;
 
         await _context.SaveChangesAsync();
@@ -363,15 +371,22 @@ public class WorkOrderService : IWorkOrderService
                 .Select(location => (int?)location.Id)
                 .SingleOrDefaultAsync()
                 ?? throw new InvalidOperationException($"Active QC inspection location {FinishedGoodsQcLocationCode} was not found.");
-            var today = DateTime.Today;
-            var prefix = $"{product.Code}-{today:yyyyMMdd}-";
+            var completedAtUtc = _timeProvider.GetUtcNow();
+            var businessDate = TimeZoneInfo
+                .ConvertTime(completedAtUtc, _businessTimeZone)
+                .Date;
+            var prefix = $"{product.Code}-{businessDate:yyyyMMdd}-";
             var existingCount = await _context.Lots.CountAsync(l => l.LotNo.StartsWith(prefix));
             var finishedLot = new Lot
             {
                 LotNo = $"{prefix}{existingCount + 1:D4}",
                 ProductId = workOrder.ProductId,
-                ManufactureDate = DateTime.UtcNow,
-                ExpiryDate = product.ShelfLifeDays.HasValue ? DateTime.UtcNow.AddDays(product.ShelfLifeDays.Value) : null,
+                // ManufactureDate is a business calendar date, not an instant. Keep
+                // Kind unspecified so database round-trips cannot imply a time zone.
+                ManufactureDate = businessDate,
+                ExpiryDate = product.ShelfLifeDays.HasValue
+                    ? completedAtUtc.UtcDateTime.AddDays(product.ShelfLifeDays.Value)
+                    : null,
                 Qty = finalQty,
                 UnitPrice = unitActualCost,
                 WorkOrderId = workOrder.Id
@@ -398,7 +413,7 @@ public class WorkOrderService : IWorkOrderService
                 Qty = finalQty,
                 QtyAfter = finishedBalance.QtyAvailable,
                 ValuationRate = unitActualCost,
-                TransactionDate = DateTime.UtcNow,
+                TransactionDate = completedAtUtc.UtcDateTime,
                 UserId = userId,
                 ReferenceNo = workOrder.Code
             });
@@ -427,7 +442,7 @@ public class WorkOrderService : IWorkOrderService
                     Qty = -reservation.QtyReserved,
                     QtyAfter = balance.QtyAvailable,
                     ValuationRate = reservation.Lot!.UnitPrice,
-                    TransactionDate = DateTime.UtcNow,
+                    TransactionDate = completedAtUtc.UtcDateTime,
                     UserId = userId,
                     ReferenceNo = workOrder.Code
                 });
