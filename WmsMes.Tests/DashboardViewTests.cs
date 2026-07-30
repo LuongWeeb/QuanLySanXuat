@@ -31,6 +31,10 @@ public class DashboardViewTests
         Assert.Contains("/inventoryHub", view);
         Assert.Contains("ReceiveProgressUpdate", view);
         Assert.Contains("ReceiveStockUpdate", view);
+        Assert.Contains("/Dashboard/GetLowStockAlert", view);
+        Assert.Contains("id=\"low-stock-alert-container\"", view);
+        Assert.Contains("fetchText(endpoints.lowStock)", view);
+        Assert.Contains("lowStockAlertContainer.replaceChildren", view);
         Assert.DoesNotContain("location.reload", view);
 
         Assert.Contains("asp-controller=\"Dashboard\"", layout);

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,7 +16,6 @@ public class PurchaseOrderController : Controller
     private readonly ApplicationDbContext _context;
     private readonly IPurchaseRequestService _requestService;
     private readonly IPurchaseOrderService _orderService;
-    private readonly ILowStockService _lowStockService;
     private readonly TimeProvider _timeProvider;
 
     public PurchaseOrderController(
@@ -28,7 +28,7 @@ public class PurchaseOrderController : Controller
         _context = context;
         _requestService = requestService;
         _orderService = orderService;
-        _lowStockService = lowStockService;
+        _ = lowStockService ?? throw new ArgumentNullException(nameof(lowStockService));
         _timeProvider = timeProvider;
     }
 
@@ -91,41 +91,92 @@ public class PurchaseOrderController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> CreateRequestFromLowStock()
     {
-        var lowStockItems = await _lowStockService.GetLowStockItemsAsync(
-            HttpContext.RequestAborted);
-        var eligibleItems = lowStockItems
-            .Where(item => item.SuggestedQty > 0)
-            .ToList();
-        if (eligibleItems.Count == 0)
+        var cancellationToken = HttpContext.RequestAborted;
+        await using var transaction = _context.Database.IsRelational() &&
+                                      _context.Database.CurrentTransaction is null
+            ? await _context.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken)
+            : null;
+        try
         {
-            TempData["ErrorMessage"] =
-                "Không có sản phẩm tồn kho thấp với số lượng đề xuất hợp lệ để tạo yêu cầu.";
+            if (await HasOpenLowStockRequestAsync(cancellationToken))
+            {
+                TempData["StatusMessage"] =
+                    "Đã có Yêu cầu mua hàng nháp đang mở từ cảnh báo tồn kho thấp.";
+                return RedirectToAction(nameof(Requests));
+            }
+
+            var lowStockItems = await LowStockQuery.Create(_context)
+                .ToListAsync(cancellationToken);
+            var eligibleItems = lowStockItems
+                .Where(item => item.SuggestedQty > 0)
+                .ToList();
+            if (eligibleItems.Count == 0)
+            {
+                TempData["ErrorMessage"] =
+                    "Không có sản phẩm tồn kho thấp với số lượng đề xuất hợp lệ để tạo yêu cầu.";
+                return RedirectToAction(nameof(Requests));
+            }
+
+            var utcNow = _timeProvider.GetUtcNow().UtcDateTime;
+            var request = new PurchaseRequest
+            {
+                RequestNo =
+                    $"PR-LOWSTOCK-{utcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}"[..38],
+                RequestDate = utcNow,
+                RequiredDate = utcNow.AddDays(3),
+                Status = DocumentStatus.Draft,
+                LowStockBatchKey = PurchaseRequest.OpenLowStockBatchKey,
+                Items = eligibleItems.Select(item => new PurchaseRequestItem
+                {
+                    ProductId = item.ProductId,
+                    Qty = item.SuggestedQty
+                }).ToList()
+            };
+
+            _context.PurchaseRequests.Add(request);
+            await _context.SaveChangesAsync(cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            var skippedCount = lowStockItems.Count - eligibleItems.Count;
+            TempData["StatusMessage"] = skippedCount > 0
+                ? $"Đã tạo Yêu cầu mua hàng {request.RequestNo}; bỏ qua {skippedCount} sản phẩm có cấu hình MaxStock không hợp lệ."
+                : $"Đã tạo Yêu cầu mua hàng {request.RequestNo} từ cảnh báo tồn kho thấp.";
             return RedirectToAction(nameof(Requests));
         }
-
-        var utcNow = _timeProvider.GetUtcNow().UtcDateTime;
-        var request = new PurchaseRequest
+        catch (DbUpdateException)
         {
-            RequestNo =
-                $"PR-LOWSTOCK-{utcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}"[..38],
-            RequestDate = utcNow,
-            RequiredDate = utcNow.AddDays(3),
-            Status = DocumentStatus.Draft,
-            Items = eligibleItems.Select(item => new PurchaseRequestItem
+            if (transaction is not null)
             {
-                ProductId = item.ProductId,
-                Qty = item.SuggestedQty
-            }).ToList()
-        };
+                await transaction.RollbackAsync(CancellationToken.None);
+                await transaction.DisposeAsync();
+            }
 
-        _context.PurchaseRequests.Add(request);
-        await _context.SaveChangesAsync(HttpContext.RequestAborted);
+            _context.ChangeTracker.Clear();
+            if (await HasOpenLowStockRequestAsync(CancellationToken.None))
+            {
+                TempData["StatusMessage"] =
+                    "Đã có Yêu cầu mua hàng nháp đang mở từ cảnh báo tồn kho thấp.";
+                return RedirectToAction(nameof(Requests));
+            }
 
-        var skippedCount = lowStockItems.Count - eligibleItems.Count;
-        TempData["StatusMessage"] = skippedCount > 0
-            ? $"Đã tạo Yêu cầu mua hàng {request.RequestNo}; bỏ qua {skippedCount} sản phẩm có cấu hình MaxStock không hợp lệ."
-            : $"Đã tạo Yêu cầu mua hàng {request.RequestNo} từ cảnh báo tồn kho thấp.";
-        return RedirectToAction(nameof(Requests));
+            throw;
+        }
+    }
+
+    private Task<bool> HasOpenLowStockRequestAsync(CancellationToken cancellationToken)
+    {
+        return _context.PurchaseRequests
+            .AsNoTracking()
+            .AnyAsync(request =>
+                    request.Status == DocumentStatus.Draft &&
+                    (request.LowStockBatchKey == PurchaseRequest.OpenLowStockBatchKey ||
+                     request.RequestNo.StartsWith("PR-LOWSTOCK-")),
+                cancellationToken);
     }
 
     private async Task LoadSuppliersAsync()

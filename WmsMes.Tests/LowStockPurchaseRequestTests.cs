@@ -10,7 +10,6 @@ using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Services;
-using WmsMes.Web.ViewModels;
 
 namespace WmsMes.Tests;
 
@@ -20,14 +19,12 @@ public sealed class LowStockPurchaseRequestTests
     public async Task CreateRequestFromLowStock_CreatesOneDraftRequestWithExactEligibleQuantities()
     {
         await using var context = CreateContext();
+        await SeedLowStockAsync(
+            context,
+            (1, "P-LOW", 10m, 50m, 2m),
+            (2, "P-BAD", 10m, 2m, 2m),
+            (3, "P-NEG", 10m, 1m, 2m));
         var lowStock = new Mock<ILowStockService>(MockBehavior.Strict);
-        lowStock.Setup(service => service.GetLowStockItemsAsync(default))
-            .ReturnsAsync(
-            [
-                Item(1, "P-LOW", min: 10, max: 50, available: 2),
-                Item(2, "P-BAD", min: 10, max: 2, available: 2),
-                Item(3, "P-NEG", min: 10, max: 1, available: 2)
-            ]);
         var utcNow = new DateTimeOffset(2026, 7, 30, 3, 4, 5, TimeSpan.Zero);
         var controller = Controller(context, lowStock.Object, utcNow);
 
@@ -47,16 +44,16 @@ public sealed class LowStockPurchaseRequestTests
         Assert.Equal(48m, item.Qty);
         Assert.Contains(request.RequestNo, controller.TempData["StatusMessage"]!.ToString());
         Assert.Contains("bỏ qua 2", controller.TempData["StatusMessage"]!.ToString());
-        lowStock.VerifyAll();
     }
 
     [Fact]
     public async Task CreateRequestFromLowStock_WithNoPositiveSuggestion_DoesNotCreateRequest()
     {
         await using var context = CreateContext();
+        await SeedLowStockAsync(
+            context,
+            (2, "P-BAD", 10m, 2m, 2m));
         var lowStock = new Mock<ILowStockService>(MockBehavior.Strict);
-        lowStock.Setup(service => service.GetLowStockItemsAsync(default))
-            .ReturnsAsync([Item(2, "P-BAD", min: 10, max: 2, available: 2)]);
         var controller = Controller(
             context,
             lowStock.Object,
@@ -68,16 +65,23 @@ public sealed class LowStockPurchaseRequestTests
         Assert.Equal(nameof(PurchaseOrderController.Requests), redirect.ActionName);
         Assert.Empty(await context.PurchaseRequests.ToListAsync());
         Assert.Contains("không có", controller.TempData["ErrorMessage"]!.ToString(), StringComparison.OrdinalIgnoreCase);
-        lowStock.VerifyAll();
     }
 
     [Fact]
-    public async Task CreateRequestFromLowStock_SameUtcInstant_GeneratesDistinctRequestNumbers()
+    public async Task CreateRequestFromLowStock_RepeatedPost_ReturnsSingleOpenDraftBatch()
     {
         await using var context = CreateContext();
+        context.Products.Add(new Product
+        {
+            Id = 1,
+            Code = "P-LOW",
+            Name = "P-LOW name",
+            IsActive = true,
+            MinStock = 10,
+            MaxStock = 50
+        });
+        await context.SaveChangesAsync();
         var lowStock = new Mock<ILowStockService>();
-        lowStock.Setup(service => service.GetLowStockItemsAsync(default))
-            .ReturnsAsync([Item(1, "P-LOW", min: 10, max: 50, available: 2)]);
         var utcNow = new DateTimeOffset(2026, 7, 30, 3, 4, 5, TimeSpan.Zero);
         var first = Controller(context, lowStock.Object, utcNow);
         var second = Controller(context, lowStock.Object, utcNow);
@@ -85,10 +89,12 @@ public sealed class LowStockPurchaseRequestTests
         await first.CreateRequestFromLowStock();
         await second.CreateRequestFromLowStock();
 
-        var requestNumbers = await context.PurchaseRequests
-            .Select(request => request.RequestNo)
-            .ToListAsync();
-        Assert.Equal(2, requestNumbers.Distinct().Count());
+        var request = Assert.Single(await context.PurchaseRequests
+            .Include(entity => entity.Items)
+            .ToListAsync());
+        Assert.Equal(DocumentStatus.Draft, request.Status);
+        Assert.Single(request.Items);
+        Assert.NotNull(second.TempData["StatusMessage"]);
     }
 
     [Fact]
@@ -106,28 +112,60 @@ public sealed class LowStockPurchaseRequestTests
         Assert.Equal("Admin,Manager,Planner", authorize.Roles);
     }
 
-    private static LowStockItemViewModel Item(
-        int productId,
-        string code,
-        decimal min,
-        decimal max,
-        decimal available) =>
-        new()
-        {
-            ProductId = productId,
-            ProductCode = code,
-            ProductName = $"{code} name",
-            MinStock = min,
-            MaxStock = max,
-            TotalAvailable = available
-        };
-
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         return new ApplicationDbContext(options);
+    }
+
+    private static async Task SeedLowStockAsync(
+        ApplicationDbContext context,
+        params (int Id, string Code, decimal Min, decimal Max, decimal Available)[] items)
+    {
+        var unit = new UnitOfMeasure { Id = 1, Code = "EA", Name = "Each" };
+        var warehouse = new Warehouse { Id = 1, Code = "WH", Name = "Warehouse" };
+        var location = new Location
+        {
+            Id = 1,
+            Code = "LOC",
+            Name = "Location",
+            Zone = new Zone
+            {
+                Id = 1,
+                Code = "ZONE",
+                Name = "Zone",
+                Warehouse = warehouse
+            }
+        };
+        foreach (var item in items)
+        {
+            var product = new Product
+            {
+                Id = item.Id,
+                Code = item.Code,
+                Name = $"{item.Code} name",
+                BaseUom = unit,
+                IsActive = true,
+                MinStock = item.Min,
+                MaxStock = item.Max
+            };
+            context.StockBalances.Add(new StockBalance
+            {
+                Product = product,
+                Lot = new Lot
+                {
+                    Id = item.Id,
+                    LotNo = $"LOT-{item.Code}",
+                    Product = product
+                },
+                Location = location,
+                QtyAvailable = item.Available
+            });
+        }
+
+        await context.SaveChangesAsync();
     }
 
     private static PurchaseOrderController Controller(

@@ -8,6 +8,7 @@ using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 using WmsMes.Web.Data;
+using WmsMes.Web.Domain.Common;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Services;
 
@@ -26,10 +27,15 @@ public class PrintController : ControllerBase
     private const string AuditorSignatureTitle = "Nhân viên Kiểm toán/QC";
     private const string ApproverSignatureTitle = "Trưởng kho/Giám đốc duyệt";
     private readonly ApplicationDbContext _context;
+    private readonly TimeZoneInfo _businessTimeZone;
 
-    public PrintController(ApplicationDbContext context)
+    public PrintController(
+        ApplicationDbContext context,
+        TimeZoneInfo? businessTimeZone = null)
     {
         _context = context;
+        _businessTimeZone = businessTimeZone ??
+            BusinessTimeZoneResolver.Resolve("Asia/Ho_Chi_Minh");
     }
 
     [HttpGet("location/{id:int}")]
@@ -152,8 +158,33 @@ public class PrintController : ControllerBase
             return NotFound("Phiếu kiểm kê không tồn tại.");
         }
 
+        await CycleCountReconciliation.PopulateExpectedAtCountQuantitiesAsync(
+            _context,
+            count,
+            HttpContext?.RequestAborted ?? default);
+        var identityIds = new[] { count.CreatedBy, count.ApprovedBy }
+            .Where(identityId => !string.IsNullOrWhiteSpace(identityId))
+            .Select(identityId => identityId!)
+            .Distinct()
+            .ToList();
+        var userNames = await _context.Users
+            .AsNoTracking()
+            .Where(user => identityIds.Contains(user.Id))
+            .Select(user => new { user.Id, user.FullName })
+            .ToDictionaryAsync(
+                user => user.Id,
+                user => user.FullName,
+                HttpContext?.RequestAborted ?? default);
+        var createdBy = ResolveDisplayName(count.CreatedBy, userNames);
+        var approvedBy = ResolveDisplayName(count.ApprovedBy, userNames);
+
         return File(
-            CreateCycleCountDocument(count).GeneratePdf(),
+            CreateCycleCountDocument(
+                count,
+                createdBy,
+                approvedBy,
+                FormatBusinessDate(count.CompletedAt ?? count.CreatedAt))
+                .GeneratePdf(),
             "application/pdf",
             $"BienBanKiemKe_{SanitizeFileNameIdentifier(count.CountNumber)}.pdf");
     }
@@ -177,7 +208,10 @@ public class PrintController : ControllerBase
         }
 
         return File(
-            CreateReceiptDocument(receipt).GeneratePdf(),
+            CreateReceiptDocument(
+                receipt,
+                FormatBusinessDate(receipt.ReceiptDate))
+                .GeneratePdf(),
             "application/pdf",
             $"PhieuNhapKho_{SanitizeFileNameIdentifier(receipt.ReceiptNo)}.pdf");
     }
@@ -203,12 +237,19 @@ public class PrintController : ControllerBase
         }
 
         return File(
-            CreateIssueDocument(issue).GeneratePdf(),
+            CreateIssueDocument(
+                issue,
+                FormatBusinessDate(issue.IssueDate))
+                .GeneratePdf(),
             "application/pdf",
             $"PhieuXuatKho_{SanitizeFileNameIdentifier(issue.IssueNo)}.pdf");
     }
 
-    private static IDocument CreateCycleCountDocument(CycleCountOrder count)
+    private static IDocument CreateCycleCountDocument(
+        CycleCountOrder count,
+        string createdBy,
+        string approvedBy,
+        string countDate)
     {
         return Document.Create(container =>
         {
@@ -238,9 +279,9 @@ public class PrintController : ControllerBase
                         AddDetail(
                             table,
                             count.CompletedAt.HasValue ? "Ngày đếm" : "Ngày lập",
-                            (count.CompletedAt ?? count.CreatedAt).ToString("dd/MM/yyyy"));
-                        AddDetail(table, "Người tạo", count.CreatedBy);
-                        AddDetail(table, "Người duyệt", count.ApprovedBy ?? string.Empty);
+                            countDate);
+                        AddDetail(table, "Người tạo", createdBy);
+                        AddDetail(table, "Người duyệt", approvedBy);
                     });
 
                     column.Item().Table(table =>
@@ -264,7 +305,7 @@ public class PrintController : ControllerBase
                             AddHeaderCell(header, "Tên sản phẩm");
                             AddHeaderCell(header, "Vị trí");
                             AddHeaderCell(header, "Số lô");
-                            AddHeaderCell(header, "SL hệ thống");
+                            AddHeaderCell(header, "Dự kiến lúc đếm");
                             AddHeaderCell(header, "SL thực đếm");
                             AddHeaderCell(header, "Chênh lệch");
                             AddHeaderCell(header, VarianceReasonHeader);
@@ -277,7 +318,9 @@ public class PrintController : ControllerBase
                             AddBodyCell(table, item.Product?.Name ?? string.Empty);
                             AddBodyCell(table, item.Location?.Code ?? string.Empty);
                             AddBodyCell(table, item.Lot?.LotNo ?? string.Empty);
-                            AddNumberCell(table, FormatQuantity(item.SystemQty));
+                            AddNumberCell(
+                                table,
+                                FormatQuantity(item.ExpectedAtCountQty ?? item.SystemQty));
                             if (item.CountedQty.HasValue)
                             {
                                 AddNumberCell(table, FormatQuantity(item.CountedQty.Value));
@@ -286,9 +329,15 @@ public class PrintController : ControllerBase
                             {
                                 AddBodyCell(table, "Chưa kiểm đếm");
                             }
-                            AddNumberCell(table, FormatQuantity(item.VarianceQty));
+                            AddNumberCell(
+                                table,
+                                FormatQuantity(item.AuthoritativeVarianceQty));
                             AddBodyCell(table, item.ReasonNote ?? string.Empty);
-                            AddNumberCell(table, FormatCurrency(item.VarianceQty * (item.Lot?.UnitPrice ?? 0m)));
+                            AddNumberCell(
+                                table,
+                                FormatCurrency(
+                                    item.AuthoritativeVarianceQty *
+                                    (item.Lot?.UnitPrice ?? 0m)));
                         }
                     });
 
@@ -305,7 +354,9 @@ public class PrintController : ControllerBase
         });
     }
 
-    private static IDocument CreateReceiptDocument(GoodsReceipt receipt)
+    private static IDocument CreateReceiptDocument(
+        GoodsReceipt receipt,
+        string receiptDate)
     {
         return Document.Create(container =>
         {
@@ -331,7 +382,7 @@ public class PrintController : ControllerBase
                         });
 
                         AddDetail(table, "Số phiếu", receipt.ReceiptNo);
-                        AddDetail(table, "Ngày nhập", receipt.ReceiptDate.ToString("dd/MM/yyyy"));
+                        AddDetail(table, "Ngày nhập", receiptDate);
                         AddDetail(table, "Nhà cung cấp", receipt.Supplier?.Name ?? string.Empty);
                         AddDetail(table, "Trạng thái", receipt.Status.ToString());
                     });
@@ -382,7 +433,9 @@ public class PrintController : ControllerBase
         });
     }
 
-    private static IDocument CreateIssueDocument(GoodsIssue issue)
+    private static IDocument CreateIssueDocument(
+        GoodsIssue issue,
+        string issueDate)
     {
         return Document.Create(container =>
         {
@@ -408,7 +461,7 @@ public class PrintController : ControllerBase
                         });
 
                         AddDetail(table, "Số phiếu", issue.IssueNo);
-                        AddDetail(table, "Ngày xuất", issue.IssueDate.ToString("dd/MM/yyyy"));
+                        AddDetail(table, "Ngày xuất", issueDate);
                         AddDetail(table, "Khách hàng", issue.Customer?.Name ?? string.Empty);
                         AddDetail(table, "Trạng thái", issue.Status.ToString());
                     });
@@ -509,6 +562,28 @@ public class PrintController : ControllerBase
 
     private static string FormatCurrency(decimal value) =>
         value.ToString("#,##0", CultureInfo.GetCultureInfo("vi-VN"));
+
+    private string FormatBusinessDate(DateTime storedUtc)
+    {
+        var businessDateTime = storedUtc.ToVietnameseBusinessDateTime(
+            _businessTimeZone);
+        return businessDateTime[..10];
+    }
+
+    private static string ResolveDisplayName(
+        string? storedIdentity,
+        IReadOnlyDictionary<string, string> userNames)
+    {
+        if (string.IsNullOrWhiteSpace(storedIdentity))
+        {
+            return string.Empty;
+        }
+
+        return userNames.TryGetValue(storedIdentity, out var fullName) &&
+               !string.IsNullOrWhiteSpace(fullName)
+            ? fullName
+            : storedIdentity;
+    }
 
     private static string SanitizeFileNameIdentifier(string identifier)
     {

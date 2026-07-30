@@ -52,7 +52,7 @@ public sealed class LowStockServiceTests
     }
 
     [Fact]
-    public async Task GetLowStockItemsAsync_ExcludesInactiveZeroMinimumAndNotLowStockProducts()
+    public async Task GetLowStockItemsAsync_UsesLiteralActiveTotalBelowMinimumPredicate()
     {
         await using var fixture = await EfFixture.CreateAsync();
         var unit = new UnitOfMeasure { Code = "EA", Name = "Each" };
@@ -71,17 +71,28 @@ public sealed class LowStockServiceTests
         var zeroMinimum = Product("ZERO-MIN", 0, 50, unit);
         var sufficient = Product("ENOUGH", 10, 50, unit);
         var malformed = Product("BAD-MAX", 10, 1, unit);
-        fixture.Context.Products.AddRange(inactive, zeroMinimum);
+        fixture.Context.Products.Add(inactive);
         fixture.Context.StockBalances.AddRange(
+            Balance(zeroMinimum, location, "LOT-ZERO-MIN", -2),
             Balance(sufficient, location, "LOT-ENOUGH", 10),
             Balance(malformed, location, "LOT-BAD-MAX", 2));
         await fixture.Context.SaveChangesAsync();
 
         var items = await new LowStockService(fixture.Context).GetLowStockItemsAsync();
 
-        var item = Assert.Single(items);
-        Assert.Equal("BAD-MAX", item.ProductCode);
-        Assert.Equal(-1m, item.SuggestedQty);
+        Assert.Collection(
+            items,
+            item =>
+            {
+                Assert.Equal("BAD-MAX", item.ProductCode);
+                Assert.Equal(-1m, item.SuggestedQty);
+            },
+            item =>
+            {
+                Assert.Equal("ZERO-MIN", item.ProductCode);
+                Assert.Equal(-2m, item.TotalAvailable);
+                Assert.Equal(52m, item.SuggestedQty);
+            });
     }
 
     [Fact]
@@ -107,6 +118,7 @@ public sealed class LowStockServiceTests
         Assert.Contains("Code", sql, StringComparison.Ordinal);
         Assert.DoesNotContain(" AS float", sql, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(" AS real", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("MinStock] > 0", sql, StringComparison.OrdinalIgnoreCase);
     }
 
     private static Product Product(

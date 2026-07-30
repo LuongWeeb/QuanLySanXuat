@@ -29,14 +29,22 @@ public class CycleCountService : ICycleCountService
         return await CreateOrderAsync(warehouseId, createdBy);
     }
 
-    public Task<CycleCountOrder?> GetByIdAsync(int id)
+    public async Task<CycleCountOrder?> GetByIdAsync(int id)
     {
-        return _context.CycleCountOrders
+        var order = await _context.CycleCountOrders
             .Include(order => order.Warehouse)
             .Include(order => order.Items).ThenInclude(item => item.Product)
             .Include(order => order.Items).ThenInclude(item => item.Location)
             .Include(order => order.Items).ThenInclude(item => item.Lot)
             .FirstOrDefaultAsync(order => order.Id == id);
+        if (order is not null)
+        {
+            await CycleCountReconciliation.PopulateExpectedAtCountQuantitiesAsync(
+                _context,
+                order);
+        }
+
+        return order;
     }
 
     public async Task<CycleCountOrder> CreateOrderAsync(
@@ -131,41 +139,110 @@ public class CycleCountService : ICycleCountService
             return false;
         }
 
-        var order = await _context.CycleCountOrders
-            .Include(item => item.Items)
-            .SingleOrDefaultAsync(item => item.Id == orderId);
-        if (order is null || order.Status is "Completed" or "Approved" or "Cancelled")
-            return false;
-
         var normalizedLocation = locationCode.Trim();
         var normalizedLot = lotNo.Trim();
-        var location = await _context.Locations
-            .Include(item => item.Zone)
-            .SingleOrDefaultAsync(item =>
-                item.Code == normalizedLocation &&
-                item.Zone!.WarehouseId == order.WarehouseId);
-        var lot = await _context.Lots
-            .SingleOrDefaultAsync(item => item.LotNo == normalizedLot);
-        if (location is null ||
-            lot is null ||
-            order.Items.Any(item =>
-                item.LocationId == location.Id &&
-                item.LotId == lot.Id))
+        await using var transaction = await BeginTransactionIfRelationalAsync();
+        try
         {
-            return false;
-        }
+            var warehouseId = await _context.CycleCountOrders
+                .AsNoTracking()
+                .Where(order =>
+                    order.Id == orderId &&
+                    (order.Status == "Draft" || order.Status == "InProgress"))
+                .Select(order => (int?)order.WarehouseId)
+                .SingleOrDefaultAsync();
+            if (!warehouseId.HasValue)
+            {
+                return false;
+            }
 
-        order.Items.Add(new CycleCountItem
+            var location = await _context.Locations
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item =>
+                    item.Code == normalizedLocation &&
+                    item.Zone!.WarehouseId == warehouseId.Value);
+            var lot = await _context.Lots
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item => item.LotNo == normalizedLot);
+            if (location is null || lot is null)
+            {
+                return false;
+            }
+
+            if (_context.Database.IsRelational())
+            {
+                var claimed = await _context.CycleCountOrders
+                    .Where(order =>
+                        order.Id == orderId &&
+                        (order.Status == "Draft" || order.Status == "InProgress"))
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(order => order.Status, "InProgress"));
+                if (claimed != 1)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                var trackedOrder = await _context.CycleCountOrders
+                    .SingleOrDefaultAsync(order => order.Id == orderId);
+                if (trackedOrder is null ||
+                    trackedOrder.Status is not ("Draft" or "InProgress"))
+                {
+                    return false;
+                }
+
+                trackedOrder.Status = "InProgress";
+            }
+
+            var duplicate = await _context.CycleCountItems
+                .AsNoTracking()
+                .AnyAsync(item =>
+                    item.CycleCountOrderId == orderId &&
+                    item.LocationId == location.Id &&
+                    item.LotId == lot.Id);
+            if (duplicate)
+            {
+                return false;
+            }
+
+            _context.CycleCountItems.Add(new CycleCountItem
+            {
+                CycleCountOrderId = orderId,
+                ProductId = lot.ProductId,
+                LocationId = location.Id,
+                LotId = lot.Id,
+                SystemQty = 0,
+                CountedQty = countedQty
+            });
+            await _context.SaveChangesAsync();
+            await CommitIfRelationalAsync(transaction);
+            return true;
+        }
+        catch (DbUpdateException)
         {
-            ProductId = lot.ProductId,
-            LocationId = location.Id,
-            LotId = lot.Id,
-            SystemQty = 0,
-            CountedQty = countedQty
-        });
-        order.Status = "InProgress";
-        await _context.SaveChangesAsync();
-        return true;
+            await RollbackIfRelationalAsync(transaction);
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+
+            _context.ChangeTracker.Clear();
+            if (await _context.CycleCountItems.AsNoTracking().AnyAsync(item =>
+                    item.CycleCountOrderId == orderId &&
+                    item.Location!.Code == normalizedLocation &&
+                    item.Lot!.LotNo == normalizedLot))
+            {
+                return false;
+            }
+
+            throw;
+        }
+        catch
+        {
+            await RollbackIfRelationalAsync(transaction);
+            throw;
+        }
     }
 
     public async Task<bool> RecordCountResultsAsync(int orderId, List<CountResultDto> results)
@@ -352,12 +429,14 @@ public class CycleCountService : ICycleCountService
                 order = await _context.CycleCountOrders
                     .AsNoTracking()
                     .Include(cycleCountOrder => cycleCountOrder.Items)
+                        .ThenInclude(item => item.Lot)
                     .SingleAsync(cycleCountOrder => cycleCountOrder.Id == orderId);
             }
             else
             {
                 var trackedOrder = await _context.CycleCountOrders
                     .Include(cycleCountOrder => cycleCountOrder.Items)
+                        .ThenInclude(item => item.Lot)
                     .FirstOrDefaultAsync(cycleCountOrder => cycleCountOrder.Id == orderId);
 
                 if (trackedOrder is null || trackedOrder.Status != "Completed")
@@ -368,15 +447,22 @@ public class CycleCountService : ICycleCountService
                 order = trackedOrder;
             }
 
-            foreach (var item in order.Items.Where(item => item.CountedQty.HasValue && item.VarianceQty != 0))
+            await CycleCountReconciliation.PopulateExpectedAtCountQuantitiesAsync(
+                _context,
+                order);
+
+            foreach (var item in order.Items.Where(item =>
+                         item.CountedQty.HasValue &&
+                         item.AuthoritativeVarianceQty != 0))
             {
+                var adjustmentQty = item.AuthoritativeVarianceQty;
                 var balanceExists = await _context.StockBalances.AnyAsync(balance =>
                     balance.ProductId == item.ProductId &&
                     balance.LotId == item.LotId &&
                     balance.LocationId == item.LocationId);
                 if (!balanceExists)
                 {
-                    if (item.VarianceQty < 0)
+                    if (adjustmentQty < 0)
                         throw new InvalidOperationException($"Cannot create negative stock for cycle count item {item.Id}.");
 
                     _context.StockBalances.Add(new StockBalance
@@ -384,7 +470,7 @@ public class CycleCountService : ICycleCountService
                         ProductId = item.ProductId,
                         LotId = item.LotId,
                         LocationId = item.LocationId,
-                        QtyAvailable = item.VarianceQty
+                        QtyAvailable = adjustmentQty
                     });
                     _context.StockTransactions.Add(new StockTransaction
                     {
@@ -392,9 +478,11 @@ public class CycleCountService : ICycleCountService
                         ProductId = item.ProductId,
                         LotId = item.LotId,
                         LocationId = item.LocationId,
-                        Qty = item.VarianceQty,
-                        QtyAfter = item.VarianceQty,
-                        ValuationRate = item.Lot?.UnitPrice ?? 0,
+                        Qty = adjustmentQty,
+                        QtyAfter = adjustmentQty,
+                        ValuationRate = item.Lot?.UnitPrice
+                            ?? throw new InvalidOperationException(
+                                $"The cycle count lot for item {item.Id} no longer exists."),
                         TransactionDate = DateTime.UtcNow,
                         UserId = approvedBy,
                         ReferenceNo = order.CountNumber
@@ -406,7 +494,7 @@ public class CycleCountService : ICycleCountService
                     item.ProductId,
                     item.LotId,
                     item.LocationId,
-                    item.VarianceQty,
+                    adjustmentQty,
                     approvedBy,
                     order.CountNumber);
 

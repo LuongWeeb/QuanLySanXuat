@@ -193,6 +193,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .IsUnique();
 
         builder.Entity<PurchaseRequest>()
+            .HasIndex(request => request.LowStockBatchKey)
+            .IsUnique()
+            .HasFilter("[LowStockBatchKey] IS NOT NULL AND [Status] = 0");
+
+        builder.Entity<PurchaseRequest>()
             .HasIndex(request => request.ProductionPlanId)
             .IsUnique()
             .HasFilter("[ProductionPlanId] IS NOT NULL");
@@ -391,6 +396,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .WithOne(item => item.CycleCountOrder)
             .HasForeignKey(item => item.CycleCountOrderId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<CycleCountItem>()
+            .HasIndex(item => new
+            {
+                item.CycleCountOrderId,
+                item.LocationId,
+                item.LotId
+            })
+            .IsUnique();
 
         builder.Entity<CycleCountItem>()
             .HasOne(item => item.Product)

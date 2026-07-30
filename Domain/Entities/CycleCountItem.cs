@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace WmsMes.Web.Domain.Entities;
 
@@ -16,6 +17,19 @@ public class CycleCountItem
     public decimal SystemQty { get; set; }
     public decimal? CountedQty { get; set; }
     public decimal VarianceQty => (CountedQty ?? SystemQty) - SystemQty;
+
+    [NotMapped]
+    public decimal? ExpectedAtCountQty { get; set; }
+
+    [NotMapped]
+    public decimal AuthoritativeVarianceQty
+    {
+        get
+        {
+            var expected = ExpectedAtCountQty ?? SystemQty;
+            return (CountedQty ?? expected) - expected;
+        }
+    }
 
     [MaxLength(250)]
     public string? ReasonNote { get; set; }

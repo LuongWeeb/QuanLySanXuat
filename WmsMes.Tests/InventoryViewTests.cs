@@ -218,6 +218,26 @@ public class InventoryViewTests
         Assert.Contains(documentLabel, view);
     }
 
+    [Theory]
+    [InlineData("Receipts.cshtml", "PrintReceipt", "@receipt.Id", "phiếu nhập kho")]
+    [InlineData("Issues.cshtml", "PrintIssue", "@issue.Id", "phiếu xuất kho")]
+    public void DocumentLists_RenderAccessibleRouteGeneratedPdfLinkForEveryHistoryRow(
+        string fileName,
+        string printAction,
+        string routeId,
+        string documentLabel)
+    {
+        var view = ReadInventoryView(fileName);
+
+        Assert.Contains("asp-controller=\"Print\"", view);
+        Assert.Contains($"asp-action=\"{printAction}\"", view);
+        Assert.Contains($"asp-route-id=\"{routeId}\"", view);
+        Assert.Contains("target=\"_blank\"", view);
+        Assert.Contains("rel=\"noopener\"", view);
+        Assert.Contains($"aria-label=\"In PDF {documentLabel}", view);
+        Assert.Contains(">In PDF</a>", view);
+    }
+
     [Fact]
     public void Transactions_RendersRunningBalanceValuationAndCancellationStatus()
     {

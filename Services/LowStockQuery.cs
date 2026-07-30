@@ -11,7 +11,7 @@ public static class LowStockQuery
     {
         var totals =
             from product in context.Products.AsNoTracking()
-            where product.IsActive && product.MinStock > 0
+            where product.IsActive
             join balance in context.StockBalances.AsNoTracking()
                 on product.Id equals balance.ProductId into productBalances
             from balance in productBalances.DefaultIfEmpty()

@@ -20,7 +20,8 @@ public class DashboardControllerTests
                      nameof(DashboardController.GetOeeData),
                      nameof(DashboardController.GetAgingData),
                      nameof(DashboardController.GetProductionProgressData),
-                     nameof(DashboardController.GetProductionQualityData)
+                     nameof(DashboardController.GetProductionQualityData),
+                     "GetLowStockAlert"
                  })
         {
             var method = typeof(DashboardController).GetMethod(action);

@@ -25,7 +25,7 @@
 <section class="data-panel mt-3">
     <div class="table-responsive">
         <table class="table data-table align-middle">
-            <thead><tr><th>Mã Phiếu</th><th>Khách hàng</th><th>Sản phẩm</th><th>Lô xuất</th><th>Vị trí</th><th class="text-end">Số lượng</th><th>Ngày xuất</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+            <thead><tr><th>Mã Phiếu</th><th>Khách hàng</th><th>Sản phẩm</th><th>Lô xuất</th><th>Vị trí</th><th class="text-end">Số lượng</th><th>Ngày xuất</th><th>PDF</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
             <tbody>
             @foreach (var issue in Model)
             {
@@ -37,6 +37,15 @@
                         <td><code>@issue.IssueNo</code></td><td>@issue.Customer?.Code - @issue.Customer?.Name</td><td>@line.Product?.Name</td><td><code>@line.Lot?.LotNo</code></td>
                         <td><code>@line.Location?.Code</code></td><td class="text-end fw-semibold text-danger">-@line.Qty.ToVietnameseNumber()</td>
                         <td>@issue.IssueDate.ToVietnameseBusinessDateTime(BusinessTimeZone)</td>
+                        <td>
+                            <a class="btn btn-sm btn-outline-primary"
+                               asp-controller="Print"
+                               asp-action="PrintIssue"
+                               asp-route-id="@issue.Id"
+                               target="_blank"
+                               rel="noopener"
+                               aria-label="In PDF phiếu xuất kho @issue.IssueNo">In PDF</a>
+                        </td>
                         @if (indexedLine.Index == 0)
                         {
                             <td rowspan="@lines.Count">

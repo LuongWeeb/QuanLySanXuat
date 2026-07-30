@@ -122,7 +122,9 @@
         </div>
     </section>
 
-    <partial name="_LowStockAlert" model="Model.LowStockItems" />
+    <div id="low-stock-alert-container">
+        <partial name="_LowStockAlert" model="Model.LowStockItems" />
+    </div>
 
     <div id="dashboard-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
         Đang tải dữ liệu dashboard.
@@ -297,7 +299,8 @@
                 oee: "/Dashboard/GetOeeData",
                 aging: "/Dashboard/GetAgingData",
                 production: "/Dashboard/GetProductionProgressData",
-                quality: "/Dashboard/GetProductionQualityData"
+                quality: "/Dashboard/GetProductionQualityData",
+                lowStock: "/Dashboard/GetLowStockAlert"
             };
             const decimalNumber = new Intl.NumberFormat("vi-VN", {
                 minimumFractionDigits: 0,
@@ -334,6 +337,7 @@
             const chartError = document.getElementById("chart-error");
             const connectionState = document.getElementById("dashboard-connection-state");
             const connectionLabel = document.getElementById("dashboard-connection-label");
+            const lowStockAlertContainer = document.getElementById("low-stock-alert-container");
             const oeeContainer = document.getElementById("oee-cards-container");
             const productionCanvas = document.getElementById("production-progress-chart");
             const agingCanvas = document.getElementById("inventory-aging-chart");
@@ -672,6 +676,15 @@
                 return response.json();
             };
 
+            const fetchText = async url => {
+                const response = await fetch(url, {
+                    cache: "no-store",
+                    headers: { "Accept": "text/html" }
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.text();
+            };
+
             const refreshDashboard = async () => {
                 if (refreshInProgress) {
                     refreshPending = true;
@@ -684,14 +697,19 @@
                 dashboardStatus.textContent = "Đang cập nhật dữ liệu dashboard.";
 
                 try {
-                    const [oeeResult, agingResult, productionResult, qualityResult] = await Promise.all([
+                    const [oeeResult, agingResult, productionResult, qualityResult, lowStockHtml] = await Promise.all([
                         fetchJson(endpoints.oee),
                         fetchJson(endpoints.aging),
                         fetchJson(endpoints.production),
-                        fetchJson(endpoints.quality)
+                        fetchJson(endpoints.quality),
+                        fetchText(endpoints.lowStock)
                     ]);
                     if (generation !== refreshGeneration) return;
 
+                    const parsedLowStockAlert = new DOMParser()
+                        .parseFromString(lowStockHtml, "text/html");
+                    lowStockAlertContainer.replaceChildren(
+                        ...parsedLowStockAlert.body.childNodes);
                     const oeeData = Array.isArray(oeeResult) ? oeeResult : [];
                     const agingData = agingResult && typeof agingResult === "object" ? agingResult : {};
                     const productionData = Array.isArray(productionResult) ? productionResult : [];

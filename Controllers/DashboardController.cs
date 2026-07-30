@@ -71,6 +71,16 @@ public class DashboardController : Controller
         return Json(data);
     }
 
+    [HttpGet]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> GetLowStockAlert()
+    {
+        return PartialView(
+            "_LowStockAlert",
+            await _lowStockService.GetLowStockItemsAsync(
+                HttpContext.RequestAborted));
+    }
+
     private ReportingPeriod GetCurrentReportingPeriod()
     {
         var businessToday =

@@ -8,6 +8,7 @@ using UglyToad.PdfPig;
 using WmsMes.Web.Controllers;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Services;
 
 namespace WmsMes.Tests;
@@ -42,15 +43,28 @@ public class PrintControllerInventoryDocumentTests :
                 Product = product,
                 UnitPrice = 12_500m
             };
+            context.Users.AddRange(
+                new ApplicationUser
+                {
+                    Id = "creator-id",
+                    UserName = "creator",
+                    FullName = "Nguyen Van A"
+                },
+                new ApplicationUser
+                {
+                    Id = "approver-id",
+                    UserName = "approver",
+                    FullName = "Tran Van B"
+                });
             context.CycleCountOrders.Add(new CycleCountOrder
             {
                 Id = 6,
                 CountNumber = "CC/2026:* 001",
                 Warehouse = warehouse,
-                CreatedAt = new DateTime(2026, 7, 30),
-                CompletedAt = new DateTime(2026, 7, 31),
-                CreatedBy = "Nguyen Van A",
-                ApprovedBy = "Tran Van B",
+                CreatedAt = new DateTime(2026, 7, 30, 17, 30, 0, DateTimeKind.Utc),
+                CompletedAt = new DateTime(2026, 7, 30, 18, 30, 0, DateTimeKind.Utc),
+                CreatedBy = "creator-id",
+                ApprovedBy = "approver-id",
                 Items =
                 [
                     new CycleCountItem
@@ -60,16 +74,29 @@ public class PrintControllerInventoryDocumentTests :
                         Location = location,
                         Lot = lot,
                         SystemQty = 10m,
-                        CountedQty = 8m,
+                        CountedQty = 7m,
                         ReasonNote = "Hu hong khi luu kho"
                     }
                 ]
+            });
+            context.StockTransactions.Add(new StockTransaction
+            {
+                Type = TransactionType.Issue,
+                Product = product,
+                Location = location,
+                Lot = lot,
+                Qty = -3,
+                QtyAfter = 7,
+                ValuationRate = lot.UnitPrice,
+                TransactionDate = new DateTime(2026, 7, 30, 18, 0, 0, DateTimeKind.Utc),
+                UserId = "warehouse-id",
+                ReferenceNo = "GI-MOVEMENT"
             });
             await context.SaveChangesAsync();
         }
 
         await using var assertionContext = new ApplicationDbContext(options);
-        var controller = new PrintController(assertionContext);
+        var controller = CreateController(assertionContext, VietnamTimeZone());
 
         var result = await controller.PrintCycleCount(6);
 
@@ -85,10 +112,15 @@ public class PrintControllerInventoryDocumentTests :
         Assert.Contains("Kho thanh pham", text);
         Assert.Contains("31/07/2026", text);
         Assert.DoesNotContain("30/07/2026", text);
+        Assert.Contains("Nguyen Van A", text);
+        Assert.Contains("Tran Van B", text);
+        Assert.DoesNotContain("creator-id", text);
+        Assert.DoesNotContain("approver-id", text);
         Assert.Contains("SKU-COUNT-01", text);
         Assert.Contains("LOT-COUNT-01", text);
         Assert.Contains("Hu hong khi luu kho", text);
-        Assert.Contains("-25.000", text);
+        Assert.DoesNotContain("-37.500", text);
+        Assert.Contains("Dự kiến", text);
         Assert.Contains("Lý do chênh lệch", text);
         Assert.Contains("Người kiểm đếm (Thủ kho)", text);
         Assert.Contains("Nhân viên Kiểm toán/QC", text);
@@ -113,7 +145,7 @@ public class PrintControllerInventoryDocumentTests :
             {
                 Id = 12,
                 ReceiptNo = "GR/2026:* 001",
-                ReceiptDate = new DateTime(2026, 7, 29),
+                ReceiptDate = new DateTime(2026, 7, 30, 18, 30, 0, DateTimeKind.Utc),
                 Supplier = new Supplier { Id = 13, Code = "SUP-01", Name = "Nha cung cap A" },
                 Lines =
                 [
@@ -133,7 +165,7 @@ public class PrintControllerInventoryDocumentTests :
         }
 
         await using var assertionContext = new ApplicationDbContext(options);
-        var controller = new PrintController(assertionContext);
+        var controller = CreateController(assertionContext, VietnamTimeZone());
 
         var result = await controller.PrintReceipt(12);
 
@@ -142,6 +174,8 @@ public class PrintControllerInventoryDocumentTests :
         AssertControllerLabel("ReceiptTitle", "PHIẾU NHẬP KHO");
         AssertControllerLabel("VarianceReasonHeader", "Lý do chênh lệch");
         Assert.Contains("PHIẾU NHẬP KHO", text);
+        Assert.Contains("31/07/2026", text);
+        Assert.DoesNotContain("30/07/2026", text);
         Assert.Contains("SKU-RECEIPT-01", text);
         Assert.Contains("Lý do chênh lệch", text);
         Assert.Contains("Thua theo bien ban giao nhan", text);
@@ -166,7 +200,7 @@ public class PrintControllerInventoryDocumentTests :
             {
                 Id = 23,
                 IssueNo = "GI/2026:* 001",
-                IssueDate = new DateTime(2026, 7, 28),
+                IssueDate = new DateTime(2026, 7, 30, 18, 30, 0, DateTimeKind.Utc),
                 Customer = new Customer { Id = 24, Code = "CUS-01", Name = "Khach hang A" },
                 Lines =
                 [
@@ -185,7 +219,7 @@ public class PrintControllerInventoryDocumentTests :
         }
 
         await using var assertionContext = new ApplicationDbContext(options);
-        var controller = new PrintController(assertionContext);
+        var controller = CreateController(assertionContext, VietnamTimeZone());
 
         var result = await controller.PrintIssue(23);
 
@@ -194,6 +228,8 @@ public class PrintControllerInventoryDocumentTests :
         AssertControllerLabel("IssueTitle", "PHIẾU XUẤT KHO");
         AssertControllerLabel("VarianceReasonHeader", "Lý do chênh lệch");
         Assert.Contains("PHIẾU XUẤT KHO", text);
+        Assert.Contains("31/07/2026", text);
+        Assert.DoesNotContain("30/07/2026", text);
         Assert.Contains("SKU-ISSUE-01", text);
         Assert.Contains("Lý do chênh lệch", text);
         Assert.Contains("Thieu do kiem dem", text);
@@ -341,6 +377,24 @@ public class PrintControllerInventoryDocumentTests :
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
     }
+
+    private static PrintController CreateController(
+        ApplicationDbContext context,
+        TimeZoneInfo businessTimeZone)
+    {
+        var constructor = typeof(PrintController).GetConstructor(
+            [typeof(ApplicationDbContext), typeof(TimeZoneInfo)]);
+        return constructor is null
+            ? new PrintController(context)
+            : (PrintController)constructor.Invoke([context, businessTimeZone]);
+    }
+
+    private static TimeZoneInfo VietnamTimeZone() =>
+        TimeZoneInfo.CreateCustomTimeZone(
+            "Asia/Ho_Chi_Minh",
+            TimeSpan.FromHours(7),
+            "Vietnam",
+            "Vietnam");
 
     private static Location CreateLocation(int id, string code)
     {

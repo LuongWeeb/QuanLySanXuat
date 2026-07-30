@@ -201,10 +201,21 @@ public class InventoryCancellationRuntimeTests :
             .ToList();
         Assert.Equal(4, rows.Count);
         Assert.Equal(
-            new[] { 7, 7, 9, 9 },
+            new[] { 8, 8, 10, 10 },
             rows.Select(row => Regex.Matches(row.Value, """<td\b""", RegexOptions.IgnoreCase).Count)
                 .Order());
         Assert.Equal(4, Regex.Matches(body, "rowspan=\"2\"", RegexOptions.IgnoreCase).Count);
+        var printDocumentType = route.EndsWith(
+            "Receipts",
+            StringComparison.OrdinalIgnoreCase)
+            ? "receipt"
+            : "issue";
+        Assert.Equal(
+            4,
+            Regex.Matches(
+                body,
+                $"href=\"/api/Print/{printDocumentType}/\\d+\"",
+                RegexOptions.IgnoreCase).Count);
     }
 }
 

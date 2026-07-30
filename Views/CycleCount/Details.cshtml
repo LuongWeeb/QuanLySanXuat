@@ -1,7 +1,7 @@
 @model WmsMes.Web.Domain.Entities.CycleCountOrder
 @{
     ViewData["Title"] = "Đối chiếu kiểm kê";
-    var totalVarianceValue = Model.Items.Sum(item => item.VarianceQty * (item.Lot?.UnitPrice ?? 0m));
+    var totalVarianceValue = Model.Items.Sum(item => item.AuthoritativeVarianceQty * (item.Lot?.UnitPrice ?? 0m));
 }
 
 <section class="toolbar-row">
@@ -24,26 +24,27 @@
 
 <div class="metric-grid">
     <article class="metric-card"><span>Dòng kiểm kê</span><strong>@Model.Items.Count.ToVietnameseNumber()</strong></article>
-    <article class="metric-card"><span>Dòng chênh lệch</span><strong>@Model.Items.Count(item => item.VarianceQty != 0).ToVietnameseNumber()</strong></article>
+    <article class="metric-card"><span>Dòng chênh lệch</span><strong>@Model.Items.Count(item => item.AuthoritativeVarianceQty != 0).ToVietnameseNumber()</strong></article>
     <article class="metric-card"><span>Tổng giá trị chênh lệch</span><strong>@totalVarianceValue.ToVietnameseNumber() VNĐ</strong></article>
 </div>
 
 <section class="data-panel">
     <div class="table-responsive">
         <table class="table data-table align-middle">
-            <thead><tr><th>Vị trí</th><th>Sản phẩm / Lô</th><th class="text-end">Hệ thống</th><th class="text-end">Thực tế</th><th class="text-end">Chênh lệch</th><th>Lý do chênh lệch</th><th class="text-end">Giá trị</th></tr></thead>
+            <thead><tr><th>Vị trí</th><th>Sản phẩm / Lô</th><th class="text-end">Dự kiến lúc đếm</th><th class="text-end">Thực tế</th><th class="text-end">Chênh lệch</th><th>Lý do chênh lệch</th><th class="text-end">Giá trị</th></tr></thead>
             <tbody>
             @foreach (var item in Model.Items)
             {
-                var rowClass = item.VarianceQty > 0 ? "text-success" : item.VarianceQty < 0 ? "text-danger" : string.Empty;
+                var expectedAtCount = item.ExpectedAtCountQty ?? item.SystemQty;
+                var rowClass = item.AuthoritativeVarianceQty > 0 ? "text-success" : item.AuthoritativeVarianceQty < 0 ? "text-danger" : string.Empty;
                 <tr class="@rowClass">
                     <td><code>@item.Location?.Code</code></td>
                     <td>@item.Product?.Code — @item.Product?.Name <span class="table-subtext">@item.Lot?.LotNo</span></td>
-                    <td class="text-end">@item.SystemQty.ToVietnameseNumber()</td>
-                    <td class="text-end">@((item.CountedQty ?? item.SystemQty).ToVietnameseNumber())</td>
-                    <td class="text-end fw-bold">@item.VarianceQty.ToVietnameseNumber()</td>
+                    <td class="text-end">@expectedAtCount.ToVietnameseNumber()</td>
+                    <td class="text-end">@((item.CountedQty ?? expectedAtCount).ToVietnameseNumber())</td>
+                    <td class="text-end fw-bold">@item.AuthoritativeVarianceQty.ToVietnameseNumber()</td>
                     <td>@item.ReasonNote</td>
-                    <td class="text-end">@((item.VarianceQty * (item.Lot?.UnitPrice ?? 0m)).ToVietnameseNumber()) VNĐ</td>
+                    <td class="text-end">@((item.AuthoritativeVarianceQty * (item.Lot?.UnitPrice ?? 0m)).ToVietnameseNumber()) VNĐ</td>
                 </tr>
             }
             </tbody>

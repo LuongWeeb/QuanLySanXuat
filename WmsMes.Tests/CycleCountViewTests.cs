@@ -58,6 +58,27 @@ public class CycleCountViewTests
         Assert.Contains("target=\"_blank\"", view);
     }
 
+    [Fact]
+    public void ExecuteScan_TerminalOrdersRenderReadOnlyStateWithoutMutationControls()
+    {
+        var view = ReadView("ExecuteScan.cshtml");
+
+        Assert.Contains("var canMutate = Model.Status is \"Draft\" or \"InProgress\"", view);
+        Assert.Contains("@if (canMutate)", view);
+        Assert.Contains("Đợt kiểm kê đã kết thúc", view);
+        Assert.Contains("asp-action=\"Details\"", view);
+    }
+
+    [Fact]
+    public void Details_UsesMovementAdjustedExpectedQuantityAndVariance()
+    {
+        var view = ReadView("Details.cshtml");
+
+        Assert.Contains("ExpectedAtCountQty", view);
+        Assert.Contains("AuthoritativeVarianceQty", view);
+        Assert.DoesNotContain("item.VarianceQty", view);
+    }
+
     private static string ReadView(string name) =>
         File.ReadAllText(Path.Combine(
             ProjectRoot(),

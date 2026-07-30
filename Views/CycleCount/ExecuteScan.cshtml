@@ -1,6 +1,7 @@
 @model WmsMes.Web.Domain.Entities.CycleCountOrder
 @{
     ViewData["Title"] = "Quét kiểm kê";
+    var canMutate = Model.Status is "Draft" or "InProgress";
 }
 
 <section class="toolbar-row">
@@ -21,6 +22,17 @@
     <div class="alert alert-success" role="status">@statusMessage</div>
 }
 
+@if (!canMutate)
+{
+    <div class="alert alert-info" role="status">
+        <p class="mb-2">Đợt kiểm kê đã kết thúc. Kết quả hiện chỉ có thể xem.</p>
+        <a class="btn btn-outline-primary"
+           asp-action="Details"
+           asp-route-id="@Model.Id">Xem đối chiếu kiểm kê</a>
+    </div>
+}
+else
+{
 <section class="ops-panel mb-3">
     <div class="row g-3 align-items-end">
         <div class="col-lg-7">
@@ -109,7 +121,11 @@
         <a class="btn btn-outline-secondary" asp-action="Index">Lưu sau</a>
     </div>
 </form>
+}
 
 @section Scripts {
-    <script src="~/js/cycle-count-scan.js" asp-append-version="true"></script>
+    @if (canMutate)
+    {
+        <script src="~/js/cycle-count-scan.js" asp-append-version="true"></script>
+    }
 }

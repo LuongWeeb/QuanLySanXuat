@@ -6,6 +6,8 @@ namespace WmsMes.Web.Domain.Entities;
 
 public class PurchaseRequest
 {
+    public const string OpenLowStockBatchKey = "LOW_STOCK_OPEN";
+
     public int Id { get; set; }
 
     [Required]
@@ -22,6 +24,9 @@ public class PurchaseRequest
     public DocumentStatus Status { get; set; } = DocumentStatus.Draft;
 
     public int? ProductionPlanId { get; set; }
+
+    [MaxLength(32)]
+    public string? LowStockBatchKey { get; set; }
 
     [ForeignKey(nameof(ProductionPlanId))]
     public virtual ProductionPlan? ProductionPlan { get; set; }

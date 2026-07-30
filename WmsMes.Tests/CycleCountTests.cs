@@ -450,7 +450,9 @@ public class CycleCountTests
             await context.StockTransactions.ToListAsync(),
             item => item.LotId == lot.Id &&
                 item.Type == TransactionType.Adjust &&
-                item.Qty == 4);
+                item.Qty == 4 &&
+                item.QtyAfter == 4 &&
+                item.ValuationRate == 25);
     }
 
     [Fact]
