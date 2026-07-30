@@ -287,16 +287,9 @@
 </div>
 
 @section Scripts {
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"
-            integrity="sha384-/taWmisziXYpcfnYsumSUmNaiMvG/fF/OJOUCLnqCIYTrpOZy7WbFF6FfIxwOrfL"
-            crossorigin="anonymous"
-            onerror="this.onerror=null;this.src='/lib/microsoft-signalr/8.0.0/signalr.min.js'"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"
-            integrity="sha384-b0GXujLkk9eYYSmcSfoyZbfyElGAQnDyY0skCHSG6w3JgTMFnz11ggrTAr7seu9f"
-            crossorigin="anonymous"
-            onerror="this.onerror=null;this.src='/lib/chart.js/4.4.9/chart.umd.min.js'"></script>
+    <script src="~/js/dashboard-loader.js"></script>
     <script>
-        (() => {
+        const initializeDashboard = () => {
             const endpoints = {
                 oee: "/Dashboard/GetOeeData",
                 aging: "/Dashboard/GetAgingData",
@@ -828,6 +821,15 @@
             retryButton.addEventListener("click", refreshDashboard);
             refreshDashboard();
             initializeRealtime();
-        })();
+        };
+
+        window.factoryDashboardLoader
+            .start(initializeDashboard)
+            .catch(() => {
+                document.getElementById("dashboard-loading").classList.add("d-none");
+                document.getElementById("dashboard-error").classList.remove("d-none");
+                document.getElementById("dashboard-status").textContent =
+                    "Không thể tải thư viện dashboard.";
+            });
     </script>
 }

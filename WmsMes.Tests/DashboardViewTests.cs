@@ -11,6 +11,7 @@ public class DashboardViewTests
         Assert.True(File.Exists(dashboardPath), $"Dashboard view was not found at {dashboardPath}.");
 
         var view = File.ReadAllText(dashboardPath);
+        var loader = ReadDashboardLoader();
         var layout = File.ReadAllText(
             Path.Combine(ProjectRoot(), "Views", "Shared", "_Layout.cshtml"));
 
@@ -22,10 +23,10 @@ public class DashboardViewTests
         Assert.Contains("/Dashboard/GetProductionQualityData", view);
         Assert.Contains(
             "https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js",
-            view);
+            loader);
         Assert.Contains(
             "https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js",
-            view);
+            loader);
         Assert.Contains("/productionHub", view);
         Assert.Contains("/inventoryHub", view);
         Assert.Contains("ReceiveProgressUpdate", view);
@@ -153,32 +154,34 @@ public class DashboardViewTests
     [Fact]
     public void DashboardView_PinsCdnAssetsWithVerifiedSriAndAnonymousCrossOrigin()
     {
-        var view = ReadDashboardView();
+        var loader = ReadDashboardLoader();
 
         Assert.Contains(
-            "integrity=\"sha384-b0GXujLkk9eYYSmcSfoyZbfyElGAQnDyY0skCHSG6w3JgTMFnz11ggrTAr7seu9f\"",
-            view);
+            "sha384-b0GXujLkk9eYYSmcSfoyZbfyElGAQnDyY0skCHSG6w3JgTMFnz11ggrTAr7seu9f",
+            loader);
         Assert.Contains(
-            "integrity=\"sha384-/taWmisziXYpcfnYsumSUmNaiMvG/fF/OJOUCLnqCIYTrpOZy7WbFF6FfIxwOrfL\"",
-            view);
-        Assert.Equal(2, CountOccurrences(view, "crossorigin=\"anonymous\""));
+            "sha384-/taWmisziXYpcfnYsumSUmNaiMvG/fF/OJOUCLnqCIYTrpOZy7WbFF6FfIxwOrfL",
+            loader);
+        Assert.Contains("script.crossOrigin = \"anonymous\"", loader);
     }
 
     [Fact]
-    public void DashboardView_UsesExactPinnedLocalAssetsAsSingleOnErrorFallbacks()
+    public void DashboardView_AwaitsNewPinnedFallbackScriptsBeforeInitializingOnce()
     {
         var view = ReadDashboardView();
+        var loader = ReadDashboardLoader();
 
         const string chartLocalUrl = "/lib/chart.js/4.4.9/chart.umd.min.js";
         const string signalRLocalUrl = "/lib/microsoft-signalr/8.0.0/signalr.min.js";
-        Assert.Equal(1, CountOccurrences(view, chartLocalUrl));
-        Assert.Equal(1, CountOccurrences(view, signalRLocalUrl));
-        Assert.Contains(
-            $"onerror=\"this.onerror=null;this.src='{chartLocalUrl}'\"",
-            view);
-        Assert.Contains(
-            $"onerror=\"this.onerror=null;this.src='{signalRLocalUrl}'\"",
-            view);
+        Assert.Contains("src=\"~/js/dashboard-loader.js\"", view);
+        Assert.DoesNotContain("onerror=", view);
+        Assert.Contains(chartLocalUrl, loader);
+        Assert.Contains(signalRLocalUrl, loader);
+        Assert.Contains("document.createElement(\"script\")", loader);
+        Assert.Contains("await appendScript(asset.localUrl)", loader);
+        Assert.Contains("Promise.all(requiredAssets.map(loadScript))", loader);
+        Assert.Contains("initializationPromise ??=", loader);
+        Assert.Contains(".then(initializeDashboard)", loader);
 
         AssertAssetMatchesSri(
             Path.Combine("wwwroot", "lib", "chart.js", "4.4.9", "chart.umd.min.js"),
@@ -234,6 +237,9 @@ public class DashboardViewTests
 
     private static string ReadDashboardView() =>
         File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Dashboard", "Index.cshtml"));
+
+    private static string ReadDashboardLoader() =>
+        File.ReadAllText(Path.Combine(ProjectRoot(), "wwwroot", "js", "dashboard-loader.js"));
 
     private static int CountOccurrences(string source, string value) =>
         source.Split(value, StringSplitOptions.None).Length - 1;
