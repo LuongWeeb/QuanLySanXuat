@@ -11,4 +11,8 @@ public interface IOeeService
     Task<InventoryAgingDto> GetInventoryAgingAnalyticsAsync();
 
     Task<IEnumerable<ProductionProgressDto>> GetProductionProgressAnalyticsAsync();
+
+    Task<ProductionQualityAnalyticsDto> GetProductionQualityAnalyticsAsync(
+        DateTime startDate,
+        DateTime endExclusive);
 }

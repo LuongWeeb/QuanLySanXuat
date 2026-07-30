@@ -1,4 +1,7 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -27,10 +30,10 @@ public class OeeServiceTests
         context.WorkOrderSteps.Add(CreateCompletedStep(1, workCenter.Id, 1, 240, 90, 10));
         await context.SaveChangesAsync();
 
-        var metrics = await new OeeService(context).GetWorkCenterOeeAsync(
+        var metrics = await CreateService(context).GetWorkCenterOeeAsync(
             workCenter.Id,
             new DateTime(2026, 7, 1),
-            new DateTime(2026, 7, 1, 23, 59, 59));
+            new DateTime(2026, 7, 2));
 
         Assert.Equal(50m, metrics.Availability);
         Assert.Equal(100m, metrics.Performance);
@@ -96,10 +99,10 @@ public class OeeServiceTests
             });
         await context.SaveChangesAsync();
 
-        var metrics = await new OeeService(context).GetWorkCenterOeeAsync(
+        var metrics = await CreateService(context).GetWorkCenterOeeAsync(
             workCenter.Id,
             new DateTime(2026, 7, 1),
-            new DateTime(2026, 7, 1, 23, 59, 59));
+            new DateTime(2026, 7, 2));
 
         Assert.Equal(workCenter.Id, metrics.WorkCenterId);
         Assert.Equal("WC-01", metrics.WorkCenterCode);
@@ -133,9 +136,9 @@ public class OeeServiceTests
             CreateCompletedStep(3, 3, 3, 480, 100, 0));
         await context.SaveChangesAsync();
 
-        var metrics = (await new OeeService(context).GetAllWorkCentersOeeAsync(
+        var metrics = (await CreateService(context).GetAllWorkCentersOeeAsync(
             new DateTime(2026, 7, 1),
-            new DateTime(2026, 7, 1, 23, 59, 59))).OrderBy(item => item.WorkCenterId).ToArray();
+            new DateTime(2026, 7, 2))).OrderBy(item => item.WorkCenterId).ToArray();
 
         Assert.Collection(metrics,
             success =>
@@ -151,28 +154,259 @@ public class OeeServiceTests
     }
 
     [Fact]
-    public async Task GetInventoryAgingAnalyticsAsync_GroupsAvailableInventoryValueByManufactureAge()
+    public async Task GetWorkCenterOeeAsync_UsesFullyContainedHalfOpenPeriodAndRejectsInvalidStepRanges()
+    {
+        await using var context = CreateContext();
+        var workCenter = new WorkCenter { Id = 1, Code = "WC-BOUNDARY", Name = "Boundary" };
+        context.WorkCenters.Add(workCenter);
+        context.WorkOrders.Add(new WorkOrder
+        {
+            Id = 1,
+            Code = "WO-BOUNDARY",
+            ProductId = 1,
+            DueDate = new DateTime(2026, 7, 31),
+            BomVersion = "V1",
+            RoutingVersion = "V1"
+        });
+        context.Routings.Add(CreateRouting(1, 1, workCenter.Id));
+
+        var start = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc);
+        var endExclusive = start.AddDays(1);
+        context.WorkOrderSteps.AddRange(
+            StepAt("lower-inclusive", start, start.AddMinutes(10), 10m, 0m),
+            StepAt("below-lower", start.AddTicks(-1), start.AddMinutes(10), 100m, 0m),
+            StepAt("upper-exclusive", endExclusive.AddMinutes(-10), endExclusive, 100m, 0m),
+            StepAt("below-upper", endExclusive.AddMinutes(-10), endExclusive.AddTicks(-1), 0m, 10m),
+            StepAt("invalid-range", start.AddHours(2), start.AddHours(1), 100m, 0m));
+        await context.SaveChangesAsync();
+
+        var metrics = await CreateService(context).GetWorkCenterOeeAsync(
+            workCenter.Id,
+            start,
+            endExclusive);
+
+        Assert.Equal(50m, metrics.Quality);
+
+        WorkOrderStep StepAt(
+            string name,
+            DateTime stepStart,
+            DateTime stepEnd,
+            decimal quantityOk,
+            decimal quantityReject) => new()
+        {
+            WorkOrderId = 1,
+            StepNumber = 10,
+            StepName = name,
+            WorkCenterId = workCenter.Id,
+            StartTime = stepStart,
+            EndTime = stepEnd,
+            QtyOK = quantityOk,
+            QtyReject = quantityReject,
+            Status = WorkOrderStepStatus.Completed
+        };
+    }
+
+    [Theory]
+    [InlineData("2026-07-01", "2026-07-01")]
+    [InlineData("2026-07-02", "2026-07-01")]
+    public async Task GetAllWorkCentersOeeAsync_WhenPeriodIsEmptyOrReversed_Throws(
+        string startValue,
+        string endExclusiveValue)
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.GetAllWorkCentersOeeAsync(
+                DateTime.Parse(startValue),
+                DateTime.Parse(endExclusiveValue)));
+    }
+
+    [Fact]
+    public async Task GetInventoryAgingAnalyticsAsync_UsesNonOverlappingBoundariesAndUnknownAge()
     {
         await using var context = CreateContext();
         var today = DateTime.UtcNow.Date;
         context.Lots.AddRange(
-            new Lot { Id = 1, ProductId = 1, LotNo = "L-30", ManufactureDate = today.AddDays(-30), UnitPrice = 2m },
-            new Lot { Id = 2, ProductId = 1, LotNo = "L-60", ManufactureDate = today.AddDays(-60), UnitPrice = 3m },
-            new Lot { Id = 3, ProductId = 1, LotNo = "L-90", ManufactureDate = today.AddDays(-90), UnitPrice = 4m },
-            new Lot { Id = 4, ProductId = 1, LotNo = "L-91", ManufactureDate = today.AddDays(-91), UnitPrice = 5m });
+            new Lot { Id = 1, ProductId = 1, LotNo = "L-29", ManufactureDate = today.AddDays(-29), UnitPrice = 1m },
+            new Lot { Id = 2, ProductId = 1, LotNo = "L-30", ManufactureDate = today.AddDays(-30), UnitPrice = 2m },
+            new Lot { Id = 3, ProductId = 1, LotNo = "L-59", ManufactureDate = today.AddDays(-59), UnitPrice = 4m },
+            new Lot { Id = 4, ProductId = 1, LotNo = "L-60", ManufactureDate = today.AddDays(-60), UnitPrice = 8m },
+            new Lot { Id = 5, ProductId = 1, LotNo = "L-90", ManufactureDate = today.AddDays(-90), UnitPrice = 16m },
+            new Lot { Id = 6, ProductId = 1, LotNo = "L-91", ManufactureDate = today.AddDays(-91), UnitPrice = 32m },
+            new Lot { Id = 7, ProductId = 1, LotNo = "L-UNKNOWN", ManufactureDate = null, UnitPrice = 64m });
         context.StockBalances.AddRange(
-            new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 10m },
-            new StockBalance { ProductId = 1, LotId = 2, LocationId = 1, QtyAvailable = 10m },
-            new StockBalance { ProductId = 1, LotId = 3, LocationId = 1, QtyAvailable = 10m },
-            new StockBalance { ProductId = 1, LotId = 4, LocationId = 1, QtyAvailable = 10m });
+            Enumerable.Range(1, 7).Select(id => new StockBalance
+            {
+                ProductId = 1,
+                LotId = id,
+                LocationId = 1,
+                QtyAvailable = 1m
+            }));
         await context.SaveChangesAsync();
 
-        var aging = await new OeeService(context).GetInventoryAgingAnalyticsAsync();
+        var aging = await CreateService(context).GetInventoryAgingAnalyticsAsync();
 
-        Assert.Equal(20m, aging.LessThan30Days);
-        Assert.Equal(30m, aging.Days30To60);
-        Assert.Equal(40m, aging.Days60To90);
-        Assert.Equal(50m, aging.MoreThan90Days);
+        Assert.Equal(1m, aging.LessThan30Days);
+        Assert.Equal(6m, aging.Days30To60);
+        Assert.Equal(24m, aging.Days60To90);
+        Assert.Equal(32m, aging.MoreThan90Days);
+        Assert.Equal(64m, aging.UnknownAge);
+        Assert.Equal(127m, aging.TotalValue);
+    }
+
+    [Fact]
+    public async Task GetInventoryAgingAnalyticsAsync_UsesConfiguredBusinessDate()
+    {
+        await using var context = CreateContext();
+        context.Lots.Add(new Lot
+        {
+            Id = 1,
+            ProductId = 1,
+            LotNo = "L-BUSINESS-DATE",
+            ManufactureDate = new DateTime(2026, 7, 1),
+            UnitPrice = 5m
+        });
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            QtyAvailable = 1m
+        });
+        await context.SaveChangesAsync();
+        var clock = new FixedTimeProvider(
+            new DateTimeOffset(2026, 7, 30, 18, 30, 0, TimeSpan.Zero));
+
+        var aging = await new OeeService(context, clock, VietnamTimeZone())
+            .GetInventoryAgingAnalyticsAsync();
+
+        Assert.Equal(0m, aging.LessThan30Days);
+        Assert.Equal(5m, aging.Days30To60);
+    }
+
+    [Fact]
+    public async Task GetProductionQualityAnalyticsAsync_ReturnsTodayOutputScrapRateAndSevenDayTrend()
+    {
+        await using var context = CreateContext();
+        var workCenter = new WorkCenter { Id = 1, Code = "WC-QUALITY", Name = "Quality" };
+        var order = new WorkOrder
+        {
+            Id = 1,
+            Code = "WO-QUALITY",
+            ProductId = 1,
+            DueDate = new DateTime(2026, 8, 1),
+            BomVersion = "V1",
+            RoutingVersion = "V1",
+            Status = WorkOrderStatus.InProgress,
+            DailyProductionLogs =
+            {
+                new DailyProductionLog { Date = new DateTime(2026, 7, 30), QtyProduced = 99m },
+                new DailyProductionLog { Date = new DateTime(2026, 7, 31), QtyProduced = 5m },
+                new DailyProductionLog { Date = new DateTime(2026, 7, 31), QtyProduced = 7m }
+            }
+        };
+        context.AddRange(workCenter, order);
+        context.WorkOrderSteps.AddRange(
+            QualityStep("2026-07-30", new DateTime(2026, 7, 30, 1, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 7, 30, 2, 0, 0, DateTimeKind.Utc), 8m, 2m),
+            QualityStep("2026-07-31", new DateTime(2026, 7, 31, 1, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 7, 31, 2, 0, 0, DateTimeKind.Utc), 9m, 1m),
+            QualityStep("upper-exclusive", new DateTime(2026, 7, 31, 16, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 7, 31, 17, 0, 0, DateTimeKind.Utc), 0m, 100m));
+        await context.SaveChangesAsync();
+        var clock = new FixedTimeProvider(
+            new DateTimeOffset(2026, 7, 30, 18, 30, 0, TimeSpan.Zero));
+        var service = new OeeService(context, clock, VietnamTimeZone());
+
+        var quality = await service.GetProductionQualityAnalyticsAsync(
+            new DateTime(2026, 7, 24, 17, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 7, 31, 17, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(12m, quality.TodayProductionOutput);
+        Assert.Equal(15m, quality.ScrapRate);
+        Assert.Equal(7, quality.DailyTrend.Count);
+        var today = quality.DailyTrend[^1];
+        Assert.Equal("2026-07-31", today.BusinessDate);
+        Assert.Equal(1m, today.ScrapQuantity);
+        Assert.Equal(90m, today.QualityRate);
+
+        WorkOrderStep QualityStep(
+            string name,
+            DateTime start,
+            DateTime end,
+            decimal quantityOk,
+            decimal quantityReject) => new()
+        {
+            WorkOrderId = order.Id,
+            StepNumber = 10,
+            StepName = name,
+            WorkCenterId = workCenter.Id,
+            StartTime = start,
+            EndTime = end,
+            QtyOK = quantityOk,
+            QtyReject = quantityReject,
+            Status = WorkOrderStepStatus.Completed
+        };
+    }
+
+    [Fact]
+    public async Task GetAllWorkCentersOeeAsync_UsesConstantNumberOfRelationalQueries()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var commands = new List<string>();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .LogTo(commands.Add, [RelationalEventId.CommandExecuted], LogLevel.Information)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        context.WorkCenters.AddRange(
+            new WorkCenter { Id = 1, Code = "WC-01", Name = "One", IsActive = true },
+            new WorkCenter { Id = 2, Code = "WC-02", Name = "Two", IsActive = true });
+        var uom = new UnitOfMeasure { Id = 1, Code = "EA-OEE", Name = "Each" };
+        context.Products.AddRange(
+            new Product { Id = 1, Code = "P-OEE-01", Name = "One", BaseUom = uom },
+            new Product { Id = 2, Code = "P-OEE-02", Name = "Two", BaseUom = uom });
+        context.WorkOrders.AddRange(
+            new WorkOrder { Id = 1, Code = "WO-01", ProductId = 1, DueDate = DateTime.UtcNow, BomVersion = "V1", RoutingVersion = "V1" },
+            new WorkOrder { Id = 2, Code = "WO-02", ProductId = 2, DueDate = DateTime.UtcNow, BomVersion = "V1", RoutingVersion = "V1" });
+        context.Routings.AddRange(
+            CreateRouting(1, 1, 1),
+            CreateRouting(2, 2, 2));
+        context.WorkOrderSteps.AddRange(
+            CreateCompletedStep(1, 1, 1, 60, 10, 0),
+            CreateCompletedStep(2, 2, 2, 60, 10, 0));
+        await context.SaveChangesAsync();
+        commands.Clear();
+
+        var metrics = (await CreateService(context).GetAllWorkCentersOeeAsync(
+            new DateTime(2026, 7, 1),
+            new DateTime(2026, 7, 2))).ToArray();
+
+        Assert.Equal(2, metrics.Length);
+        Assert.InRange(commands.Count, 1, 3);
+    }
+
+    [Fact]
+    public void Model_DefinesCompositeIndexForOeeReportingPredicate()
+    {
+        using var context = CreateContext();
+        var entityType = context.Model.FindEntityType(typeof(WorkOrderStep));
+        Assert.NotNull(entityType);
+
+        var index = Assert.Single(entityType!.GetIndexes().Where(candidate =>
+            candidate.Properties.Select(property => property.Name).SequenceEqual(
+                new[]
+                {
+                    nameof(WorkOrderStep.WorkCenterId),
+                    nameof(WorkOrderStep.Status),
+                    nameof(WorkOrderStep.StartTime),
+                    nameof(WorkOrderStep.EndTime)
+                })));
+
+        Assert.Equal("IX_WorkOrderSteps_OeeReporting", index.GetDatabaseName());
     }
 
     [Fact]
@@ -257,7 +491,7 @@ public class OeeServiceTests
             });
         await context.SaveChangesAsync();
 
-        var progress = (await new OeeService(context)
+        var progress = (await CreateService(context)
             .GetProductionProgressAnalyticsAsync()).ToArray();
 
         var active = Assert.Single(progress);
@@ -315,5 +549,20 @@ public class OeeServiceTests
             .Options;
 
         return new ApplicationDbContext(options);
+    }
+
+    private static OeeService CreateService(ApplicationDbContext context) =>
+        new(context, TimeProvider.System, TimeZoneInfo.Utc);
+
+    private static TimeZoneInfo VietnamTimeZone() =>
+        TimeZoneInfo.CreateCustomTimeZone(
+            "Asia/Ho_Chi_Minh",
+            TimeSpan.FromHours(7),
+            "Vietnam",
+            "Vietnam");
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 }

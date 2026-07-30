@@ -4,6 +4,7 @@ using System.Reflection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -13,6 +14,7 @@ using WmsMes.Web.Controllers;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
+using WmsMes.Web.Hubs;
 using WmsMes.Web.Services;
 using WmsMes.Web.ViewModels;
 
@@ -71,6 +73,42 @@ public class DailyProductionLogControllerTests
         Assert.Equal(new DateTime(2026, 7, 23), saved.Date);
         Assert.Equal(3.5m, saved.QtyProduced);
         Assert.Equal("Ca chiều", saved.Notes);
+    }
+
+    [Fact]
+    public async Task AddDailyLog_AfterSuccessfulCommit_PublishesProgressUpdate()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var order = await AddOrderAsync(context, WorkOrderStatus.InProgress);
+        var client = new Mock<IClientProxy>(MockBehavior.Strict);
+        client.Setup(proxy => proxy.SendCoreAsync(
+                "ReceiveProgressUpdate",
+                It.Is<object?[]>(arguments => arguments.Length == 0),
+                default))
+            .Returns(Task.CompletedTask);
+        var clients = new Mock<IHubClients>(MockBehavior.Strict);
+        clients.SetupGet(items => items.All).Returns(client.Object);
+        var hub = new Mock<IHubContext<ProductionHub>>(MockBehavior.Strict);
+        hub.SetupGet(item => item.Clients).Returns(clients.Object);
+
+        await InvokeAddDailyLogAsync(
+            Controller(context, productionHub: hub.Object),
+            order.Id,
+            new DateTime(2026, 7, 23),
+            3m,
+            "Thông báo");
+
+        client.VerifyAll();
+        clients.VerifyAll();
+        hub.VerifyAll();
+        context.ChangeTracker.Clear();
+        Assert.Single(await context.DailyProductionLogs.AsNoTracking().ToListAsync());
     }
 
     [Fact]
@@ -288,7 +326,8 @@ public class DailyProductionLogControllerTests
     private static WorkOrderController Controller(
         ApplicationDbContext context,
         TimeProvider? timeProvider = null,
-        TimeZoneInfo? businessTimeZone = null)
+        TimeZoneInfo? businessTimeZone = null,
+        IHubContext<ProductionHub>? productionHub = null)
     {
         var controller = new WorkOrderController(
             context,
@@ -296,7 +335,8 @@ public class DailyProductionLogControllerTests
             Mock.Of<ILogger<WorkOrderController>>(),
             Mock.Of<IReportExportService>(),
             timeProvider ?? TimeProvider.System,
-            businessTimeZone ?? TimeZoneInfo.Utc)
+            businessTimeZone ?? TimeZoneInfo.Utc,
+            productionHub ?? Mock.Of<IHubContext<ProductionHub>>())
         {
             ControllerContext = new ControllerContext
             {

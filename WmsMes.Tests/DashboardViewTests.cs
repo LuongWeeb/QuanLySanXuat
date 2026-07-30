@@ -17,6 +17,7 @@ public class DashboardViewTests
         Assert.Contains("/Dashboard/GetOeeData", view);
         Assert.Contains("/Dashboard/GetAgingData", view);
         Assert.Contains("/Dashboard/GetProductionProgressData", view);
+        Assert.Contains("/Dashboard/GetProductionQualityData", view);
         Assert.Contains(
             "https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js",
             view);
@@ -24,7 +25,9 @@ public class DashboardViewTests
             "https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js",
             view);
         Assert.Contains("/productionHub", view);
+        Assert.Contains("/inventoryHub", view);
         Assert.Contains("ReceiveProgressUpdate", view);
+        Assert.Contains("ReceiveStockUpdate", view);
         Assert.DoesNotContain("location.reload", view);
 
         Assert.Contains("asp-controller=\"Dashboard\"", layout);
@@ -115,8 +118,65 @@ public class DashboardViewTests
         Assert.Contains("Không thể hiển thị biểu đồ", view);
     }
 
+    [Fact]
+    public void DashboardView_RendersTodayOutputScrapKpiAndAccessibleQualityLineChart()
+    {
+        var view = ReadDashboardView();
+
+        Assert.Contains("id=\"today-production-output\"", view);
+        Assert.Contains("id=\"scrap-rate\"", view);
+        Assert.Contains("id=\"production-quality-chart\"", view);
+        Assert.Contains("type: \"line\"", view);
+        Assert.Contains("aria-describedby=\"quality-chart-summary\"", view);
+        Assert.Contains("id=\"quality-chart-summary-body\"", view);
+        Assert.Contains("renderQualitySummary(qualityData)", view);
+        Assert.Contains("renderQualityChart(qualityData)", view);
+        Assert.Contains("Phế phẩm", view);
+        Assert.Contains("Tỷ lệ chất lượng", view);
+    }
+
+    [Fact]
+    public void DashboardView_UsesClearAgingBucketsIncludingUnknownAge()
+    {
+        var view = ReadDashboardView();
+
+        Assert.Contains("Dưới 30 ngày", view);
+        Assert.Contains("30 đến dưới 60 ngày", view);
+        Assert.Contains("60 đến 90 ngày", view);
+        Assert.Contains("Trên 90 ngày", view);
+        Assert.Contains("Không rõ tuổi", view);
+        Assert.Contains("aging.unknownAge", view);
+    }
+
+    [Fact]
+    public void DashboardView_PinsCdnAssetsWithVerifiedSriAndAnonymousCrossOrigin()
+    {
+        var view = ReadDashboardView();
+
+        Assert.Contains(
+            "integrity=\"sha384-b0GXujLkk9eYYSmcSfoyZbfyElGAQnDyY0skCHSG6w3JgTMFnz11ggrTAr7seu9f\"",
+            view);
+        Assert.Contains(
+            "integrity=\"sha384-/taWmisziXYpcfnYsumSUmNaiMvG/fF/OJOUCLnqCIYTrpOZy7WbFF6FfIxwOrfL\"",
+            view);
+        Assert.Equal(2, CountOccurrences(view, "crossorigin=\"anonymous\""));
+    }
+
+    [Fact]
+    public void DashboardView_DisablesFetchCachingAndOffersVisibleRetry()
+    {
+        var view = ReadDashboardView();
+
+        Assert.Contains("cache: \"no-store\"", view);
+        Assert.Contains("id=\"dashboard-retry\"", view);
+        Assert.Contains("retryButton.addEventListener(\"click\", refreshDashboard)", view);
+    }
+
     private static string ReadDashboardView() =>
         File.ReadAllText(Path.Combine(ProjectRoot(), "Views", "Dashboard", "Index.cshtml"));
+
+    private static int CountOccurrences(string source, string value) =>
+        source.Split(value, StringSplitOptions.None).Length - 1;
 
     private static string ProjectRoot() => Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));

@@ -484,6 +484,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasForeignKey(s => s.WorkCenterId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.Entity<WorkOrderStep>()
+            .HasIndex(step => new
+            {
+                step.WorkCenterId,
+                step.Status,
+                step.StartTime,
+                step.EndTime
+            })
+            .HasDatabaseName("IX_WorkOrderSteps_OeeReporting");
+
         builder.Entity<MaterialReservation>()
             .HasOne(r => r.WorkOrder)
             .WithMany()

@@ -128,7 +128,10 @@
         Đang tải dữ liệu giám sát nhà máy…
     </div>
     <div id="dashboard-error" class="alert alert-danger mb-0 d-none" role="alert">
-        Không thể tải dữ liệu dashboard. Vui lòng thử lại sau.
+        <span>Không thể tải dữ liệu dashboard. Vui lòng thử lại sau.</span>
+        <button type="button" class="btn btn-sm btn-outline-light ms-2" id="dashboard-retry">
+            Thử lại
+        </button>
     </div>
     <div id="chart-error" class="alert alert-warning mb-0 d-none" role="alert">
         Không thể hiển thị biểu đồ. Dữ liệu chi tiết vẫn có sẵn cho trình đọc màn hình.
@@ -145,16 +148,16 @@
             </div>
             <div class="col-12 col-sm-6 col-xl-3">
                 <article class="metric-card h-100">
-                    <span>Sản lượng kế hoạch</span>
-                    <strong id="total-planned-quantity">—</strong>
-                    <small class="text-muted">Tổng lệnh đang sản xuất</small>
+                    <span>Sản lượng hôm nay</span>
+                    <strong id="today-production-output">—</strong>
+                    <small class="text-muted">Theo ngày sản xuất Việt Nam</small>
                 </article>
             </div>
             <div class="col-12 col-sm-6 col-xl-3">
                 <article class="metric-card h-100">
-                    <span>Sản lượng thực tế</span>
-                    <strong id="total-actual-output">—</strong>
-                    <small class="text-muted">Sản lượng đã ghi nhận</small>
+                    <span>Tỷ lệ phế phẩm</span>
+                    <strong id="scrap-rate">—</strong>
+                    <small class="text-muted">Trong bảy ngày báo cáo</small>
                 </article>
             </div>
             <div class="col-12 col-sm-6 col-xl-3">
@@ -227,7 +230,7 @@
                 <div class="dashboard-chart">
                     <canvas id="inventory-aging-chart"
                             role="img"
-                            aria-label="Biểu đồ doughnut giá trị tồn kho theo bốn nhóm tuổi"
+                            aria-label="Biểu đồ doughnut giá trị tồn kho theo năm nhóm tuổi"
                             aria-describedby="aging-chart-summary">
                         Biểu đồ tuổi tồn kho.
                     </canvas>
@@ -249,17 +252,54 @@
             </article>
         </div>
     </section>
+
+    <section class="dashboard-panel" aria-labelledby="quality-trend-title">
+        <div class="dashboard-panel-header">
+            <div>
+                <h3 id="quality-trend-title">Xu hướng phế phẩm và chất lượng</h3>
+                <p class="text-muted small mb-0">Số lượng phế phẩm và tỷ lệ chất lượng theo ngày sản xuất.</p>
+            </div>
+        </div>
+        <div class="dashboard-chart">
+            <canvas id="production-quality-chart"
+                    role="img"
+                    aria-label="Biểu đồ đường xu hướng phế phẩm và tỷ lệ chất lượng trong bảy ngày"
+                    aria-describedby="quality-chart-summary">
+                Biểu đồ xu hướng phế phẩm và chất lượng.
+            </canvas>
+            <table id="quality-chart-summary" class="visually-hidden">
+                <caption>Dữ liệu phế phẩm và tỷ lệ chất lượng theo ngày</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Ngày sản xuất</th>
+                        <th scope="col">Phế phẩm</th>
+                        <th scope="col">Tỷ lệ chất lượng</th>
+                    </tr>
+                </thead>
+                <tbody id="quality-chart-summary-body"></tbody>
+            </table>
+            <div id="quality-empty" class="empty-state compact d-none">
+                <h4 class="h6">Không có dữ liệu chất lượng</h4>
+                <p class="mb-0">Chưa có sản lượng hoàn tất trong kỳ báo cáo.</p>
+            </div>
+        </div>
+    </section>
 </div>
 
 @section Scripts {
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"
+            integrity="sha384-/taWmisziXYpcfnYsumSUmNaiMvG/fF/OJOUCLnqCIYTrpOZy7WbFF6FfIxwOrfL"
+            crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"
+            integrity="sha384-b0GXujLkk9eYYSmcSfoyZbfyElGAQnDyY0skCHSG6w3JgTMFnz11ggrTAr7seu9f"
+            crossorigin="anonymous"></script>
     <script>
         (() => {
             const endpoints = {
                 oee: "/Dashboard/GetOeeData",
                 aging: "/Dashboard/GetAgingData",
-                production: "/Dashboard/GetProductionProgressData"
+                production: "/Dashboard/GetProductionProgressData",
+                quality: "/Dashboard/GetProductionQualityData"
             };
             const decimalNumber = new Intl.NumberFormat("vi-VN", {
                 minimumFractionDigits: 0,
@@ -299,20 +339,27 @@
             const oeeContainer = document.getElementById("oee-cards-container");
             const productionCanvas = document.getElementById("production-progress-chart");
             const agingCanvas = document.getElementById("inventory-aging-chart");
+            const qualityCanvas = document.getElementById("production-quality-chart");
             const productionSummaryBody = document.getElementById("production-chart-summary-body");
             const agingSummaryBody = document.getElementById("aging-chart-summary-body");
+            const qualitySummaryBody = document.getElementById("quality-chart-summary-body");
+            const retryButton = document.getElementById("dashboard-retry");
             let productionChart;
             let agingChart;
+            let qualityChart;
             let refreshGeneration = 0;
             let refreshInProgress = false;
             let refreshPending = false;
             let refreshTimer;
-            let retryAttempt = 0;
-            let reconnectTimer;
 
             const asNumber = value => {
                 const parsed = Number(value);
                 return Number.isFinite(parsed) ? parsed : 0;
+            };
+
+            const formatBusinessDate = value => {
+                const parts = String(value ?? "").split("-");
+                return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : String(value ?? "—");
             };
 
             const setText = (id, value) => {
@@ -421,15 +468,32 @@
                 agingSummaryBody.replaceChildren();
                 [
                     ["Dưới 30 ngày", aging.lessThan30Days],
-                    ["30–60 ngày", aging.days30To60],
-                    ["60–90 ngày", aging.days60To90],
-                    ["Trên 90 ngày", aging.moreThan90Days]
+                    ["30 đến dưới 60 ngày", aging.days30To60],
+                    ["60 đến 90 ngày", aging.days60To90],
+                    ["Trên 90 ngày", aging.moreThan90Days],
+                    ["Không rõ tuổi", aging.unknownAge]
                 ].forEach(([label, value]) => {
                     const row = createElement("tr");
                     const bucket = createElement("th", null, label);
                     bucket.setAttribute("scope", "row");
                     row.append(bucket, createElement("td", null, currencyNumber.format(asNumber(value))));
                     agingSummaryBody.append(row);
+                });
+            };
+
+            const renderQualitySummary = quality => {
+                qualitySummaryBody.replaceChildren();
+                const trend = Array.isArray(quality.dailyTrend) ? quality.dailyTrend : [];
+                trend.forEach(item => {
+                    const row = createElement("tr");
+                    const date = createElement("th", null, formatBusinessDate(item.businessDate));
+                    date.setAttribute("scope", "row");
+                    row.append(
+                        date,
+                        createElement("td", null, decimalNumber.format(asNumber(item.scrapQuantity))),
+                        createElement("td", null, `${decimalNumber.format(asNumber(item.qualityRate))}%`)
+                    );
+                    qualitySummaryBody.append(row);
                 });
             };
 
@@ -493,7 +557,8 @@
                     asNumber(aging.lessThan30Days),
                     asNumber(aging.days30To60),
                     asNumber(aging.days60To90),
-                    asNumber(aging.moreThan90Days)
+                    asNumber(aging.moreThan90Days),
+                    asNumber(aging.unknownAge)
                 ];
                 const hasData = values.some(value => value > 0);
                 const chartAvailable = typeof window.Chart === "function";
@@ -504,10 +569,16 @@
                 agingChart = new window.Chart(agingCanvas, {
                     type: "doughnut",
                     data: {
-                        labels: ["Dưới 30 ngày", "30–60 ngày", "60–90 ngày", "Trên 90 ngày"],
+                        labels: [
+                            "Dưới 30 ngày",
+                            "30 đến dưới 60 ngày",
+                            "60 đến 90 ngày",
+                            "Trên 90 ngày",
+                            "Không rõ tuổi"
+                        ],
                         datasets: [{
                             data: values,
-                            backgroundColor: ["#059669", "#0d6efd", "#ffc107", "#dc3545"],
+                            backgroundColor: ["#059669", "#0d6efd", "#ffc107", "#dc3545", "#64748b"],
                             borderColor: "#ffffff",
                             borderWidth: 2
                         }]
@@ -529,8 +600,70 @@
                 });
             };
 
+            const renderQualityChart = quality => {
+                destroyChart(qualityChart);
+                qualityChart = undefined;
+                const trend = Array.isArray(quality.dailyTrend) ? quality.dailyTrend : [];
+                const hasData = trend.some(item =>
+                    asNumber(item.scrapQuantity) > 0 || asNumber(item.qualityRate) > 0
+                );
+                const chartAvailable = typeof window.Chart === "function";
+                setVisible(qualityCanvas, hasData && chartAvailable);
+                setVisible(document.getElementById("quality-empty"), !hasData);
+                if (!hasData || !chartAvailable) return;
+
+                qualityChart = new window.Chart(qualityCanvas, {
+                    type: "line",
+                    data: {
+                        labels: trend.map(item => formatBusinessDate(item.businessDate)),
+                        datasets: [
+                            {
+                                label: "Phế phẩm",
+                                data: trend.map(item => asNumber(item.scrapQuantity)),
+                                borderColor: "#dc3545",
+                                backgroundColor: "rgba(220, 53, 69, 0.12)",
+                                yAxisID: "quantity",
+                                tension: 0.25
+                            },
+                            {
+                                label: "Tỷ lệ chất lượng",
+                                data: trend.map(item => asNumber(item.qualityRate)),
+                                borderColor: "#059669",
+                                backgroundColor: "rgba(5, 150, 105, 0.12)",
+                                yAxisID: "percentage",
+                                tension: 0.25
+                            }
+                        ]
+                    },
+                    options: {
+                        locale: "vi-VN",
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: { grid: { display: false } },
+                            quantity: {
+                                beginAtZero: true,
+                                position: "left",
+                                ticks: { callback: value => decimalNumber.format(value) }
+                            },
+                            percentage: {
+                                beginAtZero: true,
+                                max: 100,
+                                position: "right",
+                                grid: { drawOnChartArea: false },
+                                ticks: { callback: value => `${decimalNumber.format(value)}%` }
+                            }
+                        },
+                        plugins: {
+                            legend: { position: "bottom" }
+                        }
+                    }
+                });
+            };
+
             const fetchJson = async url => {
                 const response = await fetch(url, {
+                    cache: "no-store",
                     headers: { "Accept": "application/json" }
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -549,45 +682,51 @@
                 dashboardStatus.textContent = "Đang cập nhật dữ liệu dashboard.";
 
                 try {
-                    const [oeeResult, agingResult, productionResult] = await Promise.all([
+                    const [oeeResult, agingResult, productionResult, qualityResult] = await Promise.all([
                         fetchJson(endpoints.oee),
                         fetchJson(endpoints.aging),
-                        fetchJson(endpoints.production)
+                        fetchJson(endpoints.production),
+                        fetchJson(endpoints.quality)
                     ]);
                     if (generation !== refreshGeneration) return;
 
                     const oeeData = Array.isArray(oeeResult) ? oeeResult : [];
                     const agingData = agingResult && typeof agingResult === "object" ? agingResult : {};
                     const productionData = Array.isArray(productionResult) ? productionResult : [];
+                    const qualityData = qualityResult && typeof qualityResult === "object" ? qualityResult : {};
                     const averageOee = oeeData.length
                         ? oeeData.reduce((total, item) => total + asNumber(item.oee), 0) / oeeData.length
                         : 0;
-                    const totalPlanned = productionData.reduce(
-                        (total, item) => total + asNumber(item.plannedQuantity),
-                        0
-                    );
-                    const totalActual = productionData.reduce(
-                        (total, item) => total + asNumber(item.actualProducedQuantity),
-                        0
-                    );
                     const totalInventory = [
                         agingData.lessThan30Days,
                         agingData.days30To60,
                         agingData.days60To90,
-                        agingData.moreThan90Days
+                        agingData.moreThan90Days,
+                        agingData.unknownAge
                     ].reduce((total, value) => total + asNumber(value), 0);
 
                     setText("average-oee", `${decimalNumber.format(averageOee)}%`);
-                    setText("total-planned-quantity", decimalNumber.format(totalPlanned));
-                    setText("total-actual-output", decimalNumber.format(totalActual));
+                    setText(
+                        "today-production-output",
+                        decimalNumber.format(asNumber(qualityData.todayProductionOutput))
+                    );
+                    setText("scrap-rate", `${decimalNumber.format(asNumber(qualityData.scrapRate))}%`);
                     setText("total-inventory-value", currencyNumber.format(totalInventory));
                     renderOeeCards(oeeData);
                     renderProductionSummary(productionData);
                     renderAgingSummary(agingData);
+                    renderQualitySummary(qualityData);
                     renderProductionChart(productionData);
                     renderAgingChart(agingData);
+                    renderQualityChart(qualityData);
 
-                    const chartDataAvailable = productionData.length > 0 || totalInventory > 0;
+                    const qualityTrend = Array.isArray(qualityData.dailyTrend)
+                        ? qualityData.dailyTrend
+                        : [];
+                    const chartDataAvailable =
+                        productionData.length > 0 ||
+                        totalInventory > 0 ||
+                        qualityTrend.length > 0;
                     const chartUnavailable = typeof window.Chart !== "function" && chartDataAvailable;
                     setVisible(chartError, chartUnavailable);
                     loadingState.classList.add("d-none");
@@ -598,7 +737,6 @@
                     if (generation !== refreshGeneration) return;
                     loadingState.classList.add("d-none");
                     errorState.classList.remove("d-none");
-                    errorState.textContent = "Không thể tải dữ liệu dashboard. Vui lòng thử lại sau.";
                     dashboardStatus.textContent = "Không thể tải dữ liệu dashboard.";
                 } finally {
                     refreshInProgress = false;
@@ -623,17 +761,13 @@
             };
 
             const startConnection = async connection => {
-                window.clearTimeout(reconnectTimer);
                 setConnectionState("Đang kết nối thời gian thực", "is-waiting");
                 try {
                     await connection.start();
-                    retryAttempt = 0;
                     setConnectionState("Dữ liệu thời gian thực", "is-live");
                 } catch {
                     setConnectionState("Mất kết nối thời gian thực", "is-offline");
-                    const delay = Math.min(30000, 1000 * (2 ** retryAttempt));
-                    retryAttempt = Math.min(retryAttempt + 1, 5);
-                    reconnectTimer = window.setTimeout(() => startConnection(connection), delay);
+                    window.setTimeout(() => startConnection(connection), 5000);
                 }
             };
 
@@ -642,22 +776,28 @@
                     setConnectionState("Không có SignalR", "is-offline");
                     return;
                 }
-                const connection = new signalR.HubConnectionBuilder()
-                    .withUrl("/productionHub")
-                    .withAutomaticReconnect()
-                    .build();
-                connection.on("ReceiveProgressUpdate", scheduleRefresh);
-                connection.onreconnecting(() => {
-                    setConnectionState("Đang kết nối lại", "is-waiting");
+                [
+                    ["/productionHub", "ReceiveProgressUpdate"],
+                    ["/inventoryHub", "ReceiveStockUpdate"]
+                ].forEach(([hubUrl, eventName]) => {
+                    const connection = new signalR.HubConnectionBuilder()
+                        .withUrl(hubUrl)
+                        .withAutomaticReconnect()
+                        .build();
+                    connection.on(eventName, scheduleRefresh);
+                    connection.onreconnecting(() => {
+                        setConnectionState("Đang kết nối lại", "is-waiting");
+                    });
+                    connection.onreconnected(() => {
+                        setConnectionState("Dữ liệu thời gian thực", "is-live");
+                        scheduleRefresh();
+                    });
+                    connection.onclose(() => startConnection(connection));
+                    startConnection(connection);
                 });
-                connection.onreconnected(() => {
-                    setConnectionState("Dữ liệu thời gian thực", "is-live");
-                    scheduleRefresh();
-                });
-                connection.onclose(() => startConnection(connection));
-                startConnection(connection);
             };
 
+            retryButton.addEventListener("click", refreshDashboard);
             refreshDashboard();
             initializeRealtime();
         })();

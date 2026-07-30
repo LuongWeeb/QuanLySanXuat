@@ -2,10 +2,12 @@ using System.Security.Claims;
 using System.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
+using WmsMes.Web.Hubs;
 using WmsMes.Web.Services;
 using WmsMes.Web.ViewModels;
 
@@ -20,6 +22,7 @@ public class WorkOrderController : Controller
     private readonly IReportExportService _reportExportService;
     private readonly TimeProvider _timeProvider;
     private readonly TimeZoneInfo _businessTimeZone;
+    private readonly IHubContext<ProductionHub>? _productionHub;
 
     public WorkOrderController(
         ApplicationDbContext context,
@@ -27,7 +30,8 @@ public class WorkOrderController : Controller
         ILogger<WorkOrderController> logger,
         IReportExportService reportExportService,
         TimeProvider timeProvider,
-        TimeZoneInfo businessTimeZone)
+        TimeZoneInfo businessTimeZone,
+        IHubContext<ProductionHub>? productionHub = null)
     {
         _context = context;
         _workOrderService = workOrderService;
@@ -35,6 +39,7 @@ public class WorkOrderController : Controller
         _reportExportService = reportExportService ?? throw new ArgumentNullException(nameof(reportExportService));
         _timeProvider = timeProvider;
         _businessTimeZone = businessTimeZone;
+        _productionHub = productionHub;
     }
 
     public async Task<IActionResult> Index()
@@ -135,7 +140,10 @@ public class WorkOrderController : Controller
         {
             try
             {
-                return DailyLogResult(await SaveDailyLogAsync(id), id);
+                var result = await SaveDailyLogAsync(id);
+                if (result == DailyLogSaveResult.Saved)
+                    await NotifyProgressAsync();
+                return DailyLogResult(result, id);
             }
             catch (Exception ex)
             {
@@ -149,7 +157,10 @@ public class WorkOrderController : Controller
         {
             var result = await SaveDailyLogAsync(id);
             if (result == DailyLogSaveResult.Saved)
+            {
                 await transaction.CommitAsync();
+                await NotifyProgressAsync();
+            }
             else
                 await transaction.RollbackAsync();
 
@@ -186,6 +197,24 @@ public class WorkOrderController : Controller
             });
             await _context.SaveChangesAsync();
             return DailyLogSaveResult.Saved;
+        }
+
+        async Task NotifyProgressAsync()
+        {
+            if (_productionHub is null)
+                return;
+
+            try
+            {
+                await _productionHub.Clients.All.SendAsync("ReceiveProgressUpdate");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Daily production log {WorkOrderId} was committed but realtime notification failed.",
+                    id);
+            }
         }
     }
 

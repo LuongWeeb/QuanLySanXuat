@@ -19,20 +19,25 @@ public class DashboardControllerTests
                  {
                      nameof(DashboardController.GetOeeData),
                      nameof(DashboardController.GetAgingData),
-                     nameof(DashboardController.GetProductionProgressData)
+                     nameof(DashboardController.GetProductionProgressData),
+                     nameof(DashboardController.GetProductionQualityData)
                  })
         {
             var method = typeof(DashboardController).GetMethod(action);
 
             Assert.NotNull(method);
             Assert.Single(method.GetCustomAttributes<HttpGetAttribute>());
+            var responseCache = Assert.Single(
+                method.GetCustomAttributes<ResponseCacheAttribute>());
+            Assert.True(responseCache.NoStore);
+            Assert.Equal(ResponseCacheLocation.None, responseCache.Location);
         }
     }
 
     [Fact]
     public void Index_ReturnsView()
     {
-        var controller = new DashboardController(Mock.Of<IOeeService>());
+        var controller = Controller(Mock.Of<IOeeService>());
 
         Assert.IsType<ViewResult>(controller.Index());
     }
@@ -56,17 +61,18 @@ public class DashboardControllerTests
                 capturedEnd = end;
             })
             .ReturnsAsync(expected);
-        var controller = new DashboardController(service.Object);
-        var beforeCall = DateTime.UtcNow;
+        var controller = Controller(service.Object);
 
         var result = Assert.IsType<JsonResult>(await controller.GetOeeData());
 
-        var afterCall = DateTime.UtcNow;
         Assert.Same(expected, result.Value);
-        Assert.NotNull(capturedStart);
-        Assert.NotNull(capturedEnd);
-        Assert.InRange(capturedEnd.Value, beforeCall, afterCall);
-        Assert.Equal(TimeSpan.FromDays(6), capturedEnd.Value - capturedStart.Value);
+        Assert.Equal(
+            new DateTime(2026, 7, 24, 17, 0, 0, DateTimeKind.Utc),
+            capturedStart);
+        Assert.Equal(
+            new DateTime(2026, 7, 31, 17, 0, 0, DateTimeKind.Utc),
+            capturedEnd);
+        Assert.Equal(TimeSpan.FromDays(7), capturedEnd - capturedStart);
         service.VerifyAll();
     }
 
@@ -81,7 +87,7 @@ public class DashboardControllerTests
         var service = new Mock<IOeeService>(MockBehavior.Strict);
         service.Setup(item => item.GetInventoryAgingAnalyticsAsync())
             .ReturnsAsync(expected);
-        var controller = new DashboardController(service.Object);
+        var controller = Controller(service.Object);
 
         var result = Assert.IsType<JsonResult>(await controller.GetAgingData());
 
@@ -105,11 +111,49 @@ public class DashboardControllerTests
         var service = new Mock<IOeeService>(MockBehavior.Strict);
         service.Setup(item => item.GetProductionProgressAnalyticsAsync())
             .ReturnsAsync(expected);
-        var controller = new DashboardController(service.Object);
+        var controller = Controller(service.Object);
 
         var result = Assert.IsType<JsonResult>(await controller.GetProductionProgressData());
 
         Assert.Same(expected, result.Value);
         service.VerifyAll();
+    }
+
+    [Fact]
+    public async Task GetProductionQualityData_ReturnsServiceDataForSameSevenBusinessDates()
+    {
+        var expected = new ProductionQualityAnalyticsDto
+        {
+            TodayProductionOutput = 12m,
+            ScrapRate = 5m
+        };
+        var service = new Mock<IOeeService>(MockBehavior.Strict);
+        service.Setup(item => item.GetProductionQualityAnalyticsAsync(
+                new DateTime(2026, 7, 24, 17, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 7, 31, 17, 0, 0, DateTimeKind.Utc)))
+            .ReturnsAsync(expected);
+        var controller = Controller(service.Object);
+
+        var result = Assert.IsType<JsonResult>(
+            await controller.GetProductionQualityData());
+
+        Assert.Same(expected, result.Value);
+        service.VerifyAll();
+    }
+
+    private static DashboardController Controller(IOeeService service) =>
+        new(
+            service,
+            new FixedTimeProvider(
+                new DateTimeOffset(2026, 7, 30, 18, 30, 0, TimeSpan.Zero)),
+            TimeZoneInfo.CreateCustomTimeZone(
+                "Asia/Ho_Chi_Minh",
+                TimeSpan.FromHours(7),
+                "Vietnam",
+                "Vietnam"));
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 }
