@@ -1,0 +1,665 @@
+@{
+    ViewData["Title"] = "Dashboard Nhà máy & OEE";
+}
+
+<style>
+    .factory-dashboard {
+        display: grid;
+        gap: 1.25rem;
+    }
+
+    .dashboard-panel {
+        height: 100%;
+        padding: 1.25rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius);
+        background: var(--color-surface);
+        box-shadow: var(--shadow-panel);
+    }
+
+    .dashboard-panel-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .dashboard-panel-header h3 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 700;
+    }
+
+    .dashboard-chart {
+        position: relative;
+        min-height: 320px;
+    }
+
+    .oee-work-center-card {
+        overflow: hidden;
+        border-width: 1px;
+    }
+
+    .oee-gauge {
+        --oee-value: 0;
+        --oee-color: var(--bs-danger);
+        position: relative;
+        display: grid;
+        width: 112px;
+        height: 112px;
+        flex: 0 0 112px;
+        place-items: center;
+        border-radius: 50%;
+        background:
+            radial-gradient(closest-side, #fff 74%, transparent 76% 99%, #fff 0),
+            conic-gradient(var(--oee-color) calc(var(--oee-value) * 1%), #e2e8f0 0);
+    }
+
+    .oee-gauge-value {
+        font-family: "Fira Code", Consolas, monospace;
+        font-size: 1.25rem;
+        font-weight: 700;
+    }
+
+    .oee-metric-list {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+
+    .oee-metric-list div {
+        padding: 0.65rem 0.4rem;
+        border-radius: var(--radius);
+        background: var(--color-muted);
+        text-align: center;
+    }
+
+    .oee-metric-list span {
+        display: block;
+        color: var(--color-subtle);
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+
+    .oee-metric-list strong {
+        display: block;
+        margin-top: 0.2rem;
+        font-family: "Fira Code", Consolas, monospace;
+        font-size: 0.92rem;
+    }
+
+    @@media (max-width: 575.98px) {
+        .dashboard-panel {
+            padding: 1rem;
+        }
+
+        .dashboard-panel-header {
+            flex-direction: column;
+        }
+
+        .dashboard-chart {
+            min-height: 280px;
+        }
+    }
+</style>
+
+<div class="factory-dashboard">
+    <section class="toolbar-row mb-0" aria-labelledby="factory-dashboard-title">
+        <div>
+            <p class="eyebrow">Hiệu suất thiết bị tổng thể</p>
+            <h2 id="factory-dashboard-title">Dashboard Giám sát Nhà máy & Báo cáo OEE</h2>
+            <p class="text-muted mb-0">
+                Theo dõi OEE, tiến độ lệnh sản xuất và giá trị tồn kho theo thời gian thực.
+            </p>
+        </div>
+        <div class="connection-pill is-waiting" id="dashboard-connection-state" aria-live="polite">
+            <span class="connection-dot" aria-hidden="true"></span>
+            <span id="dashboard-connection-label">Đang kết nối thời gian thực</span>
+        </div>
+    </section>
+
+    <div id="dashboard-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+        Đang tải dữ liệu dashboard.
+    </div>
+    <div id="dashboard-loading" class="alert alert-info mb-0" role="status">
+        Đang tải dữ liệu giám sát nhà máy…
+    </div>
+    <div id="dashboard-error" class="alert alert-danger mb-0 d-none" role="alert">
+        Không thể tải dữ liệu dashboard. Vui lòng thử lại sau.
+    </div>
+    <div id="chart-error" class="alert alert-warning mb-0 d-none" role="alert">
+        Không thể hiển thị biểu đồ. Dữ liệu chi tiết vẫn có sẵn cho trình đọc màn hình.
+    </div>
+
+    <section aria-label="Chỉ số tổng hợp nhà máy">
+        <div class="row g-3">
+            <div class="col-12 col-sm-6 col-xl-3">
+                <article class="metric-card h-100">
+                    <span>OEE trung bình</span>
+                    <strong id="average-oee">—</strong>
+                    <small class="text-muted">Trung bình tất cả trạm</small>
+                </article>
+            </div>
+            <div class="col-12 col-sm-6 col-xl-3">
+                <article class="metric-card h-100">
+                    <span>Sản lượng kế hoạch</span>
+                    <strong id="total-planned-quantity">—</strong>
+                    <small class="text-muted">Tổng lệnh đang sản xuất</small>
+                </article>
+            </div>
+            <div class="col-12 col-sm-6 col-xl-3">
+                <article class="metric-card h-100">
+                    <span>Sản lượng thực tế</span>
+                    <strong id="total-actual-output">—</strong>
+                    <small class="text-muted">Sản lượng đã ghi nhận</small>
+                </article>
+            </div>
+            <div class="col-12 col-sm-6 col-xl-3">
+                <article class="metric-card h-100">
+                    <span>Tổng giá trị tồn kho</span>
+                    <strong id="total-inventory-value">—</strong>
+                    <small class="text-muted">Giá trị theo tuổi tồn</small>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <section class="dashboard-panel" aria-labelledby="work-center-oee-title">
+        <div class="dashboard-panel-header">
+            <div>
+                <h3 id="work-center-oee-title">OEE theo trạm sản xuất</h3>
+                <p class="text-muted small mb-0">Xanh ≥ 85%; vàng từ 65% đến dưới 85%; đỏ dưới 65%.</p>
+            </div>
+            <span class="badge bg-secondary" id="work-center-count">0 trạm</span>
+        </div>
+        <div id="oee-cards-container" class="row g-3"></div>
+        <div id="oee-empty" class="empty-state compact d-none">
+            <h4 class="h6">Không có dữ liệu OEE</h4>
+            <p class="mb-0">Chưa có trạm sản xuất đang hoạt động trong kỳ báo cáo.</p>
+        </div>
+    </section>
+
+    <section class="row g-3" aria-label="Biểu đồ báo cáo nhà máy">
+        <div class="col-12 col-xl-7">
+            <article class="dashboard-panel">
+                <div class="dashboard-panel-header">
+                    <div>
+                        <h3>Tiến độ lệnh sản xuất</h3>
+                        <p class="text-muted small mb-0">So sánh kế hoạch và sản lượng thực tế.</p>
+                    </div>
+                </div>
+                <div class="dashboard-chart">
+                    <canvas id="production-progress-chart"
+                            role="img"
+                            aria-label="Biểu đồ cột so sánh sản lượng kế hoạch và thực tế theo lệnh sản xuất"
+                            aria-describedby="production-chart-summary">
+                        Biểu đồ tiến độ lệnh sản xuất.
+                    </canvas>
+                    <table id="production-chart-summary" class="visually-hidden">
+                        <caption>Dữ liệu tiến độ lệnh sản xuất</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col">Lệnh sản xuất</th>
+                                <th scope="col">Kế hoạch</th>
+                                <th scope="col">Thực tế</th>
+                            </tr>
+                        </thead>
+                        <tbody id="production-chart-summary-body"></tbody>
+                    </table>
+                    <div id="production-empty" class="empty-state compact d-none">
+                        <h4 class="h6">Không có dữ liệu tiến độ</h4>
+                        <p class="mb-0">Chưa có lệnh sản xuất đang hoạt động.</p>
+                    </div>
+                </div>
+            </article>
+        </div>
+        <div class="col-12 col-xl-5">
+            <article class="dashboard-panel">
+                <div class="dashboard-panel-header">
+                    <div>
+                        <h3>Phân tích tuổi tồn kho</h3>
+                        <p class="text-muted small mb-0">Giá trị tồn kho theo bốn nhóm tuổi.</p>
+                    </div>
+                </div>
+                <div class="dashboard-chart">
+                    <canvas id="inventory-aging-chart"
+                            role="img"
+                            aria-label="Biểu đồ doughnut giá trị tồn kho theo bốn nhóm tuổi"
+                            aria-describedby="aging-chart-summary">
+                        Biểu đồ tuổi tồn kho.
+                    </canvas>
+                    <table id="aging-chart-summary" class="visually-hidden">
+                        <caption>Dữ liệu giá trị tồn kho theo nhóm tuổi</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col">Nhóm tuổi tồn kho</th>
+                                <th scope="col">Giá trị</th>
+                            </tr>
+                        </thead>
+                        <tbody id="aging-chart-summary-body"></tbody>
+                    </table>
+                    <div id="aging-empty" class="empty-state compact d-none">
+                        <h4 class="h6">Không có dữ liệu tuổi tồn kho</h4>
+                        <p class="mb-0">Chưa có giá trị tồn kho để phân tích.</p>
+                    </div>
+                </div>
+            </article>
+        </div>
+    </section>
+</div>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+    <script>
+        (() => {
+            const endpoints = {
+                oee: "/Dashboard/GetOeeData",
+                aging: "/Dashboard/GetAgingData",
+                production: "/Dashboard/GetProductionProgressData"
+            };
+            const decimalNumber = new Intl.NumberFormat("vi-VN", {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 1
+            });
+            const currencyNumber = new Intl.NumberFormat("vi-VN", {
+                style: "currency",
+                currency: "VND",
+                maximumFractionDigits: 0
+            });
+            const statusStyles = {
+                success: {
+                    border: "border-success",
+                    badge: "bg-success",
+                    text: "text-success",
+                    color: "var(--bs-success)"
+                },
+                warning: {
+                    border: "border-warning",
+                    badge: "bg-warning text-dark",
+                    text: "text-dark",
+                    color: "#7a4b00"
+                },
+                danger: {
+                    border: "border-danger",
+                    badge: "bg-danger",
+                    text: "text-danger",
+                    color: "var(--bs-danger)"
+                }
+            };
+            const dashboardStatus = document.getElementById("dashboard-status");
+            const loadingState = document.getElementById("dashboard-loading");
+            const errorState = document.getElementById("dashboard-error");
+            const chartError = document.getElementById("chart-error");
+            const connectionState = document.getElementById("dashboard-connection-state");
+            const connectionLabel = document.getElementById("dashboard-connection-label");
+            const oeeContainer = document.getElementById("oee-cards-container");
+            const productionCanvas = document.getElementById("production-progress-chart");
+            const agingCanvas = document.getElementById("inventory-aging-chart");
+            const productionSummaryBody = document.getElementById("production-chart-summary-body");
+            const agingSummaryBody = document.getElementById("aging-chart-summary-body");
+            let productionChart;
+            let agingChart;
+            let refreshGeneration = 0;
+            let refreshInProgress = false;
+            let refreshPending = false;
+            let refreshTimer;
+            let retryAttempt = 0;
+            let reconnectTimer;
+
+            const asNumber = value => {
+                const parsed = Number(value);
+                return Number.isFinite(parsed) ? parsed : 0;
+            };
+
+            const setText = (id, value) => {
+                document.getElementById(id).textContent = value;
+            };
+
+            const setVisible = (element, visible) => {
+                element.classList.toggle("d-none", !visible);
+            };
+
+            const statusForOee = value => value >= 85 ? "success" : value >= 65 ? "warning" : "danger";
+
+            const createElement = (tagName, className, text) => {
+                const element = document.createElement(tagName);
+                if (className) element.className = className;
+                if (text !== undefined) element.textContent = text;
+                return element;
+            };
+
+            const renderOeeCards = data => {
+                oeeContainer.replaceChildren();
+                const hasData = data.length > 0;
+                setVisible(document.getElementById("oee-empty"), !hasData);
+                setText("work-center-count", `${decimalNumber.format(data.length)} trạm`);
+
+                data.forEach(item => {
+                    const oee = Math.max(0, Math.min(100, asNumber(item.oee)));
+                    const status = statusForOee(oee);
+                    const style = statusStyles[status];
+                    const column = createElement("div", "col-12 col-sm-6 col-xxl-3");
+                    const card = createElement("article", `card h-100 oee-work-center-card ${style.border}`);
+                    const body = createElement("div", "card-body");
+                    const headingRow = createElement("div", "d-flex align-items-start justify-content-between gap-2");
+                    const heading = createElement("div");
+                    const code = String(item.workCenterCode ?? "—");
+                    const name = String(item.workCenterName ?? "Chưa đặt tên");
+                    heading.append(
+                        createElement("h4", "h6 fw-bold mb-1", code),
+                        createElement("p", "small text-muted mb-0", name)
+                    );
+                    const badge = createElement(
+                        "span",
+                        `badge ${style.badge}`,
+                        status === "success" ? "Tốt" : status === "warning" ? "Cần theo dõi" : "Cần cải thiện"
+                    );
+                    headingRow.append(heading, badge);
+
+                    const gaugeRow = createElement("div", "d-flex align-items-center justify-content-center mt-3");
+                    const gauge = createElement("div", `oee-gauge ${style.text}`);
+                    gauge.style.setProperty("--oee-value", oee.toString());
+                    gauge.style.setProperty("--oee-color", style.color);
+                    gauge.setAttribute("role", "progressbar");
+                    gauge.setAttribute("aria-label", `OEE trạm ${code}`);
+                    gauge.setAttribute("aria-valuemin", "0");
+                    gauge.setAttribute("aria-valuemax", "100");
+                    gauge.setAttribute("aria-valuenow", oee.toString());
+                    gauge.append(createElement("span", "oee-gauge-value", `${decimalNumber.format(oee)}%`));
+                    gaugeRow.append(gauge);
+
+                    const metricList = createElement("div", "oee-metric-list");
+                    [
+                        ["A", item.availability, "Mức độ sẵn sàng"],
+                        ["P", item.performance, "Hiệu suất"],
+                        ["Q", item.quality, "Chất lượng"]
+                    ].forEach(([shortLabel, value, fullLabel]) => {
+                        const metric = createElement("div");
+                        const formattedValue = `${decimalNumber.format(asNumber(value))}%`;
+                        metric.setAttribute("role", "group");
+                        metric.setAttribute("aria-label", `${fullLabel}: ${formattedValue}`);
+                        const label = createElement("span", null, shortLabel);
+                        label.setAttribute("title", fullLabel);
+                        metric.append(
+                            label,
+                            createElement("strong", null, formattedValue)
+                        );
+                        metricList.append(metric);
+                    });
+
+                    body.append(headingRow, gaugeRow, metricList);
+                    card.append(body);
+                    column.append(card);
+                    oeeContainer.append(column);
+                });
+            };
+
+            const destroyChart = chart => {
+                if (chart) chart.destroy();
+            };
+
+            const renderProductionSummary = data => {
+                productionSummaryBody.replaceChildren();
+                data.forEach(item => {
+                    const row = createElement("tr");
+                    const order = createElement("th", null, String(item.workOrderCode ?? "—"));
+                    order.setAttribute("scope", "row");
+                    row.append(
+                        order,
+                        createElement("td", null, decimalNumber.format(asNumber(item.plannedQuantity))),
+                        createElement("td", null, decimalNumber.format(asNumber(item.actualProducedQuantity)))
+                    );
+                    productionSummaryBody.append(row);
+                });
+            };
+
+            const renderAgingSummary = aging => {
+                agingSummaryBody.replaceChildren();
+                [
+                    ["Dưới 30 ngày", aging.lessThan30Days],
+                    ["30–60 ngày", aging.days30To60],
+                    ["60–90 ngày", aging.days60To90],
+                    ["Trên 90 ngày", aging.moreThan90Days]
+                ].forEach(([label, value]) => {
+                    const row = createElement("tr");
+                    const bucket = createElement("th", null, label);
+                    bucket.setAttribute("scope", "row");
+                    row.append(bucket, createElement("td", null, currencyNumber.format(asNumber(value))));
+                    agingSummaryBody.append(row);
+                });
+            };
+
+            const renderProductionChart = data => {
+                destroyChart(productionChart);
+                productionChart = undefined;
+                const hasData = data.length > 0;
+                const chartAvailable = typeof window.Chart === "function";
+                setVisible(productionCanvas, hasData && chartAvailable);
+                setVisible(document.getElementById("production-empty"), !hasData);
+                if (!hasData || !chartAvailable) return;
+
+                productionChart = new window.Chart(productionCanvas, {
+                    type: "bar",
+                    data: {
+                        labels: data.map(item => String(item.workOrderCode ?? "—")),
+                        datasets: [
+                            {
+                                label: "Kế hoạch",
+                                data: data.map(item => asNumber(item.plannedQuantity)),
+                                backgroundColor: "rgba(51, 65, 85, 0.72)",
+                                borderColor: "#334155",
+                                borderWidth: 1
+                            },
+                            {
+                                label: "Thực tế",
+                                data: data.map(item => asNumber(item.actualProducedQuantity)),
+                                backgroundColor: "rgba(5, 150, 105, 0.72)",
+                                borderColor: "#059669",
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        locale: "vi-VN",
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: { grid: { display: false } },
+                            y: {
+                                beginAtZero: true,
+                                ticks: { callback: value => decimalNumber.format(value) }
+                            }
+                        },
+                        plugins: {
+                            legend: { position: "bottom" },
+                            tooltip: {
+                                callbacks: {
+                                    label: context => `${context.dataset.label}: ${decimalNumber.format(context.parsed.y)}`
+                                }
+                            }
+                        }
+                    }
+                });
+            };
+
+            const renderAgingChart = aging => {
+                destroyChart(agingChart);
+                agingChart = undefined;
+                const values = [
+                    asNumber(aging.lessThan30Days),
+                    asNumber(aging.days30To60),
+                    asNumber(aging.days60To90),
+                    asNumber(aging.moreThan90Days)
+                ];
+                const hasData = values.some(value => value > 0);
+                const chartAvailable = typeof window.Chart === "function";
+                setVisible(agingCanvas, hasData && chartAvailable);
+                setVisible(document.getElementById("aging-empty"), !hasData);
+                if (!hasData || !chartAvailable) return;
+
+                agingChart = new window.Chart(agingCanvas, {
+                    type: "doughnut",
+                    data: {
+                        labels: ["Dưới 30 ngày", "30–60 ngày", "60–90 ngày", "Trên 90 ngày"],
+                        datasets: [{
+                            data: values,
+                            backgroundColor: ["#059669", "#0d6efd", "#ffc107", "#dc3545"],
+                            borderColor: "#ffffff",
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        locale: "vi-VN",
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: "62%",
+                        plugins: {
+                            legend: { position: "bottom" },
+                            tooltip: {
+                                callbacks: {
+                                    label: context => `${context.label}: ${currencyNumber.format(context.parsed)}`
+                                }
+                            }
+                        }
+                    }
+                });
+            };
+
+            const fetchJson = async url => {
+                const response = await fetch(url, {
+                    headers: { "Accept": "application/json" }
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            };
+
+            const refreshDashboard = async () => {
+                if (refreshInProgress) {
+                    refreshPending = true;
+                    return;
+                }
+                refreshInProgress = true;
+                const generation = ++refreshGeneration;
+                loadingState.classList.remove("d-none");
+                errorState.classList.add("d-none");
+                dashboardStatus.textContent = "Đang cập nhật dữ liệu dashboard.";
+
+                try {
+                    const [oeeResult, agingResult, productionResult] = await Promise.all([
+                        fetchJson(endpoints.oee),
+                        fetchJson(endpoints.aging),
+                        fetchJson(endpoints.production)
+                    ]);
+                    if (generation !== refreshGeneration) return;
+
+                    const oeeData = Array.isArray(oeeResult) ? oeeResult : [];
+                    const agingData = agingResult && typeof agingResult === "object" ? agingResult : {};
+                    const productionData = Array.isArray(productionResult) ? productionResult : [];
+                    const averageOee = oeeData.length
+                        ? oeeData.reduce((total, item) => total + asNumber(item.oee), 0) / oeeData.length
+                        : 0;
+                    const totalPlanned = productionData.reduce(
+                        (total, item) => total + asNumber(item.plannedQuantity),
+                        0
+                    );
+                    const totalActual = productionData.reduce(
+                        (total, item) => total + asNumber(item.actualProducedQuantity),
+                        0
+                    );
+                    const totalInventory = [
+                        agingData.lessThan30Days,
+                        agingData.days30To60,
+                        agingData.days60To90,
+                        agingData.moreThan90Days
+                    ].reduce((total, value) => total + asNumber(value), 0);
+
+                    setText("average-oee", `${decimalNumber.format(averageOee)}%`);
+                    setText("total-planned-quantity", decimalNumber.format(totalPlanned));
+                    setText("total-actual-output", decimalNumber.format(totalActual));
+                    setText("total-inventory-value", currencyNumber.format(totalInventory));
+                    renderOeeCards(oeeData);
+                    renderProductionSummary(productionData);
+                    renderAgingSummary(agingData);
+                    renderProductionChart(productionData);
+                    renderAgingChart(agingData);
+
+                    const chartDataAvailable = productionData.length > 0 || totalInventory > 0;
+                    const chartUnavailable = typeof window.Chart !== "function" && chartDataAvailable;
+                    setVisible(chartError, chartUnavailable);
+                    loadingState.classList.add("d-none");
+                    dashboardStatus.textContent = chartUnavailable
+                        ? "Dữ liệu đã cập nhật nhưng không thể hiển thị biểu đồ."
+                        : "Dữ liệu dashboard đã được cập nhật.";
+                } catch (error) {
+                    if (generation !== refreshGeneration) return;
+                    loadingState.classList.add("d-none");
+                    errorState.classList.remove("d-none");
+                    errorState.textContent = "Không thể tải dữ liệu dashboard. Vui lòng thử lại sau.";
+                    dashboardStatus.textContent = "Không thể tải dữ liệu dashboard.";
+                } finally {
+                    refreshInProgress = false;
+                    if (refreshPending) {
+                        refreshPending = false;
+                        refreshDashboard();
+                    }
+                }
+            };
+
+            const scheduleRefresh = () => {
+                if (refreshTimer) return;
+                refreshTimer = window.setTimeout(() => {
+                    refreshTimer = undefined;
+                    refreshDashboard();
+                }, 150);
+            };
+
+            const setConnectionState = (label, modifier) => {
+                connectionLabel.textContent = label;
+                connectionState.className = `connection-pill ${modifier}`;
+            };
+
+            const startConnection = async connection => {
+                window.clearTimeout(reconnectTimer);
+                setConnectionState("Đang kết nối thời gian thực", "is-waiting");
+                try {
+                    await connection.start();
+                    retryAttempt = 0;
+                    setConnectionState("Dữ liệu thời gian thực", "is-live");
+                } catch {
+                    setConnectionState("Mất kết nối thời gian thực", "is-offline");
+                    const delay = Math.min(30000, 1000 * (2 ** retryAttempt));
+                    retryAttempt = Math.min(retryAttempt + 1, 5);
+                    reconnectTimer = window.setTimeout(() => startConnection(connection), delay);
+                }
+            };
+
+            const initializeRealtime = () => {
+                if (!window.signalR) {
+                    setConnectionState("Không có SignalR", "is-offline");
+                    return;
+                }
+                const connection = new signalR.HubConnectionBuilder()
+                    .withUrl("/productionHub")
+                    .withAutomaticReconnect()
+                    .build();
+                connection.on("ReceiveProgressUpdate", scheduleRefresh);
+                connection.onreconnecting(() => {
+                    setConnectionState("Đang kết nối lại", "is-waiting");
+                });
+                connection.onreconnected(() => {
+                    setConnectionState("Dữ liệu thời gian thực", "is-live");
+                    scheduleRefresh();
+                });
+                connection.onclose(() => startConnection(connection));
+                startConnection(connection);
+            };
+
+            refreshDashboard();
+            initializeRealtime();
+        })();
+    </script>
+}
