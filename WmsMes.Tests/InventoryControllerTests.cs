@@ -204,6 +204,38 @@ public class InventoryControllerTests
         service.Verify(item => item.NotifyStockChangedAsync(), Times.Once);
     }
 
+    [Theory]
+    [InlineData("  Hư hỏng khi vận chuyển  ", "Hư hỏng khi vận chuyển")]
+    [InlineData("   ", null)]
+    public async Task CreateIssue_Post_NormalizesAndMapsVarianceReason(
+        string submittedReason,
+        string? expectedReason)
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Issue_Reason_{Guid.NewGuid()}")
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        var seeded = await SeedIssueStockAsync(context);
+        var service = new Mock<IInventoryService>();
+        service.Setup(item => item.CompleteGoodsIssueWithoutNotificationAsync(
+                It.IsAny<int>(),
+                "warehouse-user"))
+            .ReturnsAsync(true);
+        var controller = Authenticated(new InventoryController(
+            context,
+            Mock.Of<IReportExportService>(),
+            service.Object));
+        controller.TempData = Mock.Of<ITempDataDictionary>();
+        var model = IssueModel(seeded, 1);
+        model.Lines[0].VarianceReason = submittedReason;
+
+        var result = await controller.CreateIssue(model);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        var line = await context.GoodsIssueLines.SingleAsync();
+        Assert.Equal(expectedReason, line.VarianceReason);
+    }
+
     [Fact]
     public async Task CreateIssue_Post_PersistsAllLinesAndCompletesOnce()
     {
@@ -796,6 +828,38 @@ public class InventoryControllerTests
         Assert.Equal(4, line.LocationId);
         inventoryService.Verify(service => service.CompleteGoodsReceiptWithoutNotificationAsync(receipt.Id, "warehouse-user"), Times.Once);
         inventoryService.Verify(service => service.NotifyStockChangedAsync(), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("  Bao bì rách  ", "Bao bì rách")]
+    [InlineData("\t ", null)]
+    public async Task CreateReceipt_Post_NormalizesAndMapsVarianceReason(
+        string submittedReason,
+        string? expectedReason)
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"Inv_Receipt_Reason_{Guid.NewGuid()}")
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await SeedReceiptReferencesAsync(context);
+        var service = new Mock<IInventoryService>();
+        service.Setup(item => item.CompleteGoodsReceiptWithoutNotificationAsync(
+                It.IsAny<int>(),
+                "warehouse-user"))
+            .ReturnsAsync(true);
+        var controller = Authenticated(new InventoryController(
+            context,
+            Mock.Of<IReportExportService>(),
+            service.Object));
+        controller.TempData = Mock.Of<ITempDataDictionary>();
+        var model = ReceiptModel(2, 3, "LOT-REASON", 1, 1, 4);
+        model.Lines[0].VarianceReason = submittedReason;
+
+        var result = await controller.CreateReceipt(model);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        var line = await context.GoodsReceiptLines.SingleAsync();
+        Assert.Equal(expectedReason, line.VarianceReason);
     }
 
     [Fact]

@@ -414,7 +414,8 @@ public class InventoryController : Controller
                 ProductId = line.ProductId,
                 LotId = line.LotId,
                 Qty = line.Qty,
-                LocationId = line.LocationId
+                LocationId = line.LocationId,
+                VarianceReason = NormalizeOptionalText(line.VarianceReason)
             }).ToList()
         };
 
@@ -549,7 +550,8 @@ public class InventoryController : Controller
                 LotNo = line.LotNo.Trim(),
                 Qty = line.Qty,
                 UnitPrice = line.UnitPrice,
-                LocationId = line.LocationId
+                LocationId = line.LocationId,
+                VarianceReason = NormalizeOptionalText(line.VarianceReason)
             }).ToList()
         };
 
@@ -618,6 +620,12 @@ public class InventoryController : Controller
             .OrderBy(order => order.OrderNo)
             .AsNoTracking()
             .ToListAsync();
+    }
+
+    private static string? NormalizeOptionalText(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrEmpty(normalized) ? null : normalized;
     }
 
     private async Task LoadIssueSelectionsAsync()

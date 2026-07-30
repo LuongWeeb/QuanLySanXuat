@@ -44,6 +44,43 @@ public class CycleCountControllerTests
     }
 
     [Fact]
+    public void SaveScan_AcceptsCountsAndReasons()
+    {
+        var action = typeof(CycleCountController)
+            .GetMethods()
+            .Single(method =>
+                method.Name == nameof(CycleCountController.SaveScan) &&
+                method.GetCustomAttribute<HttpPostAttribute>() is not null);
+
+        Assert.Equal(
+            new[] { "id", "itemCounts", "itemReasons" },
+            action.GetParameters().Select(parameter => parameter.Name));
+    }
+
+    [Fact]
+    public async Task SaveScan_InvalidModelStateRedirectsToScanWithoutCallingService()
+    {
+        await using var context = CreateContext();
+        var service = new Mock<ICycleCountService>();
+        var controller = CreateController(context, service.Object, "counter-1");
+        controller.ModelState.AddModelError(
+            "itemCounts[not-an-item]",
+            "The value is not valid.");
+
+        var result = Assert.IsType<RedirectToActionResult>(
+            await controller.SaveScan(
+                42,
+                new Dictionary<int, decimal> { [7] = 3 },
+                new Dictionary<int, string?> { [7] = "Damaged" }));
+
+        Assert.Equal(nameof(CycleCountController.ExecuteScan), result.ActionName);
+        Assert.Equal(42, result.RouteValues!["id"]);
+        Assert.NotNull(controller.TempData["ErrorMessage"]);
+        Assert.False(controller.TempData.ContainsKey("StatusMessage"));
+        service.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task Create_ValidWarehouseUsesAuthenticatedUserAndRedirectsToScan()
     {
         await using var context = CreateContext();

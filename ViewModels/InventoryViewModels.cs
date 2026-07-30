@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using WmsMes.Web.Domain.Enums;
 
 namespace WmsMes.Web.ViewModels;
@@ -16,6 +17,9 @@ public class ReceiptLineInput
     public decimal Qty { get; set; }
     public decimal UnitPrice { get; set; }
     public int LocationId { get; set; }
+
+    [MaxLength(250)]
+    public string? VarianceReason { get; set; }
 }
 
 public class CreateIssueViewModel
@@ -31,6 +35,9 @@ public class IssueLineInput
     public int LotId { get; set; }
     public decimal Qty { get; set; }
     public int LocationId { get; set; }
+
+    [MaxLength(250)]
+    public string? VarianceReason { get; set; }
 }
 
 public sealed class StockTransactionPageViewModel

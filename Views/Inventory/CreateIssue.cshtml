@@ -51,7 +51,7 @@
 
         <div class="table-responsive">
             <table class="table align-middle">
-                <thead><tr><th>Sản phẩm / Lô / Vị trí khả dụng (FEFO/FIFO)</th><th>Số lượng xuất</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead>
+                <thead><tr><th>Sản phẩm / Lô / Vị trí khả dụng (FEFO/FIFO)</th><th>Số lượng xuất</th><th>Lý do chênh lệch</th><th><span class="visually-hidden">Thao tác</span></th></tr></thead>
                 <tbody id="issue-lines">
                     @for (var index = 0; index < Model.Lines.Count; index++)
                     {
@@ -60,6 +60,10 @@
                         var qtyValue = ViewData.ModelState.TryGetValue(qtyKey, out var qtyEntry)
                             ? qtyEntry.AttemptedValue
                             : line.Qty.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        var reasonKey = $"Lines[{index}].VarianceReason";
+                        var reasonValue = ViewData.ModelState.TryGetValue(reasonKey, out var reasonEntry)
+                            ? reasonEntry.AttemptedValue
+                            : line.VarianceReason;
                         <tr data-line-row>
                             <td>
                                 <label class="visually-hidden" data-stock-label>Tồn kho khả dụng</label>
@@ -88,6 +92,15 @@
                                 <label class="visually-hidden" data-label-for="Qty">Số lượng xuất</label>
                                 <input name="Lines[@index].Qty" value="@qtyValue" data-field="Qty" type="number" class="form-control" min="0.01" step="0.01" required />
                                 @Html.ValidationMessage($"Lines[{index}].Qty", null, new { @class = "text-danger", data_validation_for = "Qty" })
+                            </td>
+                            <td style="min-width: 220px">
+                                <label class="visually-hidden" data-label-for="VarianceReason">Lý do chênh lệch</label>
+                                <textarea name="Lines[@index].VarianceReason"
+                                          data-field="VarianceReason"
+                                          class="form-control"
+                                          maxlength="250"
+                                          rows="2">@reasonValue</textarea>
+                                @Html.ValidationMessage($"Lines[{index}].VarianceReason", null, new { @class = "text-danger", data_validation_for = "VarianceReason" })
                             </td>
                             <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-line>Xóa dòng</button></td>
                         </tr>
@@ -137,6 +150,7 @@
             <input name="Lines[__index__].LocationId" data-field="LocationId" type="hidden" />
         </td>
         <td><label class="visually-hidden" data-label-for="Qty">Số lượng xuất</label><input name="Lines[__index__].Qty" data-field="Qty" type="number" class="form-control" min="0.01" step="0.01" required /></td>
+        <td><label class="visually-hidden" data-label-for="VarianceReason">Lý do chênh lệch</label><textarea name="Lines[__index__].VarianceReason" data-field="VarianceReason" class="form-control" maxlength="250" rows="2"></textarea></td>
         <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-line>Xóa dòng</button></td>
     </tr>
 </template>
@@ -188,6 +202,7 @@
             selection.selectedIndex = 0;
             Array.from(selection.options).forEach(option => option.hidden = false);
             row.querySelectorAll('input').forEach(input => input.value = '');
+            row.querySelectorAll('textarea').forEach(textarea => textarea.value = '');
             delete row.dataset.scanProductCode;
             delete row.dataset.scanLotNo;
             delete row.dataset.scanLocationCode;

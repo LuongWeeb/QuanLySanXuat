@@ -24,6 +24,19 @@ public class CycleCountViewTests
     }
 
     [Fact]
+    public void ExecuteScan_ProvidesAccessibleReasonForEveryCountedItem()
+    {
+        var view = ReadView("ExecuteScan.cshtml");
+
+        Assert.Contains("<th>Lý do chênh lệch</th>", view);
+        Assert.Contains("for=\"reason-@item.Id\"", view);
+        Assert.Contains("id=\"reason-@item.Id\"", view);
+        Assert.Contains("name=\"itemReasons[@item.Id]\"", view);
+        Assert.Contains("maxlength=\"250\"", view);
+        Assert.Contains("@item.ReasonNote", view);
+    }
+
+    [Fact]
     public void Details_ShowsFinancialVarianceAndManagerApproval()
     {
         var view = ReadView("Details.cshtml");
@@ -32,6 +45,17 @@ public class CycleCountViewTests
         Assert.Contains("VarianceQty", view);
         Assert.Contains("User.IsInRole(\"Manager\")", view);
         Assert.Contains("asp-action=\"Approve\"", view);
+    }
+
+    [Fact]
+    public void Details_ShowsReasonAndCycleCountPrintLink()
+    {
+        var view = ReadView("Details.cshtml");
+
+        Assert.Contains("<th>Lý do chênh lệch</th>", view);
+        Assert.Contains("@item.ReasonNote", view);
+        Assert.Contains("href=\"/api/print/cyclecount/@Model.Id\"", view);
+        Assert.Contains("target=\"_blank\"", view);
     }
 
     private static string ReadView(string name) =>

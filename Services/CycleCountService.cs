@@ -100,14 +100,15 @@ public class CycleCountService : ICycleCountService
         int orderId,
         Dictionary<int, decimal> itemCounts)
     {
-        var results = itemCounts
-            .Select(entry => new CountResultDto
-            {
-                CycleCountItemId = entry.Key,
-                CountedQty = entry.Value
-            })
-            .ToList();
-        return RecordCountResultsAsync(orderId, results);
+        return UpdateCountedQtysAsync(orderId, itemCounts, []);
+    }
+
+    public Task<bool> UpdateCountedQtysAsync(
+        int orderId,
+        Dictionary<int, decimal> itemCounts,
+        Dictionary<int, string?> itemReasons)
+    {
+        return SaveCountResultsAsync(orderId, itemCounts, itemReasons);
     }
 
     public Task<bool> ApproveAndAdjustLedgerAsync(
@@ -169,6 +170,37 @@ public class CycleCountService : ICycleCountService
 
     public async Task<bool> RecordCountResultsAsync(int orderId, List<CountResultDto> results)
     {
+        if (results.Select(result => result.CycleCountItemId).Distinct().Count() !=
+            results.Count)
+        {
+            return false;
+        }
+
+        return await SaveCountResultsAsync(
+            orderId,
+            results.ToDictionary(
+                result => result.CycleCountItemId,
+                result => result.CountedQty),
+            new Dictionary<int, string?>());
+    }
+
+    private async Task<bool> SaveCountResultsAsync(
+        int orderId,
+        IReadOnlyDictionary<int, decimal> itemCounts,
+        IReadOnlyDictionary<int, string?> itemReasons)
+    {
+        var normalizedReasons = new Dictionary<int, string?>();
+        foreach (var (itemId, reason) in itemReasons)
+        {
+            var normalizedReason = NormalizeReason(reason);
+            if (normalizedReason?.Length > 250)
+            {
+                return false;
+            }
+
+            normalizedReasons[itemId] = normalizedReason;
+        }
+
         if (_context.Database.IsRelational())
         {
             await using var transaction = await BeginTransactionIfRelationalAsync();
@@ -179,27 +211,48 @@ public class CycleCountService : ICycleCountService
                     .Include(order => order.Items)
                     .SingleOrDefaultAsync(order => order.Id == orderId);
                 if (orderSnapshot is null ||
-                    orderSnapshot.Status is "Approved" or "Cancelled")
+                    orderSnapshot.Status is not ("Draft" or "InProgress"))
                     return false;
 
                 var itemIds = orderSnapshot.Items.Select(item => item.Id).ToHashSet();
-                if (results.Any(result =>
-                        result.CountedQty < 0 ||
-                        !itemIds.Contains(result.CycleCountItemId)) ||
-                    results.Select(result => result.CycleCountItemId).Distinct().Count() != results.Count)
+                if (itemCounts.Any(entry =>
+                        entry.Value < 0 ||
+                        !itemIds.Contains(entry.Key)) ||
+                    normalizedReasons.Keys.Any(itemId => !itemIds.Contains(itemId)))
                     return false;
 
-                foreach (var result in results)
+                foreach (var itemId in itemCounts.Keys
+                    .Concat(normalizedReasons.Keys)
+                    .Distinct())
                 {
-                    var countedQty = result.CountedQty;
-                    var affected = await _context.CycleCountItems
+                    var query = _context.CycleCountItems
                         .Where(item =>
-                            item.Id == result.CycleCountItemId &&
+                            item.Id == itemId &&
                             item.CycleCountOrderId == orderId &&
-                            item.CycleCountOrder!.Status != "Approved" &&
-                            item.CycleCountOrder.Status != "Cancelled")
-                        .ExecuteUpdateAsync(setters => setters
+                            (item.CycleCountOrder!.Status == "Draft" ||
+                             item.CycleCountOrder.Status == "InProgress"));
+                    var hasCount = itemCounts.TryGetValue(itemId, out var countedQty);
+                    var hasReason = normalizedReasons.TryGetValue(
+                        itemId,
+                        out var normalizedReason);
+                    int affected;
+                    if (hasCount && hasReason)
+                    {
+                        affected = await query.ExecuteUpdateAsync(setters => setters
+                            .SetProperty(item => item.CountedQty, countedQty)
+                            .SetProperty(item => item.ReasonNote, normalizedReason));
+                    }
+                    else if (hasCount)
+                    {
+                        affected = await query.ExecuteUpdateAsync(setters => setters
                             .SetProperty(item => item.CountedQty, countedQty));
+                    }
+                    else
+                    {
+                        affected = await query.ExecuteUpdateAsync(setters => setters
+                            .SetProperty(item => item.ReasonNote, normalizedReason));
+                    }
+
                     if (affected != 1)
                         return false;
                 }
@@ -212,8 +265,8 @@ public class CycleCountService : ICycleCountService
                 var claimed = await _context.CycleCountOrders
                     .Where(order =>
                         order.Id == orderId &&
-                        order.Status != "Approved" &&
-                        order.Status != "Cancelled")
+                        (order.Status == "Draft" ||
+                         order.Status == "InProgress"))
                     .ExecuteUpdateAsync(setters => setters
                         .SetProperty(order => order.Status, nextStatus)
                         .SetProperty(order => order.CompletedAt, completedAt));
@@ -234,21 +287,29 @@ public class CycleCountService : ICycleCountService
             .Include(cycleCountOrder => cycleCountOrder.Items)
             .FirstOrDefaultAsync(cycleCountOrder => cycleCountOrder.Id == orderId);
 
-        if (order is null || order.Status is "Approved" or "Cancelled")
+        if (order is null ||
+            order.Status is not ("Draft" or "InProgress"))
         {
             return false;
         }
 
         var itemsById = order.Items.ToDictionary(item => item.Id);
-        if (results.Any(result => result.CountedQty < 0 || !itemsById.ContainsKey(result.CycleCountItemId)) ||
-            results.Select(result => result.CycleCountItemId).Distinct().Count() != results.Count)
+        if (itemCounts.Any(entry =>
+                entry.Value < 0 ||
+                !itemsById.ContainsKey(entry.Key)) ||
+            normalizedReasons.Keys.Any(itemId => !itemsById.ContainsKey(itemId)))
         {
             return false;
         }
 
-        foreach (var result in results)
+        foreach (var (itemId, countedQty) in itemCounts)
         {
-            itemsById[result.CycleCountItemId].CountedQty = result.CountedQty;
+            itemsById[itemId].CountedQty = countedQty;
+        }
+
+        foreach (var (itemId, normalizedReason) in normalizedReasons)
+        {
+            itemsById[itemId].ReasonNote = normalizedReason;
         }
 
         var isCompleted = order.Items.All(item => item.CountedQty.HasValue);
@@ -256,6 +317,12 @@ public class CycleCountService : ICycleCountService
         order.CompletedAt = isCompleted ? DateTime.UtcNow : null;
         await _context.SaveChangesAsync();
         return true;
+    }
+
+    private static string? NormalizeReason(string? reason)
+    {
+        var normalized = reason?.Trim();
+        return string.IsNullOrEmpty(normalized) ? null : normalized;
     }
 
     public async Task<bool> ApproveAndAdjustStockAsync(int orderId, string approvedBy)

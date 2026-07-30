@@ -69,7 +69,7 @@
     <section class="data-panel">
         <div class="table-responsive">
             <table class="table data-table align-middle">
-                <thead><tr><th>Vị trí</th><th>Sản phẩm</th><th>Lô</th><th class="text-end">Hệ thống</th><th style="min-width: 150px">Đếm thực tế</th></tr></thead>
+                <thead><tr><th>Vị trí</th><th>Sản phẩm</th><th>Lô</th><th class="text-end">Hệ thống</th><th style="min-width: 150px">Đếm thực tế</th><th>Lý do chênh lệch</th></tr></thead>
                 <tbody>
                 @foreach (var item in Model.Items.OrderBy(item => item.Location!.Code).ThenBy(item => item.Lot!.LotNo))
                 {
@@ -89,6 +89,14 @@
                                    min="0"
                                    step="0.01"
                                    value="@item.CountedQty?.ToString(System.Globalization.CultureInfo.InvariantCulture)" />
+                        </td>
+                        <td style="min-width: 220px">
+                            <label class="visually-hidden" for="reason-@item.Id">Lý do chênh lệch cho lô @item.Lot?.LotNo</label>
+                            <textarea id="reason-@item.Id"
+                                      name="itemReasons[@item.Id]"
+                                      class="form-control"
+                                      maxlength="250"
+                                      rows="2">@item.ReasonNote</textarea>
                         </td>
                     </tr>
                 }

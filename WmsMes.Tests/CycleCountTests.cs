@@ -78,6 +78,187 @@ public class CycleCountTests
     }
 
     [Fact]
+    public async Task UpdateCountedQtysAsync_PersistsNormalizedReasonsWithCounts()
+    {
+        await using var context = CreateContext();
+        var (warehouse, firstBalance) =
+            await AddWarehouseBalanceAsync(context, qtyAvailable: 10);
+        await AddAdditionalBalanceAsync(context, warehouse, "SECOND", 8);
+        ICycleCountService service =
+            new CycleCountService(context, new InventoryService(context));
+        var order = await service.CreateOrderAsync(warehouse.Id, "counter-1");
+        var first = order.Items.Single(item =>
+            item.ProductId == firstBalance.ProductId);
+        var second = order.Items.Single(item =>
+            item.ProductId != firstBalance.ProductId);
+
+        var saved = await UpdateCountedQtysWithReasonsAsync(
+            service,
+            order.Id,
+            new Dictionary<int, decimal>
+            {
+                [first.Id] = 7,
+                [second.Id] = 8
+            },
+            new Dictionary<int, string?>
+            {
+                [first.Id] = "  Hư hỏng khi lưu kho  ",
+                [second.Id] = "   "
+            });
+
+        Assert.True(saved);
+        context.ChangeTracker.Clear();
+        var persisted = await context.CycleCountItems
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Equal(7, persisted.Single(item => item.Id == first.Id).CountedQty);
+        Assert.Equal(
+            "Hư hỏng khi lưu kho",
+            persisted.Single(item => item.Id == first.Id).ReasonNote);
+        Assert.Equal(8, persisted.Single(item => item.Id == second.Id).CountedQty);
+        Assert.Null(persisted.Single(item => item.Id == second.Id).ReasonNote);
+        Assert.Equal("Completed", (await context.CycleCountOrders.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task UpdateCountedQtysAsync_RejectsOverlongReasonWithoutPartialUpdate()
+    {
+        await using var context = CreateContext();
+        var (warehouse, firstBalance) =
+            await AddWarehouseBalanceAsync(context, qtyAvailable: 10);
+        await AddAdditionalBalanceAsync(context, warehouse, "SECOND", 8);
+        ICycleCountService service =
+            new CycleCountService(context, new InventoryService(context));
+        var order = await service.CreateOrderAsync(warehouse.Id, "counter-1");
+        var first = order.Items.Single(item =>
+            item.ProductId == firstBalance.ProductId);
+        var second = order.Items.Single(item =>
+            item.ProductId != firstBalance.ProductId);
+
+        var saved = await UpdateCountedQtysWithReasonsAsync(
+            service,
+            order.Id,
+            new Dictionary<int, decimal>
+            {
+                [first.Id] = 7,
+                [second.Id] = 6
+            },
+            new Dictionary<int, string?>
+            {
+                [first.Id] = "Valid reason",
+                [second.Id] = new string('x', 251)
+            });
+
+        Assert.False(saved);
+        context.ChangeTracker.Clear();
+        Assert.All(
+            await context.CycleCountItems.ToListAsync(),
+            item =>
+            {
+                Assert.Null(item.CountedQty);
+                Assert.Null(item.ReasonNote);
+            });
+        Assert.Equal("Draft", (await context.CycleCountOrders.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task UpdateCountedQtysAsync_RejectsReasonForItemOutsideOrderWithoutMutation()
+    {
+        await using var context = CreateContext();
+        var (warehouse, _) =
+            await AddWarehouseBalanceAsync(context, qtyAvailable: 10);
+        ICycleCountService service =
+            new CycleCountService(context, new InventoryService(context));
+        var order = await service.CreateOrderAsync(warehouse.Id, "counter-1");
+        var item = Assert.Single(order.Items);
+
+        var saved = await UpdateCountedQtysWithReasonsAsync(
+            service,
+            order.Id,
+            new Dictionary<int, decimal> { [item.Id] = 7 },
+            new Dictionary<int, string?> { [int.MaxValue] = "Forged" });
+
+        Assert.False(saved);
+        context.ChangeTracker.Clear();
+        var persisted = await context.CycleCountItems.SingleAsync();
+        Assert.Null(persisted.CountedQty);
+        Assert.Null(persisted.ReasonNote);
+        Assert.Equal("Draft", (await context.CycleCountOrders.SingleAsync()).Status);
+    }
+
+    [Theory]
+    [InlineData("Completed")]
+    [InlineData("Approved")]
+    [InlineData("Cancelled")]
+    [InlineData("Unexpected")]
+    public async Task UpdateCountedQtysAsync_RejectsNonEditableOrderWithoutMutation(
+        string status)
+    {
+        await using var context = CreateContext();
+        var (warehouse, _) =
+            await AddWarehouseBalanceAsync(context, qtyAvailable: 10);
+        ICycleCountService service =
+            new CycleCountService(context, new InventoryService(context));
+        var order = await service.CreateOrderAsync(warehouse.Id, "counter-1");
+        var item = Assert.Single(order.Items);
+        var completedAt = new DateTime(2026, 7, 30, 3, 15, 0, DateTimeKind.Utc);
+        order.Status = status;
+        order.CompletedAt = completedAt;
+        await context.SaveChangesAsync();
+
+        var saved = await UpdateCountedQtysWithReasonsAsync(
+            service,
+            order.Id,
+            new Dictionary<int, decimal> { [item.Id] = 7 },
+            new Dictionary<int, string?> { [item.Id] = "Forged update" });
+
+        Assert.False(saved);
+        context.ChangeTracker.Clear();
+        var persisted = await context.CycleCountItems.SingleAsync();
+        Assert.Null(persisted.CountedQty);
+        Assert.Null(persisted.ReasonNote);
+        var persistedOrder = await context.CycleCountOrders.SingleAsync();
+        Assert.Equal(status, persistedOrder.Status);
+        Assert.Equal(completedAt, persistedOrder.CompletedAt);
+    }
+
+    [Fact]
+    public async Task UpdateCountedQtysAsync_WithSqlite_RejectsCompletedOrderAtomically()
+    {
+        var (keepAlive, options) =
+            await CreateSharedSqliteContextOptionsAsync("completed-save");
+        await using (keepAlive)
+        {
+            await SeedCompletedOrderAsync(options, countedQty: 7);
+            await using var context = new ApplicationDbContext(options);
+            var completedAt =
+                new DateTime(2026, 7, 30, 3, 20, 0, DateTimeKind.Utc);
+            await context.CycleCountOrders.ExecuteUpdateAsync(setters => setters
+                .SetProperty(order => order.CompletedAt, completedAt));
+            var service =
+                new CycleCountService(context, new InventoryService(context));
+            var item = await context.CycleCountItems.SingleAsync();
+
+            var saved = await service.UpdateCountedQtysAsync(
+                1,
+                new Dictionary<int, decimal> { [item.Id] = 6 },
+                new Dictionary<int, string?>
+                {
+                    [item.Id] = "Replayed update"
+                });
+
+            Assert.False(saved);
+            context.ChangeTracker.Clear();
+            var persistedItem = await context.CycleCountItems.SingleAsync();
+            Assert.Equal(7, persistedItem.CountedQty);
+            Assert.Null(persistedItem.ReasonNote);
+            var persistedOrder = await context.CycleCountOrders.SingleAsync();
+            Assert.Equal("Completed", persistedOrder.Status);
+            Assert.Equal(completedAt, persistedOrder.CompletedAt);
+        }
+    }
+
+    [Fact]
     public async Task RecordCountResultsAsync_RejectsNegativeBatchWithoutMutatingAnyItem()
     {
         await using var context = CreateContext();
@@ -367,6 +548,18 @@ public class CycleCountTests
             .Options;
 
         return new ApplicationDbContext(options);
+    }
+
+    private static async Task<bool> UpdateCountedQtysWithReasonsAsync(
+        ICycleCountService service,
+        int orderId,
+        Dictionary<int, decimal> itemCounts,
+        Dictionary<int, string?> itemReasons)
+    {
+        return await service.UpdateCountedQtysAsync(
+            orderId,
+            itemCounts,
+            itemReasons);
     }
 
     private static async Task<(Warehouse Warehouse, StockBalance Balance)> AddWarehouseBalanceAsync(ApplicationDbContext context, decimal qtyAvailable)

@@ -63,6 +63,7 @@
                         <th>Số lượng</th>
                         <th>Đơn giá</th>
                         <th>Vị trí</th>
+                        <th>Lý do chênh lệch</th>
                         <th><span class="visually-hidden">Thao tác</span></th>
                     </tr>
                 </thead>
@@ -78,6 +79,10 @@
                         var unitPriceValue = ViewData.ModelState.TryGetValue(unitPriceKey, out var unitPriceEntry)
                             ? unitPriceEntry.AttemptedValue
                             : line.UnitPrice.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        var reasonKey = $"Lines[{index}].VarianceReason";
+                        var reasonValue = ViewData.ModelState.TryGetValue(reasonKey, out var reasonEntry)
+                            ? reasonEntry.AttemptedValue
+                            : line.VarianceReason;
                         <tr data-line-row>
                             <td>
                                 <label class="visually-hidden" data-label-for="ProductId">Sản phẩm</label>
@@ -115,6 +120,15 @@
                                     }
                                 </select>
                                 @Html.ValidationMessage($"Lines[{index}].LocationId", null, new { @class = "text-danger", data_validation_for = "LocationId" })
+                            </td>
+                            <td style="min-width: 220px">
+                                <label class="visually-hidden" data-label-for="VarianceReason">Lý do chênh lệch</label>
+                                <textarea name="Lines[@index].VarianceReason"
+                                          data-field="VarianceReason"
+                                          class="form-control"
+                                          maxlength="250"
+                                          rows="2">@reasonValue</textarea>
+                                @Html.ValidationMessage($"Lines[{index}].VarianceReason", null, new { @class = "text-danger", data_validation_for = "VarianceReason" })
                             </td>
                             <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-line>Xóa dòng</button></td>
                         </tr>
@@ -171,6 +185,10 @@
                 }
             </select>
         </td>
+        <td>
+            <label class="visually-hidden" data-label-for="VarianceReason">Lý do chênh lệch</label>
+            <textarea name="Lines[__index__].VarianceReason" data-field="VarianceReason" class="form-control" maxlength="250" rows="2"></textarea>
+        </td>
         <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-line>Xóa dòng</button></td>
     </tr>
 </template>
@@ -210,6 +228,7 @@
 
         function resetRow(row) {
             row.querySelectorAll('input').forEach(input => input.value = '');
+            row.querySelectorAll('textarea').forEach(textarea => textarea.value = '');
             row.querySelectorAll('select').forEach(select => select.selectedIndex = 0);
         }
 

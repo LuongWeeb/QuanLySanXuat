@@ -1,7 +1,68 @@
+using System.ComponentModel.DataAnnotations;
+using WmsMes.Web.ViewModels;
+
 namespace WmsMes.Tests;
 
 public class InventoryViewTests
 {
+    [Theory]
+    [InlineData(typeof(ReceiptLineInput))]
+    [InlineData(typeof(IssueLineInput))]
+    public void VarianceReason_IsNullableAndLimitedTo250Characters(Type lineType)
+    {
+        var property = lineType.GetProperty("VarianceReason");
+        Assert.NotNull(property);
+        Assert.Equal(typeof(string), property!.PropertyType);
+        Assert.Empty(property.GetCustomAttributes(typeof(RequiredAttribute), true));
+        Assert.Equal(
+            250,
+            Assert.Single(property.GetCustomAttributes(typeof(MaxLengthAttribute), true)
+                .Cast<MaxLengthAttribute>()).Length);
+
+        var line = Activator.CreateInstance(lineType)!;
+        property.SetValue(line, new string('x', 251));
+        var results = new List<ValidationResult>();
+
+        Assert.False(Validator.TryValidateObject(
+            line,
+            new ValidationContext(line),
+            results,
+            validateAllProperties: true));
+        Assert.Contains(results, result =>
+            result.MemberNames.Contains("VarianceReason"));
+    }
+
+    [Theory]
+    [InlineData("CreateReceipt.cshtml", "receipt-line")]
+    [InlineData("CreateIssue.cshtml", "issue-line")]
+    public void TransactionForms_RenderIndexedAccessibleVarianceReasonFields(
+        string fileName,
+        string idPrefix)
+    {
+        var view = ReadInventoryView(fileName);
+
+        Assert.Contains("<th>Lý do chênh lệch</th>", view);
+        Assert.Contains("data-label-for=\"VarianceReason\"", view);
+        Assert.Contains("data-field=\"VarianceReason\"", view);
+        Assert.Contains("maxlength=\"250\"", view);
+        Assert.Contains($"{idPrefix}-${{index}}-${{fieldName}}", view);
+        Assert.Contains("data_validation_for = \"VarianceReason\"", view);
+        Assert.Contains("Lines[__index__].VarianceReason", view);
+    }
+
+    [Theory]
+    [InlineData("CreateReceipt.cshtml")]
+    [InlineData("CreateIssue.cshtml")]
+    public void TransactionForms_ClearVarianceReasonWhenResettingOnlyRow(
+        string fileName)
+    {
+        var view = ReadInventoryView(fileName);
+
+        Assert.Contains(
+            "row.querySelectorAll('textarea').forEach(textarea => textarea.value = '');",
+            view);
+    }
+
     [Theory]
     [InlineData("CreateReceipt.cshtml", "CreateReceiptViewModel", "receipt-lines", "receipt-line-template")]
     [InlineData("CreateIssue.cshtml", "CreateIssueViewModel", "issue-lines", "issue-line-template")]

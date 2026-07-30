@@ -79,11 +79,20 @@ public class CycleCountController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> SaveScan(
         int id,
-        Dictionary<int, decimal> itemCounts)
+        Dictionary<int, decimal> itemCounts,
+        Dictionary<int, string?> itemReasons)
     {
+        if (!ModelState.IsValid)
+        {
+            TempData["ErrorMessage"] =
+                "Không thể lưu kết quả đếm. Vui lòng kiểm tra dữ liệu và thử lại.";
+            return RedirectToAction(nameof(ExecuteScan), new { id });
+        }
+
         var saved = await _countService.UpdateCountedQtysAsync(
             id,
-            itemCounts ?? []);
+            itemCounts ?? [],
+            itemReasons ?? []);
         if (!saved)
         {
             TempData["ErrorMessage"] =
