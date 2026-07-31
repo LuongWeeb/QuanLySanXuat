@@ -45,15 +45,15 @@ public class PackingSlipAndStockValuationTests
                 Id = 5,
                 PackingNo = "PS-20260731-001",
                 SalesOrder = salesOrder,
-                PackageNo = 2,
+                PackageNo = 1,
                 GrossWeight = 18.5m
             });
             context.PackingSlips.Add(new PackingSlip
             {
                 Id = 6,
-                PackingNo = "PS-20260731-002",
+                PackingNo = "PS-20260731-003",
                 SalesOrderId = 2,
-                PackageNo = 1
+                PackageNo = 3
             });
             await context.SaveChangesAsync();
         }
@@ -73,7 +73,7 @@ public class PackingSlipAndStockValuationTests
         Assert.Contains("PS-20260731-001", text);
         Assert.Contains("SO-20260731-001", text);
         Assert.Contains("Khach hang A", text);
-        Assert.Contains("Thùng 2 / 2", text);
+        Assert.Contains("Thùng 1 / 3", text);
         Assert.Contains("SKU-PACK-01", text);
         Assert.Equal("PS-20260731-001", DecodeQr(page));
     }
@@ -86,6 +86,56 @@ public class PackingSlipAndStockValuationTests
         var result = await new PrintController(context).PrintPackingSlip(404);
 
         Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task PrintPackingSlip_StaysOnOnePageAndSignalsTruncatedProductsForLongPackages()
+    {
+        var options = CreateOptions();
+        await using (var context = new ApplicationDbContext(options))
+        {
+            var salesOrder = new SalesOrder
+            {
+                Id = 30,
+                OrderNo = new string('O', 50),
+                Customer = new Customer { Id = 31, Code = "CUS-LONG", Name = new string('C', 250) },
+                DeliveryDate = new DateTime(2026, 8, 1),
+                Items = Enumerable.Range(1, 24).Select(index => new SalesOrderItem
+                {
+                    Id = 100 + index,
+                    Product = new Product
+                    {
+                        Id = 200 + index,
+                        Code = $"SKU-LONG-{index:D2}",
+                        Name = new string('P', 250),
+                        BaseUomId = 1
+                    },
+                    Qty = index,
+                    UnitPrice = 1m
+                }).ToList()
+            };
+            context.PackingSlips.Add(new PackingSlip
+            {
+                Id = 32,
+                PackingNo = "PS-LONG-001",
+                SalesOrder = salesOrder,
+                PackageNo = 1
+            });
+            await context.SaveChangesAsync();
+        }
+
+        await using var assertionContext = new ApplicationDbContext(options);
+        var result = await new PrintController(assertionContext).PrintPackingSlip(32);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        using var pdf = PdfDocument.Open(file.FileContents);
+        var page = Assert.Single(pdf.GetPages());
+        Assert.InRange(page.Width, 283.4, 283.6);
+        Assert.InRange(page.Height, 283.4, 283.6);
+        Assert.Contains("PS-LONG-001", page.Text);
+        Assert.Contains("SKU-LONG-01", page.Text);
+        Assert.Contains("18", page.Text);
+        Assert.Equal("PS-LONG-001", DecodeQr(page));
     }
 
     [Fact]
@@ -139,6 +189,23 @@ public class PackingSlipAndStockValuationTests
         Assert.Equal(
             XLColor.FromHtml("#0D6EFD").Color.ToArgb(),
             worksheet.Range("A3:H3").FirstCell().Style.Fill.BackgroundColor.Color.ToArgb());
+    }
+
+    [Fact]
+    public async Task ExportStockValuationExcel_ProducesValidStandardFontWorkbookWhenNoBalanceIsAvailable()
+    {
+        await using var context = new ApplicationDbContext(CreateOptions());
+
+        var result = await new ReportController(context).ExportStockValuationExcel();
+
+        var file = Assert.IsType<FileContentResult>(result);
+        using var workbook = new XLWorkbook(new MemoryStream(file.FileContents));
+        var worksheet = workbook.Worksheet("Báo cáo Tài chính Kho");
+        Assert.NotEqual("#,##0.00", worksheet.Cell(4, 6).Style.NumberFormat.Format);
+        Assert.Equal("Arial", worksheet.Style.Font.FontName);
+        Assert.Equal("TỔNG CỘNG", worksheet.Cell(4, 7).GetString());
+        Assert.Equal(0m, worksheet.Cell(4, 8).GetValue<decimal>());
+        Assert.Equal("#,##0.00", worksheet.Cell(4, 8).Style.NumberFormat.Format);
     }
 
     [Fact]

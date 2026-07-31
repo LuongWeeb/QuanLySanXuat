@@ -19,6 +19,7 @@ namespace WmsMes.Web.Controllers;
 [ApiController]
 public class PrintController : ControllerBase
 {
+    private const int PackingSlipMaxProductLines = 6;
     private const string CycleCountTitle = "BIÊN BẢN KIỂM KÊ VÀ ĐỐI CHIẾU TỒN KHO";
     private const string ReceiptTitle = "PHIẾU NHẬP KHO";
     private const string IssueTitle = "PHIẾU XUẤT KHO";
@@ -157,10 +158,12 @@ public class PrintController : ControllerBase
 
         var totalPackages = await _context.PackingSlips
             .AsNoTracking()
-            .CountAsync(slip => slip.SalesOrderId == packingSlip.SalesOrderId);
+            .Where(slip => slip.SalesOrderId == packingSlip.SalesOrderId)
+            .Select(slip => (int?)slip.PackageNo)
+            .MaxAsync() ?? packingSlip.PackageNo;
 
         return File(
-            CreatePackingSlipDocument(packingSlip, Math.Max(packingSlip.PackageNo, totalPackages)).GeneratePdf(),
+            CreatePackingSlipDocument(packingSlip, totalPackages).GeneratePdf(),
             "application/pdf",
             $"PhieuDongGoi_{SanitizeFileNameIdentifier(packingSlip.PackingNo)}.pdf");
     }
@@ -384,6 +387,9 @@ public class PrintController : ControllerBase
     private static IDocument CreatePackingSlipDocument(PackingSlip packingSlip, int totalPackages)
     {
         var salesOrder = packingSlip.SalesOrder;
+        var items = salesOrder?.Items
+            .OrderBy(item => item.Product?.Code)
+            .ToList() ?? [];
         var qrCodeBytes = GenerateQrCode(packingSlip.PackingNo);
         return Document.Create(container =>
         {
@@ -395,7 +401,7 @@ public class PrintController : ControllerBase
                 page.Content().Column(column =>
                 {
                     column.Item().AlignCenter().Text("PHIẾU ĐÓNG GÓI").FontSize(13).Bold();
-                    column.Item().AlignCenter().Text(packingSlip.PackingNo).FontSize(10).Bold();
+                    column.Item().AlignCenter().Text(Abbreviate(packingSlip.PackingNo, 28)).FontSize(10).Bold();
                     column.Item().PaddingTop(2, Unit.Millimetre).Row(row =>
                     {
                         row.ConstantItem(30, Unit.Millimetre)
@@ -404,17 +410,30 @@ public class PrintController : ControllerBase
                             .FitArea();
                         row.RelativeItem().PaddingLeft(3, Unit.Millimetre).Column(details =>
                         {
-                            details.Item().Text($"Đơn hàng: {salesOrder?.OrderNo ?? "N/A"}").SemiBold();
-                            details.Item().Text($"Khách hàng: {salesOrder?.Customer?.Name ?? "N/A"}");
+                            details.Item().Text($"Đơn hàng: {Abbreviate(salesOrder?.OrderNo ?? "N/A", 18)}").SemiBold();
+                            details.Item().Text($"Khách hàng: {Abbreviate(salesOrder?.Customer?.Name ?? "N/A", 24)}");
                             details.Item().Text($"Thùng {packingSlip.PackageNo} / {totalPackages}").Bold();
                             details.Item().Text($"Khối lượng: {FormatQuantity(packingSlip.GrossWeight)} kg");
                         });
                     });
                     column.Item().PaddingTop(2, Unit.Millimetre).Text("SẢN PHẨM").SemiBold();
-                    foreach (var item in salesOrder?.Items.OrderBy(item => item.Product?.Code) ?? Enumerable.Empty<SalesOrderItem>())
+                    foreach (var item in items.Take(PackingSlipMaxProductLines))
                     {
-                        column.Item().PaddingLeft(1, Unit.Millimetre).Text(
-                            $"• {item.Product?.Code ?? "N/A"} - {item.Product?.Name ?? string.Empty}: {FormatQuantity(item.Qty)}");
+                        column.Item().PaddingLeft(1, Unit.Millimetre)
+                            .DefaultTextStyle(style => style.FontSize(6))
+                            .Text(text =>
+                            {
+                                text.Span("• ");
+                                text.Span(Abbreviate(item.Product?.Code ?? "N/A", 16)).SemiBold();
+                                text.Span($" - {Abbreviate(item.Product?.Name ?? string.Empty, 24)}: {FormatQuantity(item.Qty)}");
+                            });
+                    }
+                    if (items.Count > PackingSlipMaxProductLines)
+                    {
+                        column.Item().PaddingLeft(1, Unit.Millimetre)
+                            .Text($"Còn {items.Count - PackingSlipMaxProductLines} sản phẩm")
+                            .Italic()
+                            .FontSize(6);
                     }
                 });
             });

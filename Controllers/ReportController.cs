@@ -29,6 +29,7 @@ public class ReportController : Controller
         var balances = await GetStockValuationBalancesAsync();
         using var workbook = new XLWorkbook();
         var worksheet = workbook.Worksheets.Add(WorksheetName);
+        worksheet.Style.Font.FontName = "Arial";
 
         worksheet.Range("A1:H1").Merge();
         worksheet.Cell(1, 1).Value = "BÁO CÁO GIÁ TRỊ TỒN KHO & TÀI CHÍNH";
@@ -70,7 +71,10 @@ public class ReportController : Controller
             row++;
         }
 
-        worksheet.Range(4, 6, row - 1, 8).Style.NumberFormat.Format = "#,##0.00";
+        if (balances.Count > 0)
+        {
+            worksheet.Range(4, 6, row - 1, 8).Style.NumberFormat.Format = "#,##0.00";
+        }
         worksheet.Cell(row, 7).Value = "TỔNG CỘNG";
         worksheet.Cell(row, 8).Value = totalValue;
         worksheet.Range(row, 7, row, 8).Style.Font.Bold = true;
