@@ -1,5 +1,6 @@
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Services;
@@ -34,7 +35,7 @@ public class SupplyChainReportsTests : IClassFixture<InventoryCancellationWebApp
                 OrderNo = "SO-PICK-001",
                 CustomerId = 5,
                 DeliveryDate = new DateTime(2026, 8, 1),
-                Items = [new SalesOrderItem { Product = product, Qty = 11m }]
+                Items = [new SalesOrderItem { Product = product, Qty = 9m }]
             });
             context.StockBalances.AddRange(
                 new StockBalance
@@ -73,23 +74,39 @@ public class SupplyChainReportsTests : IClassFixture<InventoryCancellationWebApp
             ["LOC-A-01", "LOC-A-10", "LOC-B-05"],
             pickList!.Items.OrderBy(item => item.SequenceOrder).Select(item => locationsById[item.LocationId]));
         Assert.Equal([1, 2, 3], pickList.Items.OrderBy(item => item.SequenceOrder).Select(item => item.SequenceOrder));
+        Assert.Equal([3m, 4m, 2m], pickList.Items.OrderBy(item => item.SequenceOrder).Select(item => item.QtyToPick));
+        Assert.Equal(9m, pickList.Items.Sum(item => item.QtyToPick));
     }
 
     [Fact]
     public async Task ExportStockValuationExcel_ReturnsValidSpreadsheet()
     {
+        await SeedExportStockBalanceAsync();
         using var client = _factory.CreateInventoryClient("Warehouse");
-
-        var response = await client.GetAsync("/Report/ExportStockValuationExcel");
+        using var response = await client.GetAsync("/Report/ExportStockValuationExcel");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             response.Content.Headers.ContentType?.MediaType);
+        Assert.NotNull(response.Content.Headers.ContentDisposition);
+        Assert.EndsWith(
+            ".xlsx",
+            response.Content.Headers.ContentDisposition!.FileName!.Trim('"'),
+            StringComparison.OrdinalIgnoreCase);
         using var workbook = new XLWorkbook(new MemoryStream(await response.Content.ReadAsByteArrayAsync()));
         var worksheet = Assert.Single(workbook.Worksheets);
         Assert.Equal("Báo cáo Tài chính Kho", worksheet.Name);
-        Assert.Equal("TỔNG CỘNG", worksheet.Cell(4, 7).GetString());
+        Assert.Equal("SKU-EXPORT", worksheet.Cell(4, 1).GetString());
+        Assert.Equal("Export product", worksheet.Cell(4, 2).GetString());
+        Assert.Equal("Export warehouse", worksheet.Cell(4, 3).GetString());
+        Assert.Equal("LOC-EXPORT-01", worksheet.Cell(4, 4).GetString());
+        Assert.Equal(12.5m, worksheet.Cell(4, 6).GetValue<decimal>());
+        Assert.Equal(1_234.56m, worksheet.Cell(4, 7).GetValue<decimal>());
+        Assert.Equal(15_432m, worksheet.Cell(4, 8).GetValue<decimal>());
+        Assert.Equal("#,##0.00", worksheet.Cell(4, 6).Style.NumberFormat.Format);
+        Assert.Equal("#,##0.00", worksheet.Cell(4, 7).Style.NumberFormat.Format);
+        Assert.Equal("#,##0.00", worksheet.Cell(4, 8).Style.NumberFormat.Format);
     }
 
     [Fact]
@@ -119,5 +136,23 @@ public class SupplyChainReportsTests : IClassFixture<InventoryCancellationWebApp
         return new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
+    }
+
+    private async Task SeedExportStockBalanceAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        await using var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var warehouse = new Warehouse { Id = 9_001, Code = "WH-EXPORT", Name = "Export warehouse" };
+        var zone = new Zone { Id = 9_002, Warehouse = warehouse, Code = "ZONE-EXPORT", Name = "Export zone" };
+        var product = new Product { Id = 9_003, Code = "SKU-EXPORT", Name = "Export product", BaseUomId = 1 };
+        context.StockBalances.Add(new StockBalance
+        {
+            Id = 9_004,
+            Product = product,
+            Lot = new Lot { Id = 9_005, Product = product, LotNo = "LOT-EXPORT", UnitPrice = 1_234.56m },
+            Location = new Location { Id = 9_006, Zone = zone, Code = "LOC-EXPORT-01", Name = "Export location" },
+            QtyAvailable = 12.5m
+        });
+        await context.SaveChangesAsync();
     }
 }
