@@ -43,6 +43,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<SalesOrderItem> SalesOrderItems { get; set; }
 
+    public DbSet<PickList> PickLists { get; set; } = null!;
+
+    public DbSet<PickListItem> PickListItems { get; set; } = null!;
+
+    public DbSet<PackingSlip> PackingSlips { get; set; } = null!;
+
+    public DbSet<AppNotification> AppNotifications { get; set; } = null!;
+
     public DbSet<PurchaseRequest> PurchaseRequests { get; set; }
 
     public DbSet<PurchaseRequestItem> PurchaseRequestItems { get; set; }
@@ -245,6 +253,50 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .HasOne(item => item.Product)
             .WithMany()
             .HasForeignKey(item => item.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<PickList>()
+            .HasIndex(list => list.PickListNo)
+            .IsUnique();
+
+        builder.Entity<PickList>()
+            .HasOne(list => list.SalesOrder)
+            .WithMany()
+            .HasForeignKey(list => list.SalesOrderId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<PickList>()
+            .HasMany(list => list.Items)
+            .WithOne(item => item.PickList)
+            .HasForeignKey(item => item.PickListId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<PickListItem>()
+            .HasOne(item => item.Product)
+            .WithMany()
+            .HasForeignKey(item => item.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<PickListItem>()
+            .HasOne(item => item.Location)
+            .WithMany()
+            .HasForeignKey(item => item.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<PickListItem>()
+            .HasOne(item => item.Lot)
+            .WithMany()
+            .HasForeignKey(item => item.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<PackingSlip>()
+            .HasIndex(slip => slip.PackingNo)
+            .IsUnique();
+
+        builder.Entity<PackingSlip>()
+            .HasOne(slip => slip.SalesOrder)
+            .WithMany()
+            .HasForeignKey(slip => slip.SalesOrderId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<PurchaseRequestItem>()

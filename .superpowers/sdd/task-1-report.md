@@ -1,92 +1,93 @@
-# Task 1 Report: FEFO/FIFO Picking Recommendation
+# Task 1 Report — Phase 9 Data Structure & Migration
 
-## Scope delivered
+## Status
 
-Implemented only Task 1 from `task-1-brief.md`:
+Completed on 2026-07-31 in worktree `comprehensive-supply-chain-reports`.
 
-- Added `PickingStrategy` (`FEFO`, `FIFO`) and `PickingRecommendationDto`.
-- Added `IInventoryService.GetPickingRecommendationsAsync(int, decimal, PickingStrategy)`.
-- Implemented non-mutating recommendations from available stock, excluding `QcService.QuarantineLocationCode`.
-- FEFO orders by expiry (missing expiry last) then manufacture date; FIFO orders by manufacture date then `StockBalance.Id`.
-- Allocates `RecommendedQty` until `requiredQty` is fulfilled, while retaining actual `AvailableQty`.
-- Added `GET api/inventory/picking-recommendations` returning `200 OK` with service results.
-- Did not implement or modify any Cycle Counting / Task 2 behavior.
+## Changes
 
-`Lot.ManufactureDate` is nullable in the existing entity while the required DTO property is not; the mapping uses `DateTime.MinValue` when no manufacture date exists.
+- Added `PickList`, `PickListItem`, `PackingSlip`, and `AppNotification` entities.
+- Registered the four `DbSet`s and explicit EF Core mappings.
+- Added unique indexes for `PickListNo` and `PackingNo`, preserving the PK/PS document-number identifiers for later service generation.
+- Configured `PickList -> PickListItem` as cascade delete; business-reference foreign keys use `Restrict` to prevent deleting a SalesOrder, Product, Lot, or Location that is referenced by fulfillment documents.
+- Generated migration `AddPhase9SupplyChainAndNotificationTables` and updated the model snapshot.
+- Added model-first tests for schema mappings, relationships, unique document numbers, and default entity values.
 
-## Files changed
+## Files
 
-- `DTOs/PickingRecommendationDto.cs` (new)
-- `Services/IInventoryService.cs`
-- `Services/InventoryService.cs`
-- `Controllers/InventoryController.cs`
-- `WmsMes.Tests/FifoFefoPickingTests.cs` (new)
+- `Domain/Entities/PickList.cs`
+- `Domain/Entities/PickListItem.cs`
+- `Domain/Entities/PackingSlip.cs`
+- `Domain/Entities/AppNotification.cs`
+- `Data/ApplicationDbContext.cs`
+- `Data/Migrations/20260731061027_AddPhase9SupplyChainAndNotificationTables.cs`
+- `Data/Migrations/20260731061027_AddPhase9SupplyChainAndNotificationTables.Designer.cs`
+- `Data/Migrations/ApplicationDbContextModelSnapshot.cs`
+- `WmsMes.Tests/SupplyChainSchemaTests.cs`
 
 ## TDD evidence
 
-### RED: service contract/algorithm tests
+### RED
 
 Command:
 
 ```powershell
-dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~SupplyChainSchemaTests --no-restore
 ```
 
-Result: exit code `1`; compilation failed at each service test with expected `CS1061`: `InventoryService` did not contain `GetPickingRecommendationsAsync`.
+Result: exit code 1; 0 passed, 2 failed. Both failures were `Assert.NotNull() Failure: Value is null` in `SupplyChainSchemaTests.AssertEntity`, because `PickList` and the other Phase 9 entity types were not registered in the EF model.
 
-### GREEN: service implementation
+### GREEN
 
-Command:
+Same focused command after the minimal entities and mappings were added.
+
+Result: exit code 0; 2 passed, 0 failed, 0 skipped.
+
+## Migration and database update
+
+Generated with:
 
 ```powershell
-dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
+dotnet ef migrations add AddPhase9SupplyChainAndNotificationTables
 ```
 
-Result: exit code `0`; `Passed: 3, Failed: 0`.
+Result: build succeeded; generated `20260731061027_AddPhase9SupplyChainAndNotificationTables` plus designer and snapshot changes. Manual inspection confirmed all four intended tables, decimal `(18,2)` columns, required/nullability constraints, unique document-number indexes, required foreign keys, correct restrict/cascade delete behavior, and reversible `Down` operations.
 
-### RED: API endpoint test
-
-Command:
+Database update command:
 
 ```powershell
-dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
+dotnet ef database update
 ```
 
-Result: exit code `1`; compilation failed with expected `CS1061`: `InventoryController` did not contain `GetPickingRecommendations`.
+Result: exit code 0. LocalDB applied `20260730113038_EnforceOperationsIntegrityInvariants` (it was already pending) and then applied `20260731061027_AddPhase9SupplyChainAndNotificationTables` successfully.
 
-### GREEN: endpoint implementation and review coverage
-
-Commands:
+Model/migration consistency check:
 
 ```powershell
-dotnet test WmsMes.sln --filter "FullyQualifiedName~FifoFefoPickingTests"
-dotnet test WmsMes.sln
+dotnet ef migrations has-pending-model-changes --project WmsMes.Web.csproj --startup-project WmsMes.Web.csproj
 ```
 
-Results:
+Result: build succeeded; no pending model changes.
 
-- Focused post-endpoint run: exit code `0`; `Passed: 4, Failed: 0`.
-- After adding review-requested tie-breaker/null-expiry coverage: focused run exit code `0`; `Passed: 6, Failed: 0`.
-- Fresh full-suite run: exit code `0`; `Passed: 120, Failed: 0, Skipped: 0`.
+## Full verification
 
-The final full-suite command was run outside the filesystem sandbox after the sandboxed process was denied read access to the user NuGet config; the same command then restored successfully and ran all tests.
+```powershell
+dotnet build WmsMes.sln --no-restore
+dotnet test WmsMes.Tests\WmsMes.Tests.csproj --no-restore
+```
 
-## Test coverage
-
-- FEFO chooses earliest expiry and splits a quantity request across balances.
-- FIFO chooses earliest manufacture date.
-- FEFO uses manufacture date when expiry dates tie and places no-expiry lots last.
-- FIFO uses `StockBalance.Id` when manufacture dates tie.
-- Quarantine balances are excluded.
-- Controller delegates exact inputs to `IInventoryService` and returns `Ok` with its result.
+- Build: exit code 0, 0 warnings, 0 errors.
+- Tests: exit code 0, 619 passed, 0 failed, 0 skipped.
 
 ## Self-review
 
-- Confirmed signature, DTO fields, route, FEFO/FIFO sort clauses, allocation, and quarantine exclusion against every Task 1 requirement.
-- Confirmed the recommendation query uses `AsNoTracking`, so an API call cannot mutate inventory.
-- Ran `git diff --check`: no whitespace errors.
-- Independent review reported no Critical or Important issues. Its Minor test-coverage finding (tie-breakers and null expiry) was addressed by the final two tests.
+- `git diff --check` is clean.
+- New entity fields, defaults, max lengths, decimal precision, table names, relationships, and indexes match the approved Task 1 brief and existing repository conventions.
+- Migration contains no unrelated schema operations and its snapshot agrees with the current model.
+- Changes are limited to Task 1 schema, migration, and its direct tests/report.
 
 ## Concerns
 
-None. The endpoint follows existing controller behavior by throwing a clear exception only if the optional constructor dependency is omitted; normal DI registration supplies `IInventoryService`.
+- Current `DocumentStatus` contains `Draft`, `Completed`, and `Cancelled`; it does not contain the design document's narrative `InProgress` value. Task 1 preserves the existing enum and only requires the `Draft` default, so this is left for a separately scoped decision if workflow state progression needs `InProgress`.
+- PK/PS format generation belongs to later service/controller work. Task 1 reserves sufficient length and enforces uniqueness for those document numbers.
+- The LocalDB update advanced one previously pending migration in addition to Phase 9; no production/external database was targeted.
