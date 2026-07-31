@@ -133,3 +133,78 @@ Passed!  - Failed:     0, Passed:   326, Skipped:     0, Total:   326
 ### Valuation fallback review
 
 The issue path retains `lot?.UnitPrice ?? 0m`. `LotId` is a required foreign key and normal posting therefore guarantees a lot, so no behavior change was made solely for the theoretically missing lot. The fallback remains a review concern: if referential integrity is bypassed, it silently records a zero valuation rather than failing fast.
+
+---
+
+# Task 2 Report — Pick List & Notification Services
+
+## Status
+
+Implemented `PickListService`, `NotificationService`, and authenticated SignalR `NotificationHub` in the comprehensive supply-chain reports worktree.
+
+## Changes
+
+- Added `IPickListService` and `PickListService`.
+  - Returns `null` for an unknown sales order.
+  - Allocates available `StockBalance` rows until each undelivered order-item demand is met.
+  - Does not create negative demand/allocation when `DeliveredQty >= Qty`.
+  - Sorts every generated pick line by `Zone.Code`, then `Location.Code`, and assigns contiguous sequence numbers.
+  - Generates `PK-YYYYMMDD-XXX` identifiers. The database's existing unique index is the final integrity guard; on a `DbUpdateException` collision, allocation re-queries and retries up to 10 times.
+- Added `INotificationService` and `NotificationService`.
+  - Persists unread notifications, counts unread notifications, and gets newest-first recent notifications.
+  - Broadcasts persisted notifications to all connected notification-hub clients using `ReceiveNotification`.
+- Added `[Authorize] NotificationHub` at `/notificationHub` with no client-callable broadcast methods.
+- Registered both new services in DI.
+- Added seven focused tests covering allocation/order, delivered-quantity guard, missing order, document number format/sequential uniqueness, persistence/unread, recent ordering, SignalR event, DI, and hub route.
+
+## TDD Evidence
+
+### RED
+
+```powershell
+dotnet test WmsMes.Tests/WmsMes.Tests.csproj --filter FullyQualifiedName~SupplyChainReportServiceTests --no-restore
+```
+
+Result: failed as intended with `CS0246` for missing `PickListService`, `NotificationService`, and `NotificationHub` references in the newly added behavior tests.
+
+### GREEN
+
+```powershell
+dotnet test WmsMes.Tests/WmsMes.Tests.csproj --filter FullyQualifiedName~SupplyChainReportServiceTests --no-restore
+```
+
+Result: `Passed: 7, Failed: 0`.
+
+## Verification
+
+```powershell
+dotnet build WmsMes.sln --no-restore
+# Build succeeded. 0 Warning(s), 0 Error(s)
+
+dotnet test WmsMes.sln --no-build --no-restore
+# Passed: 626, Failed: 0, Skipped: 0
+```
+
+The full test run emits existing test-host JWT options-validation logs while exercising startup-validation scenarios, but exits 0 with all 626 tests passing.
+
+## Files
+
+- `Services/IPickListService.cs`
+- `Services/PickListService.cs`
+- `Services/INotificationService.cs`
+- `Services/NotificationService.cs`
+- `Hubs/NotificationHub.cs`
+- `Program.cs`
+- `WmsMes.Tests/SupplyChainReportServiceTests.cs`
+
+## Self-review
+
+- Confirmed the pick-list format follows the global `PK-YYYYMMDD-XXX` constraint rather than the timestamp sample.
+- Confirmed SignalR is durable-first: notification is saved before the realtime event is sent.
+- Confirmed no webhook or Telegram integration was introduced.
+- Confirmed whitespace check is clean with `git diff --check`.
+
+## Concerns
+
+- Notification producers (QC reject, low stock, and completed work orders/plans) are intentionally not wired here; that integration belongs to the corresponding later feature tasks.
+- The retry protects against normal unique-index races; sustained contention exceeding 10 consecutive collisions throws instead of risking a duplicate number.

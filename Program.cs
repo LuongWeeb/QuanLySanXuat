@@ -119,6 +119,8 @@ builder.Services.AddScoped<IProductionPlanService, ProductionPlanService>();
 builder.Services.AddScoped<IPurchaseRequestService, PurchaseRequestService>();
 builder.Services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();
 builder.Services.AddScoped<ISalesOrderService, SalesOrderService>();
+builder.Services.AddScoped<IPickListService, PickListService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IWorkOrderService, WorkOrderService>();
 builder.Services.AddScoped<IOeeService, OeeService>();
 builder.Services.AddScoped<ICostingService, CostingService>();
@@ -159,6 +161,7 @@ app.MapControllerRoute(
 app.MapHub<InventoryHub>("/inventoryHub");
 app.MapHub<ProductionHub>("/productionHub");
 app.MapHub<QualityHub>("/qualityHub");
+app.MapHub<NotificationHub>("/notificationHub");
 
 if (DatabaseInitializationPolicy.ShouldInitialize(args, builder.Configuration))
 {
