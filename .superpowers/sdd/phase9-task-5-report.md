@@ -52,3 +52,26 @@
 ## Scope
 
 No PackingSlip workflow, webhook, Telegram integration, or remote dependencies were added.
+
+## Review follow-up
+
+### Findings fixed
+
+- Moved `#notification-live-region` ahead of the notification IIFE so the listener captures a real DOM node. The listener remains payload-safe: titles/messages are assigned through `textContent`, links require a safe local URL, and the live region receives a plain-text announcement.
+- Reworked stock valuation into a typed `StockValuationViewModel` with warehouse/product choice lists and selected filters. `StockValuation` and `ExportStockValuationExcel` accept optional `warehouseId` and `productId` and both use the same `BuildStockValuationQuery` predicate, preventing view/export filter drift.
+- Added accessible warehouse/product select labels, apply/reset controls, and an export link that preserves the active filters.
+- Replaced Pick List create's unbounded `Include(order.Items)` with a small `PickListSalesOrderOptionViewModel`. The query offers only Draft orders that are not fully delivered and excludes Completed/Cancelled orders; it projects only identifier, order number, customer name, and remaining quantity.
+
+### Follow-up TDD evidence
+
+1. RED: `Layout_PlacesLiveRegionBeforeTheNotificationListenerReadsIt` failed because the live-region markup occurred after the listener's `getElementById` call. GREEN after moving the markup.
+2. RED: warehouse-filtered HTML and XLSX tests each found the excluded SKU because filters were ignored. GREEN after adding shared filter query construction.
+3. RED: `PickListCreate_OffersOnlyActionableSalesOrdersWithoutLoadingTheirItemsIntoTheView` found four orders including completed/cancelled/fully delivered rows. GREEN after the actionable projection.
+
+Additional regression coverage verifies product filtering and preserved export parameters, no-filter behavior, the typed stock-valuation model, and the `ReceiveNotification` payload/DOM safety contract.
+
+Fresh verification after the review follow-up:
+
+1. `dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~PickListUiIntegrationTests --no-restore` — 19 passed.
+2. `dotnet build WmsMes.sln --no-restore` — 0 warnings, 0 errors.
+3. `dotnet test WmsMes.Tests\WmsMes.Tests.csproj --no-restore --no-build` — 661 passed, 0 failed. Expected JWT startup-validation negative-test logs remain present.

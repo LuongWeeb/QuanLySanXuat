@@ -1,8 +1,8 @@
-@model IReadOnlyList<WmsMes.Web.Domain.Entities.StockBalance>
+@model WmsMes.Web.ViewModels.StockValuationViewModel
 @{
     ViewData["Title"] = "Báo cáo Tài chính Kho";
-    var totalValue = Model.Sum(balance => balance.QtyAvailable * (balance.Lot?.UnitPrice ?? 0m));
-    var totalQuantity = Model.Sum(balance => balance.QtyAvailable);
+    var totalValue = Model.Balances.Sum(balance => balance.QtyAvailable * (balance.Lot?.UnitPrice ?? 0m));
+    var totalQuantity = Model.Balances.Sum(balance => balance.QtyAvailable);
 }
 
 <section class="toolbar-row">
@@ -11,11 +11,41 @@
         <h2>Giá trị tồn kho</h2>
         <p class="text-muted mb-0">Giá trị dựa trên tồn khả dụng và đơn giá vốn của từng lô.</p>
     </div>
-    <a class="btn btn-primary" asp-action="ExportStockValuationExcel">Xuất Báo cáo Excel</a>
+    <a class="btn btn-primary" asp-action="ExportStockValuationExcel" asp-route-warehouseId="@Model.WarehouseId" asp-route-productId="@Model.ProductId">Xuất Báo cáo Excel</a>
+</section>
+
+<section class="ops-panel mb-3" aria-labelledby="stock-valuation-filter-heading">
+    <h3 class="section-title" id="stock-valuation-filter-heading">Bộ lọc báo cáo</h3>
+    <form asp-action="StockValuation" method="get" class="row g-3 align-items-end mt-1">
+        <div class="col-md-5">
+            <label class="form-label" for="warehouseId">Kho</label>
+            <select class="form-select" id="warehouseId" name="warehouseId">
+                <option value="">Tất cả kho</option>
+                @foreach (var warehouse in Model.Warehouses)
+                {
+                    <option value="@warehouse.Id" selected="@(Model.WarehouseId == warehouse.Id)">@warehouse.Code — @warehouse.Name</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-5">
+            <label class="form-label" for="productId">Sản phẩm</label>
+            <select class="form-select" id="productId" name="productId">
+                <option value="">Tất cả sản phẩm</option>
+                @foreach (var product in Model.Products)
+                {
+                    <option value="@product.Id" selected="@(Model.ProductId == product.Id)">@product.Code — @product.Name</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-2 d-flex flex-wrap gap-2">
+            <button class="btn btn-outline-primary" type="submit">Áp dụng</button>
+            <a class="btn btn-outline-secondary" asp-action="StockValuation">Đặt lại</a>
+        </div>
+    </form>
 </section>
 
 <div class="metric-grid">
-    <article class="metric-card"><span>Dòng tồn khả dụng</span><strong>@Model.Count.ToVietnameseNumber()</strong></article>
+    <article class="metric-card"><span>Dòng tồn khả dụng</span><strong>@Model.Balances.Count.ToVietnameseNumber()</strong></article>
     <article class="metric-card"><span>Tổng số lượng</span><strong>@totalQuantity.ToVietnameseNumber()</strong></article>
     <article class="metric-card"><span>Tổng giá trị</span><strong>@totalValue.ToVietnameseNumber() VNĐ</strong></article>
 </div>
@@ -26,7 +56,7 @@
             <caption class="visually-hidden">Chi tiết giá trị tồn kho khả dụng</caption>
             <thead><tr><th scope="col">SKU</th><th scope="col">Sản phẩm</th><th scope="col">Kho / Vị trí</th><th scope="col">Lô</th><th scope="col" class="text-end">Tồn khả dụng</th><th scope="col" class="text-end">Đơn giá vốn</th><th scope="col" class="text-end">Giá trị</th></tr></thead>
             <tbody>
-            @foreach (var balance in Model)
+            @foreach (var balance in Model.Balances)
             {
                 var unitPrice = balance.Lot?.UnitPrice ?? 0m;
                 <tr>
@@ -39,12 +69,12 @@
                     <td class="text-end fw-semibold">@((balance.QtyAvailable * unitPrice).ToVietnameseNumber()) VNĐ</td>
                 </tr>
             }
-            @if (Model.Count == 0)
+            @if (Model.Balances.Count == 0)
             {
                 <tr><td colspan="7" class="p-0"><div class="empty-state compact"><h3 class="h5">Không có tồn khả dụng</h3><p class="mb-0">Báo cáo sẽ có dữ liệu khi kho phát sinh tồn khả dụng.</p></div></td></tr>
             }
             </tbody>
-            @if (Model.Count > 0)
+            @if (Model.Balances.Count > 0)
             {
                 <tfoot><tr><th colspan="4" class="text-end">Tổng cộng</th><th class="text-end">@totalQuantity.ToVietnameseNumber()</th><th></th><th class="text-end">@totalValue.ToVietnameseNumber() VNĐ</th></tr></tfoot>
             }

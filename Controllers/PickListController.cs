@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using WmsMes.Web.Data;
 using WmsMes.Web.Services;
+using WmsMes.Web.ViewModels;
 
 namespace WmsMes.Web.Controllers;
 
@@ -87,13 +88,22 @@ public class PickListController : Controller
 
     private async Task LoadSalesOrdersAsync(int? selectedId = null)
     {
-        ViewBag.SalesOrders = await _context.SalesOrders
+        ViewData["SalesOrders"] = await _context.SalesOrders
             .AsNoTracking()
-            .Include(order => order.Customer)
-            .Include(order => order.Items)
-            .OrderByDescending(order => order.OrderDate)
-            .ThenByDescending(order => order.Id)
+            .Where(order => order.Status != WmsMes.Web.Domain.Enums.DocumentStatus.Completed
+                && order.Status != WmsMes.Web.Domain.Enums.DocumentStatus.Cancelled
+                && order.Items.Any(item => item.Qty > item.DeliveredQty))
+            .Select(order => new PickListSalesOrderOptionViewModel
+            {
+                Id = order.Id,
+                OrderNo = order.OrderNo,
+                CustomerName = order.Customer!.Name,
+                RemainingQuantity = order.Items
+                    .Where(item => item.Qty > item.DeliveredQty)
+                    .Sum(item => item.Qty - item.DeliveredQty)
+            })
+            .OrderByDescending(order => order.Id)
             .ToListAsync();
-        ViewBag.SelectedSalesOrderId = selectedId;
+        ViewData["SelectedSalesOrderId"] = selectedId;
     }
 }

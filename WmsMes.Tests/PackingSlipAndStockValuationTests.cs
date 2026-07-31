@@ -9,6 +9,7 @@ using UglyToad.PdfPig;
 using WmsMes.Web.Controllers;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.ViewModels;
 using ZXing;
 using ZXing.Common;
 
@@ -154,8 +155,8 @@ public class PackingSlipAndStockValuationTests : IClassFixture<PdfFontRegistrati
         var result = await new ReportController(context).StockValuation();
 
         var view = Assert.IsType<ViewResult>(result);
-        var balances = Assert.IsAssignableFrom<IReadOnlyList<StockBalance>>(view.Model);
-        Assert.Equal(["SKU-A", "SKU-B"], balances.Select(balance => balance.Product!.Code));
+        var model = Assert.IsType<StockValuationViewModel>(view.Model);
+        Assert.Equal(["SKU-A", "SKU-B"], model.Balances.Select(balance => balance.Product!.Code));
     }
 
     [Fact]

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.ViewModels;
 
 namespace WmsMes.Web.Controllers;
 
@@ -18,15 +19,23 @@ public class ReportController : Controller
         _context = context;
     }
 
-    public async Task<IActionResult> StockValuation()
+    public async Task<IActionResult> StockValuation(int? warehouseId = null, int? productId = null)
     {
-        return View(await GetStockValuationBalancesAsync());
+        var model = new StockValuationViewModel
+        {
+            Balances = await GetStockValuationBalancesAsync(warehouseId, productId),
+            Warehouses = await GetWarehousesAsync(),
+            Products = await GetProductsAsync(),
+            WarehouseId = warehouseId,
+            ProductId = productId
+        };
+        return View(model);
     }
 
     [HttpGet]
-    public async Task<IActionResult> ExportStockValuationExcel()
+    public async Task<IActionResult> ExportStockValuationExcel(int? warehouseId = null, int? productId = null)
     {
-        var balances = await GetStockValuationBalancesAsync();
+        var balances = await GetStockValuationBalancesAsync(warehouseId, productId);
         using var workbook = new XLWorkbook();
         var worksheet = workbook.Worksheets.Add(WorksheetName);
         worksheet.Style.Font.FontName = "Arial";
@@ -89,21 +98,56 @@ public class ReportController : Controller
             $"BaoCao_TaiChinh_Kho_{DateTime.UtcNow:yyyyMMdd}.xlsx");
     }
 
-    private Task<List<StockBalance>> GetStockValuationBalancesAsync()
+    private Task<List<Warehouse>> GetWarehousesAsync()
     {
-        return _context.StockBalances
+        return _context.Warehouses
             .AsNoTracking()
-            .Include(balance => balance.Product)
-            .Include(balance => balance.Lot)
-            .Include(balance => balance.Location)
-                .ThenInclude(location => location!.Zone)
-                    .ThenInclude(zone => zone!.Warehouse)
-            .Where(balance => balance.QtyAvailable > 0)
+            .Where(warehouse => warehouse.IsActive)
+            .OrderBy(warehouse => warehouse.Code)
+            .ToListAsync();
+    }
+
+    private Task<List<Product>> GetProductsAsync()
+    {
+        return _context.Products
+            .AsNoTracking()
+            .Where(product => product.IsActive)
+            .OrderBy(product => product.Code)
+            .ToListAsync();
+    }
+
+    private Task<List<StockBalance>> GetStockValuationBalancesAsync(int? warehouseId, int? productId)
+    {
+        return BuildStockValuationQuery(warehouseId, productId)
             .OrderBy(balance => balance.Product!.Code)
             .ThenBy(balance => balance.Location!.Zone!.Warehouse!.Code)
             .ThenBy(balance => balance.Location!.Code)
             .ThenBy(balance => balance.Lot!.LotNo)
             .ThenBy(balance => balance.Id)
             .ToListAsync();
+    }
+
+    private IQueryable<StockBalance> BuildStockValuationQuery(int? warehouseId, int? productId)
+    {
+        var query = _context.StockBalances
+            .AsNoTracking()
+            .Include(balance => balance.Product)
+            .Include(balance => balance.Lot)
+            .Include(balance => balance.Location)
+                .ThenInclude(location => location!.Zone)
+                    .ThenInclude(zone => zone!.Warehouse)
+            .Where(balance => balance.QtyAvailable > 0);
+
+        if (warehouseId.HasValue)
+        {
+            query = query.Where(balance => balance.Location!.Zone!.WarehouseId == warehouseId.Value);
+        }
+
+        if (productId.HasValue)
+        {
+            query = query.Where(balance => balance.ProductId == productId.Value);
+        }
+
+        return query;
     }
 }

@@ -1,8 +1,8 @@
-@using WmsMes.Web.Domain.Entities
+@using WmsMes.Web.ViewModels
 @{
     ViewData["Title"] = "Tạo danh sách lấy hàng";
-    var salesOrders = ViewBag.SalesOrders as IEnumerable<SalesOrder> ?? [];
-    var selectedSalesOrderId = ViewBag.SelectedSalesOrderId as int?;
+    var salesOrders = ViewData["SalesOrders"] as IEnumerable<PickListSalesOrderOptionViewModel> ?? [];
+    var selectedSalesOrderId = ViewData["SelectedSalesOrderId"] as int?;
 }
 
 <section class="toolbar-row">
@@ -21,8 +21,7 @@
                 <option value="">-- Chọn đơn bán hàng --</option>
                 @foreach (var order in salesOrders)
                 {
-                    var remaining = order.Items.Sum(item => Math.Max(0m, item.Qty - item.DeliveredQty));
-                    <option value="@order.Id" selected="@(selectedSalesOrderId == order.Id)">@order.OrderNo — @order.Customer?.Name (còn @remaining.ToVietnameseNumber())</option>
+                    <option value="@order.Id" selected="@(selectedSalesOrderId == order.Id)">@order.OrderNo — @order.CustomerName (còn @order.RemainingQuantity.ToVietnameseNumber())</option>
                 }
             </select>
             <span class="text-danger" data-valmsg-for="salesOrderId" data-valmsg-replace="true"></span>
