@@ -138,6 +138,33 @@ public class PrintController : ControllerBase
         return File(document.GeneratePdf(), "application/pdf");
     }
 
+    [HttpGet("packingslip/{id:int}")]
+    public async Task<IActionResult> PrintPackingSlip(int id)
+    {
+        var packingSlip = await _context.PackingSlips
+            .AsNoTracking()
+            .Include(slip => slip.SalesOrder)
+                .ThenInclude(order => order!.Customer)
+            .Include(slip => slip.SalesOrder)
+                .ThenInclude(order => order!.Items)
+                    .ThenInclude(item => item.Product)
+            .SingleOrDefaultAsync(slip => slip.Id == id);
+
+        if (packingSlip is null)
+        {
+            return NotFound("Phiếu đóng gói không tồn tại.");
+        }
+
+        var totalPackages = await _context.PackingSlips
+            .AsNoTracking()
+            .CountAsync(slip => slip.SalesOrderId == packingSlip.SalesOrderId);
+
+        return File(
+            CreatePackingSlipDocument(packingSlip, Math.Max(packingSlip.PackageNo, totalPackages)).GeneratePdf(),
+            "application/pdf",
+            $"PhieuDongGoi_{SanitizeFileNameIdentifier(packingSlip.PackingNo)}.pdf");
+    }
+
     [HttpGet("cyclecount/{id:int}")]
     [Authorize(Roles = "Admin,Warehouse,Manager")]
     public async Task<IActionResult> PrintCycleCount(int id)
@@ -350,6 +377,46 @@ public class PrintController : ControllerBase
                 });
 
                 AddPageFooter(page);
+            });
+        });
+    }
+
+    private static IDocument CreatePackingSlipDocument(PackingSlip packingSlip, int totalPackages)
+    {
+        var salesOrder = packingSlip.SalesOrder;
+        var qrCodeBytes = GenerateQrCode(packingSlip.PackingNo);
+        return Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Size(new PageSize(100, 100, Unit.Millimetre));
+                page.Margin(5, Unit.Millimetre);
+                page.DefaultTextStyle(style => style.FontSize(7));
+                page.Content().Column(column =>
+                {
+                    column.Item().AlignCenter().Text("PHIẾU ĐÓNG GÓI").FontSize(13).Bold();
+                    column.Item().AlignCenter().Text(packingSlip.PackingNo).FontSize(10).Bold();
+                    column.Item().PaddingTop(2, Unit.Millimetre).Row(row =>
+                    {
+                        row.ConstantItem(30, Unit.Millimetre)
+                            .AlignCenter()
+                            .Image(qrCodeBytes)
+                            .FitArea();
+                        row.RelativeItem().PaddingLeft(3, Unit.Millimetre).Column(details =>
+                        {
+                            details.Item().Text($"Đơn hàng: {salesOrder?.OrderNo ?? "N/A"}").SemiBold();
+                            details.Item().Text($"Khách hàng: {salesOrder?.Customer?.Name ?? "N/A"}");
+                            details.Item().Text($"Thùng {packingSlip.PackageNo} / {totalPackages}").Bold();
+                            details.Item().Text($"Khối lượng: {FormatQuantity(packingSlip.GrossWeight)} kg");
+                        });
+                    });
+                    column.Item().PaddingTop(2, Unit.Millimetre).Text("SẢN PHẨM").SemiBold();
+                    foreach (var item in salesOrder?.Items.OrderBy(item => item.Product?.Code) ?? Enumerable.Empty<SalesOrderItem>())
+                    {
+                        column.Item().PaddingLeft(1, Unit.Millimetre).Text(
+                            $"• {item.Product?.Code ?? "N/A"} - {item.Product?.Name ?? string.Empty}: {FormatQuantity(item.Qty)}");
+                    }
+                });
             });
         });
     }
