@@ -1,5 +1,9 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
@@ -71,6 +75,76 @@ public class SupplyChainReportServiceTests
     }
 
     [Fact]
+    public async Task CreatePickListForSalesOrderAsync_OrdersEqualLocationCodesByLotId()
+    {
+        await using var context = CreateContext();
+        await SeedPickListOrderAsync(context, orderId: 1, quantity: 2m);
+        context.StockBalances.AddRange(
+            new StockBalance { ProductId = 1, LotId = 3, LocationId = 1, QtyAvailable = 1m },
+            new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 1m });
+        await context.SaveChangesAsync();
+
+        var pickList = await new PickListService(context).CreatePickListForSalesOrderAsync(1);
+
+        Assert.Equal([1, 3], pickList!.Items.OrderBy(item => item.SequenceOrder).Select(item => item.LotId));
+    }
+
+    [Fact]
+    public async Task CreatePickListForSalesOrderAsync_FailsBeforePersistingWhenDailyNumberRangeIsExhausted()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = await CreateRelationalContextAsync(connection);
+        await SeedPickListOrderAsync(context, orderId: 1, quantity: 1m);
+        var prefix = $"PK-{DateTime.UtcNow:yyyyMMdd}-";
+        context.PickLists.AddRange(Enumerable.Range(1, 999).Select(sequence => new PickList
+        {
+            PickListNo = $"{prefix}{sequence:000}",
+            SalesOrderId = 1
+        }));
+        await context.SaveChangesAsync();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new PickListService(context).CreatePickListForSalesOrderAsync(1));
+
+        Assert.Contains("exhausted", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(999, await context.PickLists.CountAsync());
+    }
+
+    [Fact]
+    public async Task PickListNumbers_AreActuallyUniqueInTheRelationalDatabase()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = await CreateRelationalContextAsync(connection);
+        await SeedPickListOrderAsync(context, orderId: 1, quantity: 1m);
+        var number = $"PK-{DateTime.UtcNow:yyyyMMdd}-001";
+        context.PickLists.Add(new PickList { PickListNo = number, SalesOrderId = 1 });
+        await context.SaveChangesAsync();
+        context.PickLists.Add(new PickList { PickListNo = number, SalesOrderId = 1 });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task CreatePickListForSalesOrderAsync_DoesNotRetryAnUnrelatedDatabaseUpdateError()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        await using (var seedContext = CreateContext(databaseName))
+        {
+            await SeedPickListOrderAsync(seedContext, orderId: 1, quantity: 1m);
+        }
+
+        var interceptor = new UnrelatedDbUpdateExceptionInterceptor();
+        await using var context = CreateContext(databaseName, interceptor);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() =>
+            new PickListService(context).CreatePickListForSalesOrderAsync(1));
+
+        Assert.Equal(1, interceptor.SaveAttempts);
+    }
+
+    [Fact]
     public async Task SendNotificationAsync_PersistsUnreadNotificationAndBroadcastsRealtimeEvent()
     {
         await using var context = CreateContext();
@@ -79,7 +153,11 @@ public class SupplyChainReportServiceTests
                 "ReceiveNotification",
                 It.IsAny<object?[]>(),
                 It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .Returns(() =>
+            {
+                Assert.Single(context.AppNotifications);
+                return Task.CompletedTask;
+            });
         var clients = new Mock<IHubClients>();
         clients.SetupGet(items => items.All).Returns(client.Object);
         var hub = new Mock<IHubContext<NotificationHub>>();
@@ -103,9 +181,9 @@ public class SupplyChainReportServiceTests
     {
         await using var context = CreateContext();
         context.AppNotifications.AddRange(
-            new AppNotification { Title = "old", Message = "old", CreatedAt = new DateTime(2026, 7, 1), IsRead = false },
-            new AppNotification { Title = "read", Message = "read", CreatedAt = new DateTime(2026, 7, 2), IsRead = true },
-            new AppNotification { Title = "new", Message = "new", CreatedAt = new DateTime(2026, 7, 3), IsRead = false });
+            new AppNotification { Id = 1, Title = "old", Message = "old", CreatedAt = new DateTime(2026, 7, 1), IsRead = false },
+            new AppNotification { Id = 2, Title = "read", Message = "read", CreatedAt = new DateTime(2026, 7, 3), IsRead = true },
+            new AppNotification { Id = 3, Title = "new", Message = "new", CreatedAt = new DateTime(2026, 7, 3), IsRead = false });
         await context.SaveChangesAsync();
         var service = new NotificationService(context);
 
@@ -117,19 +195,41 @@ public class SupplyChainReportServiceTests
     }
 
     [Fact]
-    public void Program_RegistersSupplyChainReportServicesAndNotificationHub()
+    public void NotificationHub_RequiresAuthorizedConnections()
     {
-        var program = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Program.cs"));
-
-        Assert.Contains("AddScoped<IPickListService, PickListService>()", program);
-        Assert.Contains("AddScoped<INotificationService, NotificationService>()", program);
-        Assert.Contains("MapHub<NotificationHub>(\"/notificationHub\")", program);
+        Assert.NotNull(typeof(NotificationHub)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+            .SingleOrDefault());
     }
 
-    private static ApplicationDbContext CreateContext() => new(
+    [Fact]
+    public void ApplicationServices_ResolveRegisteredSupplyChainServices()
+    {
+        using var factory = new InventoryCancellationWebApplicationFactory();
+        using var scope = factory.Services.CreateScope();
+
+        Assert.IsType<PickListService>(scope.ServiceProvider.GetRequiredService<IPickListService>());
+        Assert.IsType<NotificationService>(scope.ServiceProvider.GetRequiredService<INotificationService>());
+    }
+
+    private static ApplicationDbContext CreateContext() => CreateContext(Guid.NewGuid().ToString());
+
+    private static ApplicationDbContext CreateContext(
+        string databaseName,
+        params IInterceptor[] interceptors) => new(
         new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .UseInMemoryDatabase(databaseName)
+            .AddInterceptors(interceptors)
             .Options);
+
+    private static async Task<ApplicationDbContext> CreateRelationalContextAsync(SqliteConnection connection)
+    {
+        var context = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options);
+        await context.Database.EnsureCreatedAsync();
+        return context;
+    }
 
     private static async Task SeedPickListOrderAsync(
         ApplicationDbContext context,
@@ -141,6 +241,7 @@ public class SupplyChainReportServiceTests
         {
             context.UnitOfMeasures.Add(new UnitOfMeasure { Id = 1, Code = "PCS", Name = "Pieces" });
             context.Products.Add(new Product { Id = 1, Code = "ITEM-01", Name = "Item", BaseUomId = 1 });
+            context.Customers.Add(new Customer { Id = 1, Code = "CUS", Name = "Customer" });
             context.Warehouses.Add(new Warehouse { Id = 1, Code = "WH", Name = "Warehouse" });
             context.Zones.AddRange(
                 new Zone { Id = 1, WarehouseId = 1, Code = "A", Name = "A" },
@@ -164,5 +265,19 @@ public class SupplyChainReportServiceTests
             Items = { new SalesOrderItem { ProductId = 1, Qty = quantity, DeliveredQty = deliveredQuantity } }
         });
         await context.SaveChangesAsync();
+    }
+
+    private sealed class UnrelatedDbUpdateExceptionInterceptor : SaveChangesInterceptor
+    {
+        public int SaveAttempts { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            SaveAttempts++;
+            throw new DbUpdateException("Simulated unrelated database update failure.");
+        }
     }
 }

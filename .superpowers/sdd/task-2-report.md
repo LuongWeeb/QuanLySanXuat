@@ -208,3 +208,59 @@ The full test run emits existing test-host JWT options-validation logs while exe
 
 - Notification producers (QC reject, low stock, and completed work orders/plans) are intentionally not wired here; that integration belongs to the corresponding later feature tasks.
 - The retry protects against normal unique-index races; sustained contention exceeding 10 consecutive collisions throws instead of risking a duplicate number.
+
+---
+
+## Review-fix follow-up
+
+### Changes
+
+- Enforced the `001..999` daily pick-list range. A full range raises `InvalidOperationException` before a new list is tracked or persisted, so `PK-YYYYMMDD-1000` cannot be generated.
+- Retry is now restricted to a verified number collision: SQL Server errors 2601/2627 and SQLite constraint errors are provider-aware candidates, then the database is queried `AsNoTracking` for the exact attempted `PickListNo`. Other update errors are rethrown immediately.
+- Added deterministic allocation tie-breakers: `LocationId`, `ProductId`, `LotId`, and `StockBalance.Id` after zone/location code.
+- Added `ThenByDescending(Id)` to recent notification ordering.
+- Replaced the brittle Program source-text test with a real DI resolution test. Added reflection coverage for `[Authorize]` and a hub callback assertion proving persistence occurs before publish.
+- Added SQLite in-memory tests proving the model's unique `PickListNo` constraint and the 999-number exhaustion guard under a relational provider.
+
+### RED
+
+Command:
+
+```powershell
+dotnet test WmsMes.Tests/WmsMes.Tests.csproj --filter FullyQualifiedName~SupplyChainReportServiceTests --no-restore
+```
+
+Result before the fixes: `Failed: 3, Passed: 9`.
+
+- Exhaustion test failed because no exception was thrown (the prior code generated a fourth-digit suffix).
+- Equal-timestamp recent notifications returned `read, new` rather than `new, read`.
+- A simulated unrelated `DbUpdateException` observed 10 save attempts rather than 1.
+
+The SQLite unique-constraint test is a relational characterization test and was already green, confirming the test exercises real database enforcement rather than EF InMemory behavior.
+
+### GREEN
+
+Same focused command after the fixes:
+
+```text
+Passed!  - Failed:     0, Passed:    12, Skipped:     0
+```
+
+### Covering verification
+
+```powershell
+dotnet build WmsMes.sln --no-restore
+# Build succeeded. 0 Warning(s), 0 Error(s)
+
+dotnet test WmsMes.sln --no-build --no-restore
+# Passed: 631, Failed: 0, Skipped: 0
+```
+
+The full suite emits existing test-host Data Protection/JWT startup-validation logs, but exits 0 with all 631 tests passing.
+
+### Review-fix files
+
+- `Services/PickListService.cs`
+- `Services/NotificationService.cs`
+- `WmsMes.Tests/SupplyChainReportServiceTests.cs`
+- `.superpowers/sdd/task-2-report.md`

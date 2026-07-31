@@ -52,6 +52,7 @@ public class NotificationService : INotificationService
         return await _context.AppNotifications
             .AsNoTracking()
             .OrderByDescending(notification => notification.CreatedAt)
+            .ThenByDescending(notification => notification.Id)
             .Take(take)
             .ToListAsync();
     }
