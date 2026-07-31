@@ -1,0 +1,53 @@
+@model WmsMes.Web.Domain.Entities.PickList
+@{
+    ViewData["Title"] = $"Pick List {Model.PickListNo}";
+    var orderedItems = Model.Items.OrderBy(item => item.SequenceOrder).ThenBy(item => item.Id).ToList();
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Kho · Hướng dẫn lấy hàng</p>
+        <h2>@Model.PickListNo</h2>
+        <p class="text-muted mb-0">SO @Model.SalesOrder?.OrderNo · @Model.SalesOrder?.Customer?.Name</p>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+        <span class="status-pill @(Model.Status == WmsMes.Web.Domain.Enums.DocumentStatus.Completed ? "is-active" : "is-muted")">@Model.Status.ToVietnameseString()</span>
+        <a class="btn btn-outline-secondary" asp-action="Index">Quay lại</a>
+    </div>
+</section>
+
+@if (TempData["StatusMessage"] is string message)
+{
+    <div class="alert alert-success" role="status">@message</div>
+}
+
+<div class="metric-grid">
+    <article class="metric-card"><span>Dòng cần lấy</span><strong>@orderedItems.Count.ToVietnameseNumber()</strong></article>
+    <article class="metric-card"><span>Tổng cần lấy</span><strong>@orderedItems.Sum(item => item.QtyToPick).ToVietnameseNumber()</strong></article>
+    <article class="metric-card"><span>Đã lấy</span><strong>@orderedItems.Sum(item => item.PickedQty).ToVietnameseNumber()</strong></article>
+</div>
+
+<section class="data-panel mt-3">
+    <div class="table-responsive">
+        <table class="table data-table align-middle mb-0">
+            <caption class="visually-hidden">Thứ tự lấy hàng theo lộ trình đã tối ưu</caption>
+            <thead><tr><th scope="col">Thứ tự</th><th scope="col">Vị trí</th><th scope="col">Sản phẩm / lô</th><th scope="col" class="text-end">Cần lấy</th><th scope="col" class="text-end">Đã lấy</th></tr></thead>
+            <tbody>
+            @foreach (var item in orderedItems)
+            {
+                <tr>
+                    <td><span class="badge text-bg-primary rounded-pill">@item.SequenceOrder</span></td>
+                    <td><code>@item.Location?.Zone?.Code / @item.Location?.Code</code></td>
+                    <td>@item.Product?.Code — @item.Product?.Name <span class="table-subtext">Lô: @item.Lot?.LotNo</span></td>
+                    <td class="text-end fw-semibold">@item.QtyToPick.ToVietnameseNumber()</td>
+                    <td class="text-end">@item.PickedQty.ToVietnameseNumber()</td>
+                </tr>
+            }
+            @if (orderedItems.Count == 0)
+            {
+                <tr><td colspan="5" class="p-0"><div class="empty-state compact"><h3 class="h5">Không còn hàng cần lấy</h3><p class="mb-0">Đơn bán hàng này đã được giao đủ hoặc không có tồn khả dụng.</p></div></td></tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</section>

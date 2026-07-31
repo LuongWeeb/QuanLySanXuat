@@ -1,3 +1,18 @@
+@using WmsMes.Web.Domain.Entities
+@using WmsMes.Web.Services
+@inject INotificationService NotificationService
+@{
+    var isAuthenticated = User.Identity?.IsAuthenticated == true;
+    var unreadNotificationCount = 0;
+    var recentNotifications = Array.Empty<AppNotification>();
+    if (isAuthenticated)
+    {
+        unreadNotificationCount = await NotificationService.GetUnreadCountAsync();
+        recentNotifications = (await NotificationService.GetRecentNotificationsAsync()).ToArray();
+    }
+
+    var currentController = ViewContext.RouteData.Values["controller"]?.ToString();
+}
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -31,6 +46,13 @@
             <a asp-controller="Inventory" asp-action="Issues">Xuất kho</a>
             <a asp-controller="Warehouse" asp-action="Index">Kho & Vị trí</a>
             <a asp-controller="CycleCount" asp-action="Index">Kiểm kê kho (Stocktake)</a>
+            @if (User.IsInRole("Admin") || User.IsInRole("Warehouse") || User.IsInRole("Manager"))
+            {
+                <a class="@(currentController == "PickList" ? "active" : null)" asp-controller="PickList" asp-action="Index">Danh sách lấy hàng</a>
+            }
+
+            <div class="nav-section-title">Báo cáo &amp; Phân tích</div>
+            <a class="@(currentController == "Report" ? "active" : null)" asp-controller="Report" asp-action="StockValuation">Báo cáo Tài chính Kho</a>
 
             <div class="nav-section-title">Quản lý Sản xuất (MES)</div>
             @if (User.IsInRole("Admin") || User.IsInRole("Planner") || User.IsInRole("Manager"))
@@ -67,9 +89,46 @@
                            style="max-width: 250px" placeholder="Tìm SKU, lệnh SX, số lô..." />
                     <button class="btn btn-outline-primary btn-sm" type="submit">Tìm</button>
                 </form>
-                @if (User.Identity?.IsAuthenticated == true)
+                @if (isAuthenticated)
                 {
-                    <span class="user-chip">@User.Identity.Name</span>
+                    <div class="dropdown">
+                        <button class="btn btn-link position-relative p-1 text-decoration-none" type="button"
+                                id="notificationDropdown" data-bs-toggle="dropdown" aria-expanded="false"
+                                aria-label="Thông báo hệ thống">
+                            <span aria-hidden="true" class="fs-5">&#128276;</span>
+                            <span id="unread-count" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger @(unreadNotificationCount == 0 ? "d-none" : null)"
+                                  aria-label="@unreadNotificationCount thông báo chưa đọc">@unreadNotificationCount</span>
+                        </button>
+                        <div class="dropdown-menu dropdown-menu-end p-0 notification-menu" aria-labelledby="notificationDropdown">
+                            <div class="d-flex align-items-center justify-content-between px-3 py-2">
+                                <strong>Thông báo hệ thống</strong>
+                                <span class="small text-muted">Mới nhất</span>
+                            </div>
+                            <div class="dropdown-divider my-0"></div>
+                            <div id="notification-list" aria-label="Danh sách thông báo gần đây">
+                                @foreach (var notification in recentNotifications)
+                                {
+                                    var isSafeReferenceUrl = !string.IsNullOrWhiteSpace(notification.ReferenceUrl)
+                                        && notification.ReferenceUrl.StartsWith('/')
+                                        && !notification.ReferenceUrl.StartsWith("//", StringComparison.Ordinal)
+                                        && !notification.ReferenceUrl.Contains('\\');
+                                    <div class="notification-item px-3 py-2">
+                                        <div class="d-flex justify-content-between gap-2"><strong class="small">@notification.Title</strong><time class="small text-muted text-nowrap" datetime="@notification.CreatedAt.ToUniversalTime().ToString("O")">@notification.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm")</time></div>
+                                        <div class="small text-muted">@notification.Message</div>
+                                        @if (isSafeReferenceUrl)
+                                        {
+                                            <a class="small stretched-link" href="@notification.ReferenceUrl">Xem chi tiết</a>
+                                        }
+                                    </div>
+                                }
+                                @if (recentNotifications.Length == 0)
+                                {
+                                    <p class="text-muted small text-center mb-0 px-3 py-3" id="notification-empty">Chưa có thông báo mới.</p>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    <span class="user-chip">@User.Identity?.Name</span>
                     <form asp-controller="Auth" asp-action="Logout" method="post">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Đăng xuất</button>
                     </form>
@@ -86,6 +145,84 @@
     </div>
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    @if (isAuthenticated)
+    {
+        <script src="~/lib/microsoft-signalr/8.0.0/signalr.min.js"></script>
+        <script>
+            (() => {
+                const badge = document.getElementById("unread-count");
+                const list = document.getElementById("notification-list");
+                const liveRegion = document.getElementById("notification-live-region");
+                if (!badge || !list || !window.signalR) return;
+
+                const isSafeReferenceUrl = value => typeof value === "string"
+                    && value.startsWith("/") && !value.startsWith("//") && !value.includes("\\");
+                const updateBadge = change => {
+                    const count = Math.max(0, Number.parseInt(badge.textContent, 10) || 0) + change;
+                    badge.textContent = String(count);
+                    badge.classList.toggle("d-none", count === 0);
+                    badge.setAttribute("aria-label", `${count} thông báo chưa đọc`);
+                };
+                const renderNotification = notification => {
+                    const empty = document.getElementById("notification-empty");
+                    empty?.remove();
+                    const item = document.createElement("div");
+                    item.className = "notification-item px-3 py-2";
+                    const heading = document.createElement("strong");
+                    heading.className = "small";
+                    heading.textContent = notification.title || "Thông báo hệ thống";
+                    const time = document.createElement("time");
+                    time.className = "small text-muted text-nowrap";
+                    const createdAt = notification.createdAt ? new Date(notification.createdAt) : new Date();
+                    time.dateTime = createdAt.toISOString();
+                    time.textContent = createdAt.toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+                    const header = document.createElement("div");
+                    header.className = "d-flex justify-content-between gap-2";
+                    header.append(heading, time);
+                    const message = document.createElement("div");
+                    message.className = "small text-muted";
+                    message.textContent = notification.message || "";
+                    item.append(header, message);
+                    if (isSafeReferenceUrl(notification.referenceUrl)) {
+                        const link = document.createElement("a");
+                        link.className = "small stretched-link";
+                        link.href = notification.referenceUrl;
+                        link.textContent = "Xem chi tiết";
+                        item.append(link);
+                    }
+                    list.prepend(item);
+                    while (list.querySelectorAll(".notification-item").length > 5) list.lastElementChild?.remove();
+                };
+
+                const connection = new signalR.HubConnectionBuilder()
+                    .withUrl("/notificationHub")
+                    .withAutomaticReconnect()
+                    .build();
+                connection.on("ReceiveNotification", notification => {
+                    renderNotification(notification || {});
+                    if (!notification?.isRead) updateBadge(1);
+                    if (liveRegion) liveRegion.textContent = `${notification?.title || "Thông báo hệ thống"}: ${notification?.message || ""}`;
+                });
+
+                let retryAttempt = 0;
+                let retryTimer;
+                const start = async () => {
+                    window.clearTimeout(retryTimer);
+                    try {
+                        await connection.start();
+                        retryAttempt = 0;
+                    } catch (error) {
+                        const delay = Math.min(30000, 1000 * (2 ** retryAttempt));
+                        retryAttempt = Math.min(retryAttempt + 1, 5);
+                        retryTimer = window.setTimeout(start, delay);
+                    }
+                };
+                connection.onclose(() => start());
+                start();
+            })();
+        </script>
+    }
+    <div id="notification-live-region" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
     <script src="~/js/site.js" asp-append-version="true"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

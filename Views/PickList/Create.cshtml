@@ -1,0 +1,45 @@
+@using WmsMes.Web.Domain.Entities
+@{
+    ViewData["Title"] = "Tạo danh sách lấy hàng";
+    var salesOrders = ViewBag.SalesOrders as IEnumerable<SalesOrder> ?? [];
+    var selectedSalesOrderId = ViewBag.SelectedSalesOrderId as int?;
+}
+
+<section class="toolbar-row">
+    <div><p class="eyebrow">Kho · Fulfillment</p><h2>Tạo danh sách lấy hàng</h2></div>
+    <a class="btn btn-outline-secondary" asp-action="Index">Quay lại danh sách</a>
+</section>
+
+<section class="ops-panel" aria-labelledby="pick-list-form-heading">
+    <h3 class="section-title" id="pick-list-form-heading">Chọn đơn bán hàng</h3>
+    <p class="muted-text mt-2">Hệ thống sẽ lấy tồn khả dụng và sắp xếp theo khu vực, vị trí để giảm quãng đường di chuyển.</p>
+    <form asp-action="Create" method="post" class="mt-4">
+        <div asp-validation-summary="ModelOnly" class="text-danger mb-3" role="alert"></div>
+        <div class="mb-3">
+            <label class="form-label" for="salesOrderId">Đơn bán hàng</label>
+            <select class="form-select" id="salesOrderId" name="salesOrderId" required aria-describedby="salesOrderHelp">
+                <option value="">-- Chọn đơn bán hàng --</option>
+                @foreach (var order in salesOrders)
+                {
+                    var remaining = order.Items.Sum(item => Math.Max(0m, item.Qty - item.DeliveredQty));
+                    <option value="@order.Id" selected="@(selectedSalesOrderId == order.Id)">@order.OrderNo — @order.Customer?.Name (còn @remaining.ToVietnameseNumber())</option>
+                }
+            </select>
+            <span class="text-danger" data-valmsg-for="salesOrderId" data-valmsg-replace="true"></span>
+            <div class="form-text" id="salesOrderHelp">Chỉ dữ liệu của đơn được chọn được gửi lên máy chủ.</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-primary" type="submit">Tạo Pick List</button>
+            <a class="btn btn-outline-secondary" asp-action="Index">Hủy</a>
+        </div>
+    </form>
+</section>
+
+@if (!salesOrders.Any())
+{
+    <div class="alert alert-info mt-3" role="status">Chưa có đơn bán hàng để tạo danh sách lấy hàng.</div>
+}
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

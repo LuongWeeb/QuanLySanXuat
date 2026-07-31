@@ -1,0 +1,53 @@
+@model IReadOnlyList<WmsMes.Web.Domain.Entities.StockBalance>
+@{
+    ViewData["Title"] = "Báo cáo Tài chính Kho";
+    var totalValue = Model.Sum(balance => balance.QtyAvailable * (balance.Lot?.UnitPrice ?? 0m));
+    var totalQuantity = Model.Sum(balance => balance.QtyAvailable);
+}
+
+<section class="toolbar-row">
+    <div>
+        <p class="eyebrow">Báo cáo · Giá vốn</p>
+        <h2>Giá trị tồn kho</h2>
+        <p class="text-muted mb-0">Giá trị dựa trên tồn khả dụng và đơn giá vốn của từng lô.</p>
+    </div>
+    <a class="btn btn-primary" asp-action="ExportStockValuationExcel">Xuất Báo cáo Excel</a>
+</section>
+
+<div class="metric-grid">
+    <article class="metric-card"><span>Dòng tồn khả dụng</span><strong>@Model.Count.ToVietnameseNumber()</strong></article>
+    <article class="metric-card"><span>Tổng số lượng</span><strong>@totalQuantity.ToVietnameseNumber()</strong></article>
+    <article class="metric-card"><span>Tổng giá trị</span><strong>@totalValue.ToVietnameseNumber() VNĐ</strong></article>
+</div>
+
+<section class="data-panel mt-3">
+    <div class="table-responsive">
+        <table class="table data-table align-middle mb-0">
+            <caption class="visually-hidden">Chi tiết giá trị tồn kho khả dụng</caption>
+            <thead><tr><th scope="col">SKU</th><th scope="col">Sản phẩm</th><th scope="col">Kho / Vị trí</th><th scope="col">Lô</th><th scope="col" class="text-end">Tồn khả dụng</th><th scope="col" class="text-end">Đơn giá vốn</th><th scope="col" class="text-end">Giá trị</th></tr></thead>
+            <tbody>
+            @foreach (var balance in Model)
+            {
+                var unitPrice = balance.Lot?.UnitPrice ?? 0m;
+                <tr>
+                    <td><code>@balance.Product?.Code</code></td>
+                    <td>@balance.Product?.Name</td>
+                    <td>@balance.Location?.Zone?.Warehouse?.Name <span class="table-subtext">@balance.Location?.Code</span></td>
+                    <td><code>@balance.Lot?.LotNo</code></td>
+                    <td class="text-end">@balance.QtyAvailable.ToVietnameseNumber()</td>
+                    <td class="text-end">@unitPrice.ToVietnameseNumber() VNĐ</td>
+                    <td class="text-end fw-semibold">@((balance.QtyAvailable * unitPrice).ToVietnameseNumber()) VNĐ</td>
+                </tr>
+            }
+            @if (Model.Count == 0)
+            {
+                <tr><td colspan="7" class="p-0"><div class="empty-state compact"><h3 class="h5">Không có tồn khả dụng</h3><p class="mb-0">Báo cáo sẽ có dữ liệu khi kho phát sinh tồn khả dụng.</p></div></td></tr>
+            }
+            </tbody>
+            @if (Model.Count > 0)
+            {
+                <tfoot><tr><th colspan="4" class="text-end">Tổng cộng</th><th class="text-end">@totalQuantity.ToVietnameseNumber()</th><th></th><th class="text-end">@totalValue.ToVietnameseNumber() VNĐ</th></tr></tfoot>
+            }
+        </table>
+    </div>
+</section>
