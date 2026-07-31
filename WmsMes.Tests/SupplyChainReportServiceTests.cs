@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
+using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.Hubs;
 using WmsMes.Web.Services;
 
@@ -34,7 +35,7 @@ public class SupplyChainReportServiceTests
     }
 
     [Fact]
-    public async Task CreatePickListForSalesOrderAsync_DoesNotAllocateWhenDeliveredQuantityMeetsOrderQuantity()
+    public async Task CreatePickListForSalesOrderAsync_ReturnsNullAndDoesNotPersistWhenDeliveredQuantityMeetsOrderQuantity()
     {
         await using var context = CreateContext();
         await SeedPickListOrderAsync(context, orderId: 1, quantity: 5m, deliveredQuantity: 5m);
@@ -43,8 +44,37 @@ public class SupplyChainReportServiceTests
 
         var pickList = await new PickListService(context).CreatePickListForSalesOrderAsync(1);
 
-        Assert.NotNull(pickList);
-        Assert.Empty(pickList!.Items);
+        Assert.Null(pickList);
+        Assert.Empty(await context.PickLists.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreatePickListForSalesOrderAsync_ReturnsNullAndDoesNotPersistWhenNoStockCanBeAllocated()
+    {
+        await using var context = CreateContext();
+        await SeedPickListOrderAsync(context, orderId: 1, quantity: 5m);
+
+        var pickList = await new PickListService(context).CreatePickListForSalesOrderAsync(1);
+
+        Assert.Null(pickList);
+        Assert.Empty(await context.PickLists.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(DocumentStatus.Completed)]
+    [InlineData(DocumentStatus.Cancelled)]
+    public async Task CreatePickListForSalesOrderAsync_ReturnsNullAndDoesNotPersistForNonDraftOrder(
+        DocumentStatus status)
+    {
+        await using var context = CreateContext();
+        await SeedPickListOrderAsync(context, orderId: 1, quantity: 5m, status: status);
+        context.StockBalances.Add(new StockBalance { ProductId = 1, LotId = 1, LocationId = 1, QtyAvailable = 5m });
+        await context.SaveChangesAsync();
+
+        var pickList = await new PickListService(context).CreatePickListForSalesOrderAsync(1);
+
+        Assert.Null(pickList);
+        Assert.Empty(await context.PickLists.ToListAsync());
     }
 
     [Fact]
@@ -63,6 +93,7 @@ public class SupplyChainReportServiceTests
         await using var context = CreateContext();
         await SeedPickListOrderAsync(context, orderId: 1, quantity: 1m);
         await SeedPickListOrderAsync(context, orderId: 2, quantity: 1m);
+        await SeedPickableStockAsync(context);
 
         var service = new PickListService(context);
         var first = await service.CreatePickListForSalesOrderAsync(1);
@@ -97,6 +128,7 @@ public class SupplyChainReportServiceTests
         await connection.OpenAsync();
         await using var context = await CreateRelationalContextAsync(connection);
         await SeedPickListOrderAsync(context, orderId: 1, quantity: 1m);
+        await SeedPickableStockAsync(context);
         var prefix = $"PK-{now:yyyyMMdd}-";
         context.PickLists.AddRange(Enumerable.Range(1, 999).Select(sequence => new PickList
         {
@@ -127,6 +159,7 @@ public class SupplyChainReportServiceTests
         await using (var seedContext = await CreateRelationalContextAsync(connection))
         {
             await SeedPickListOrderAsync(seedContext, orderId: 1, quantity: 1m);
+            await SeedPickableStockAsync(seedContext);
         }
 
         var interceptor = new InsertCompetingPickListInterceptor(connectionString);
@@ -164,6 +197,7 @@ public class SupplyChainReportServiceTests
         await using (var seedContext = CreateContext(databaseName))
         {
             await SeedPickListOrderAsync(seedContext, orderId: 1, quantity: 1m);
+            await SeedPickableStockAsync(seedContext);
         }
 
         var interceptor = new UnrelatedDbUpdateExceptionInterceptor();
@@ -269,7 +303,8 @@ public class SupplyChainReportServiceTests
         ApplicationDbContext context,
         int orderId,
         decimal quantity,
-        decimal deliveredQuantity = 0m)
+        decimal deliveredQuantity = 0m,
+        DocumentStatus status = DocumentStatus.Draft)
     {
         if (!await context.Products.AnyAsync())
         {
@@ -296,7 +331,20 @@ public class SupplyChainReportServiceTests
             OrderNo = $"SO-{orderId:000}",
             CustomerId = 1,
             DeliveryDate = DateTime.UtcNow.AddDays(1),
+            Status = status,
             Items = { new SalesOrderItem { ProductId = 1, Qty = quantity, DeliveredQty = deliveredQuantity } }
+        });
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task SeedPickableStockAsync(ApplicationDbContext context)
+    {
+        context.StockBalances.Add(new StockBalance
+        {
+            ProductId = 1,
+            LotId = 1,
+            LocationId = 1,
+            QtyAvailable = 10m
         });
         await context.SaveChangesAsync();
     }

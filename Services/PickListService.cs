@@ -23,8 +23,11 @@ public class PickListService : IPickListService
     public async Task<PickList?> CreatePickListForSalesOrderAsync(int salesOrderId)
     {
         var order = await _context.SalesOrders
+            .Where(salesOrder => salesOrder.Id == salesOrderId
+                && salesOrder.Status == DocumentStatus.Draft
+                && salesOrder.Items.Any(item => item.Qty > item.DeliveredQty))
             .Include(salesOrder => salesOrder.Items)
-            .FirstOrDefaultAsync(salesOrder => salesOrder.Id == salesOrderId);
+            .FirstOrDefaultAsync();
         if (order is null)
         {
             return null;
@@ -87,6 +90,11 @@ public class PickListService : IPickListService
             .ThenBy(allocation => allocation.LotId)
             .ThenBy(allocation => allocation.BalanceId)
             .ToList();
+        if (orderedAllocations.Count == 0)
+        {
+            return null;
+        }
+
         var today = _timeProvider.GetUtcNow().UtcDateTime;
         var prefix = $"PK-{today:yyyyMMdd}-";
 

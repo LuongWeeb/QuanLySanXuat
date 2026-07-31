@@ -75,3 +75,16 @@ Fresh verification after the review follow-up:
 1. `dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter FullyQualifiedName~PickListUiIntegrationTests --no-restore` — 19 passed.
 2. `dotnet build WmsMes.sln --no-restore` — 0 warnings, 0 errors.
 3. `dotnet test WmsMes.Tests\WmsMes.Tests.csproj --no-restore --no-build` — 661 passed, 0 failed. Expected JWT startup-validation negative-test logs remain present.
+
+## Final actionable-order service boundary follow-up
+
+- `PickListService.CreatePickListForSalesOrderAsync` now loads an order only when it is `Draft` and has at least one line with `Qty > DeliveredQty`. Completed, cancelled, fully delivered, and missing orders therefore return `null` before number allocation or persistence.
+- A Draft order with no allocatable stock also returns `null`, preventing empty PickLists. The predicate is part of the initial order query, so the service makes its eligibility decision from the same database read that loads allocation lines; controller POST already turns a `null` response into its existing validation error and refreshed actionable choices.
+
+### TDD evidence
+
+1. RED: direct service tests showed a PickList persisted for Completed, Cancelled, and fully delivered orders; a fully delivered order produced an empty persisted list.
+2. GREEN: `SupplyChainReportServiceTests` passed 16 tests after the service-boundary predicate and empty-allocation guard. Existing numbering/collision tests now seed allocatable stock so they continue to prove the valid flow.
+3. `dotnet test WmsMes.Tests\WmsMes.Tests.csproj --filter "FullyQualifiedName~SupplyChainReportServiceTests|FullyQualifiedName~PickListUiIntegrationTests" --no-restore` — 35 passed.
+4. `dotnet build WmsMes.sln --no-restore` — 0 warnings, 0 errors.
+5. `dotnet test WmsMes.Tests\WmsMes.Tests.csproj --no-restore --no-build` — 664 passed, 0 failed. Expected JWT startup-validation negative-test logs remain present.
