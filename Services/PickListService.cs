@@ -1,5 +1,5 @@
-using System.Data.Common;
 using Microsoft.Data.SqlClient;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
@@ -12,10 +12,12 @@ public class PickListService : IPickListService
     private const int MaxNumberAllocationAttempts = 10;
     private const int MaxPickListSequence = 999;
     private readonly ApplicationDbContext _context;
+    private readonly TimeProvider _timeProvider;
 
-    public PickListService(ApplicationDbContext context)
+    public PickListService(ApplicationDbContext context, TimeProvider? timeProvider = null)
     {
         _context = context;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<PickList?> CreatePickListForSalesOrderAsync(int salesOrderId)
@@ -85,7 +87,7 @@ public class PickListService : IPickListService
             .ThenBy(allocation => allocation.LotId)
             .ThenBy(allocation => allocation.BalanceId)
             .ToList();
-        var today = DateTime.UtcNow;
+        var today = _timeProvider.GetUtcNow().UtcDateTime;
         var prefix = $"PK-{today:yyyyMMdd}-";
 
         for (var attempt = 0; attempt < MaxNumberAllocationAttempts; attempt++)
@@ -171,7 +173,10 @@ public class PickListService : IPickListService
             return true;
         }
 
-        return _context.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite" &&
-               exception.InnerException is DbException { ErrorCode: 19 };
+        return exception.InnerException is SqliteException
+        {
+            SqliteErrorCode: 19,
+            SqliteExtendedErrorCode: 2067
+        };
     }
 }

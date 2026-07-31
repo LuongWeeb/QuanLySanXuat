@@ -264,3 +264,56 @@ The full suite emits existing test-host Data Protection/JWT startup-validation l
 - `Services/NotificationService.cs`
 - `WmsMes.Tests/SupplyChainReportServiceTests.cs`
 - `.superpowers/sdd/task-2-report.md`
+
+---
+
+## Re-review follow-up
+
+### Changes
+
+- Replaced the incorrect base `DbException.ErrorCode` check with the typed `Microsoft.Data.Sqlite.SqliteException` pattern: primary constraint code `19` and extended unique-constraint code `2067`. The existing exact `PickListNo` database lookup remains required before retrying.
+- Added a direct `Microsoft.Data.Sqlite` 8.0.0 reference to the web project solely for that type-safe provider exception classification. The same provider and version were already used by the test project; no new provider behavior or network dependency was introduced.
+- Injected an optional `TimeProvider` into `PickListService` (defaulting to `TimeProvider.System`, with the existing DI singleton supplying production time). The exhaustion test now uses a fixed UTC instant.
+- Added an SQLite shared in-memory service-level race test. A save interceptor inserts the competing `001` list immediately before the service save, causing SQLite's real unique violation; the service verifies the exact number, retries, and persists compliant `PK-20260731-002`.
+
+### RED
+
+Initial focused command:
+
+```powershell
+dotnet test WmsMes.Tests/WmsMes.Tests.csproj --filter FullyQualifiedName~SupplyChainReportServiceTests --no-restore
+```
+
+The new clock-injection tests initially failed to compile with `CS1729` because `PickListService` had no two-argument constructor. After the minimal clock injection, the same command failed the service-level collision test with the real provider exception:
+
+```text
+Microsoft.Data.Sqlite.SqliteException: SQLite Error 19: 'UNIQUE constraint failed: PickLists.PickListNo'.
+```
+
+This established that `DbException.ErrorCode` was not SQLite's primary constraint code and prevented the retry.
+
+### GREEN
+
+```powershell
+dotnet test WmsMes.Tests/WmsMes.Tests.csproj --filter FullyQualifiedName~SupplyChainReportServiceTests --no-restore
+```
+
+Result: `Passed: 13, Failed: 0`.
+
+### Covering verification
+
+```powershell
+dotnet restore WmsMes.sln
+dotnet build WmsMes.sln --no-restore
+# Build succeeded. 0 Warning(s), 0 Error(s)
+
+dotnet test WmsMes.sln --no-build --no-restore
+# Passed: 632, Failed: 0, Skipped: 0
+```
+
+### Re-review files
+
+- `WmsMes.Web.csproj`
+- `Services/PickListService.cs`
+- `WmsMes.Tests/SupplyChainReportServiceTests.cs`
+- `.superpowers/sdd/task-2-report.md`

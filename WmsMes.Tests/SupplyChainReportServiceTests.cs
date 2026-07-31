@@ -92,11 +92,12 @@ public class SupplyChainReportServiceTests
     [Fact]
     public async Task CreatePickListForSalesOrderAsync_FailsBeforePersistingWhenDailyNumberRangeIsExhausted()
     {
+        var now = new DateTimeOffset(2026, 7, 31, 23, 59, 59, TimeSpan.Zero);
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         await using var context = await CreateRelationalContextAsync(connection);
         await SeedPickListOrderAsync(context, orderId: 1, quantity: 1m);
-        var prefix = $"PK-{DateTime.UtcNow:yyyyMMdd}-";
+        var prefix = $"PK-{now:yyyyMMdd}-";
         context.PickLists.AddRange(Enumerable.Range(1, 999).Select(sequence => new PickList
         {
             PickListNo = $"{prefix}{sequence:000}",
@@ -105,10 +106,40 @@ public class SupplyChainReportServiceTests
         await context.SaveChangesAsync();
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            new PickListService(context).CreatePickListForSalesOrderAsync(1));
+            new PickListService(context, new FixedTimeProvider(now)).CreatePickListForSalesOrderAsync(1));
 
         Assert.Contains("exhausted", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(999, await context.PickLists.CountAsync());
+    }
+
+    [Fact]
+    public async Task CreatePickListForSalesOrderAsync_RetriesAnActualSqlitePickListNumberCollision()
+    {
+        var now = new DateTimeOffset(2026, 7, 31, 12, 0, 0, TimeSpan.Zero);
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = $"pick-list-collision-{Guid.NewGuid()}",
+            Mode = SqliteOpenMode.Memory,
+            Cache = SqliteCacheMode.Shared
+        }.ToString();
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+        await using (var seedContext = await CreateRelationalContextAsync(connection))
+        {
+            await SeedPickListOrderAsync(seedContext, orderId: 1, quantity: 1m);
+        }
+
+        var interceptor = new InsertCompetingPickListInterceptor(connectionString);
+        await using var context = await CreateRelationalContextAsync(connection, interceptor);
+
+        var pickList = await new PickListService(context, new FixedTimeProvider(now))
+            .CreatePickListForSalesOrderAsync(1);
+
+        Assert.True(interceptor.InsertedCompetingPickList);
+        Assert.Equal("PK-20260731-002", pickList!.PickListNo);
+        Assert.Equal(
+            ["PK-20260731-001", "PK-20260731-002"],
+            await context.PickLists.OrderBy(list => list.PickListNo).Select(list => list.PickListNo).ToListAsync());
     }
 
     [Fact]
@@ -222,10 +253,13 @@ public class SupplyChainReportServiceTests
             .AddInterceptors(interceptors)
             .Options);
 
-    private static async Task<ApplicationDbContext> CreateRelationalContextAsync(SqliteConnection connection)
+    private static async Task<ApplicationDbContext> CreateRelationalContextAsync(
+        SqliteConnection connection,
+        params IInterceptor[] interceptors)
     {
         var context = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlite(connection)
+            .AddInterceptors(interceptors)
             .Options);
         await context.Database.EnsureCreatedAsync();
         return context;
@@ -279,5 +313,52 @@ public class SupplyChainReportServiceTests
             SaveAttempts++;
             throw new DbUpdateException("Simulated unrelated database update failure.");
         }
+    }
+
+    private sealed class InsertCompetingPickListInterceptor(string connectionString) : SaveChangesInterceptor
+    {
+        private bool _hasInserted;
+
+        public bool InsertedCompetingPickList => _hasInserted;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_hasInserted || eventData.Context is null)
+            {
+                return result;
+            }
+
+            var pendingPickList = eventData.Context.ChangeTracker.Entries<PickList>()
+                .Select(entry => entry.Entity)
+                .SingleOrDefault(pickList => eventData.Context.Entry(pickList).State == EntityState.Added);
+            if (pendingPickList is null)
+            {
+                return result;
+            }
+
+            _hasInserted = true;
+            await using var competingConnection = new SqliteConnection(connectionString);
+            await competingConnection.OpenAsync(cancellationToken);
+            await using var competingContext = new ApplicationDbContext(
+                new DbContextOptionsBuilder<ApplicationDbContext>()
+                    .UseSqlite(competingConnection)
+                    .Options);
+            competingContext.PickLists.Add(new PickList
+            {
+                PickListNo = pendingPickList.PickListNo,
+                SalesOrderId = pendingPickList.SalesOrderId
+            });
+            await competingContext.SaveChangesAsync(cancellationToken);
+
+            return result;
+        }
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 }
