@@ -14,8 +14,12 @@ using ZXing.Common;
 
 namespace WmsMes.Tests;
 
-public class PackingSlipAndStockValuationTests
+public class PackingSlipAndStockValuationTests : IClassFixture<PdfFontRegistrationFixture>
 {
+    public PackingSlipAndStockValuationTests(PdfFontRegistrationFixture _)
+    {
+    }
+
     [Fact]
     public async Task PrintPackingSlip_ReturnsNamed100MillimetrePdfWithPackageQrAndOrderDetails()
     {
@@ -132,9 +136,11 @@ public class PackingSlipAndStockValuationTests
         var page = Assert.Single(pdf.GetPages());
         Assert.InRange(page.Width, 283.4, 283.6);
         Assert.InRange(page.Height, 283.4, 283.6);
-        Assert.Contains("PS-LONG-001", page.Text);
-        Assert.Contains("SKU-LONG-01", page.Text);
-        Assert.Contains("18", page.Text);
+        var text = page.Text;
+        Assert.Contains("PHIẾU ĐÓNG GÓI", text);
+        Assert.Contains("PS-LONG-001", text);
+        Assert.Contains("SKU-LONG-01", text);
+        Assert.Contains("Còn 18 sản phẩm", text);
         Assert.Equal("PS-LONG-001", DecodeQr(page));
     }
 

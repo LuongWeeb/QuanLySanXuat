@@ -397,7 +397,7 @@ public class PrintController : ControllerBase
             {
                 page.Size(new PageSize(100, 100, Unit.Millimetre));
                 page.Margin(5, Unit.Millimetre);
-                page.DefaultTextStyle(style => style.FontSize(7));
+                page.DefaultTextStyle(style => style.FontFamily(PdfFontRegistration.FontFamilyName).FontSize(7));
                 page.Content().Column(column =>
                 {
                     column.Item().AlignCenter().Text("PHIẾU ĐÓNG GÓI").FontSize(13).Bold();
