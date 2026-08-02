@@ -64,7 +64,7 @@ public class PickListController : Controller
             return View();
         }
 
-        TempData["StatusMessage"] = $"Đã tạo danh sách lấy hàng {pickList.PickListNo}.";
+        TempData["StatusMessage"] = $"Danh sách lấy hàng {pickList.PickListNo} sẵn sàng.";
         return RedirectToAction(nameof(Details), new { id = pickList.Id });
     }
 
@@ -90,9 +90,11 @@ public class PickListController : Controller
     {
         ViewData["SalesOrders"] = await _context.SalesOrders
             .AsNoTracking()
-            .Where(order => order.Status != WmsMes.Web.Domain.Enums.DocumentStatus.Completed
-                && order.Status != WmsMes.Web.Domain.Enums.DocumentStatus.Cancelled
-                && order.Items.Any(item => item.Qty > item.DeliveredQty))
+            .Where(order => order.Status == WmsMes.Web.Domain.Enums.DocumentStatus.Draft
+                && order.Items.Any(item => item.Qty > item.DeliveredQty)
+                && !_context.PickLists.Any(pickList =>
+                    pickList.SalesOrderId == order.Id &&
+                    pickList.Status == WmsMes.Web.Domain.Enums.DocumentStatus.Draft))
             .Select(order => new PickListSalesOrderOptionViewModel
             {
                 Id = order.Id,

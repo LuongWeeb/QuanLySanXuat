@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Moq;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -66,6 +67,35 @@ public class QcServiceTests
     }
 
     [Fact]
+    public async Task SubmitInspection_Reject_PublishesDangerNotificationAfterPersistence()
+    {
+        await using var context = CreateContext();
+        await SeedAsync(context, quantityOnHold: 50m);
+        var notifications = new Mock<INotificationService>(MockBehavior.Strict);
+        notifications.Setup(service => service.SendNotificationAsync(
+                "QC REJECT",
+                It.Is<string>(message => message.Contains("LOT-001", StringComparison.Ordinal)),
+                "Danger",
+                "/Dashboard"))
+            .Returns(() =>
+            {
+                Assert.Single(context.QCInspections);
+                Assert.Equal(50m, context.StockBalances.Single(item => item.LocationId == 2).QtyOnHold);
+                return Task.CompletedTask;
+            });
+        var service = new QcService(
+            context,
+            qualityHub: null,
+            inventoryHub: null,
+            logger: null,
+            notificationService: notifications.Object);
+
+        Assert.True(await service.SubmitQCInspectionAsync(CreateInspection("25"), "qc-user"));
+
+        notifications.VerifyAll();
+    }
+
+    [Fact]
     public async Task SubmitInspection_WhenSourceDoesNotMatchType_ReturnsFalse()
     {
         await using var context = CreateContext();
@@ -73,9 +103,16 @@ public class QcServiceTests
         var inspection = CreateInspection("15");
         inspection.Type = QCInspectionType.FinalFGQC;
 
-        Assert.False(await new QcService(context)
+        var notifications = new Mock<INotificationService>(MockBehavior.Strict);
+        Assert.False(await new QcService(
+                context,
+                qualityHub: null,
+                inventoryHub: null,
+                logger: null,
+                notificationService: notifications.Object)
             .SubmitQCInspectionAsync(inspection, "qc-user"));
         Assert.Empty(await context.QCInspections.ToListAsync());
+        notifications.VerifyNoOtherCalls();
     }
 
     private static ApplicationDbContext CreateContext()

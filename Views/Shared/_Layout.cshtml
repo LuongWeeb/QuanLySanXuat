@@ -3,9 +3,11 @@
 @inject INotificationService NotificationService
 @{
     var isAuthenticated = User.Identity?.IsAuthenticated == true;
+    var canAccessSupplyChainFeatures = isAuthenticated &&
+        (User.IsInRole("Admin") || User.IsInRole("Warehouse") || User.IsInRole("Manager"));
     var unreadNotificationCount = 0;
     var recentNotifications = Array.Empty<AppNotification>();
-    if (isAuthenticated)
+    if (canAccessSupplyChainFeatures)
     {
         unreadNotificationCount = await NotificationService.GetUnreadCountAsync();
         recentNotifications = (await NotificationService.GetRecentNotificationsAsync()).ToArray();
@@ -52,7 +54,10 @@
             }
 
             <div class="nav-section-title">Báo cáo &amp; Phân tích</div>
-            <a class="@(currentController == "Report" ? "active" : null)" asp-controller="Report" asp-action="StockValuation">Báo cáo Tài chính Kho</a>
+            @if (canAccessSupplyChainFeatures)
+            {
+                <a class="@(currentController == "Report" ? "active" : null)" asp-controller="Report" asp-action="StockValuation">Báo cáo Tài chính Kho</a>
+            }
 
             <div class="nav-section-title">Quản lý Sản xuất (MES)</div>
             @if (User.IsInRole("Admin") || User.IsInRole("Planner") || User.IsInRole("Manager"))
@@ -91,7 +96,9 @@
                 </form>
                 @if (isAuthenticated)
                 {
-                    <div class="dropdown">
+                    @if (canAccessSupplyChainFeatures)
+                    {
+                        <div class="dropdown">
                         <button class="btn btn-link position-relative p-1 text-decoration-none" type="button"
                                 id="notificationDropdown" data-bs-toggle="dropdown" aria-expanded="false"
                                 aria-label="Thông báo hệ thống">
@@ -102,7 +109,14 @@
                         <div class="dropdown-menu dropdown-menu-end p-0 notification-menu" aria-labelledby="notificationDropdown">
                             <div class="d-flex align-items-center justify-content-between px-3 py-2">
                                 <strong>Thông báo hệ thống</strong>
-                                <span class="small text-muted">Mới nhất</span>
+                                <form id="mark-all-notifications-form"
+                                      class="@(unreadNotificationCount == 0 ? "d-none" : null)"
+                                      asp-controller="Notification" asp-action="MarkAllAsRead" method="post">
+                                    <button id="mark-all-notifications-button"
+                                            class="btn btn-link btn-sm p-0 text-decoration-none"
+                                            type="submit"
+                                            disabled="@(unreadNotificationCount == 0 ? "disabled" : null)">Đánh dấu đã đọc</button>
+                                </form>
                             </div>
                             <div class="dropdown-divider my-0"></div>
                             <div id="notification-list" aria-label="Danh sách thông báo gần đây">
@@ -127,7 +141,8 @@
                                 }
                             </div>
                         </div>
-                    </div>
+                        </div>
+                    }
                     <span class="user-chip">@User.Identity?.Name</span>
                     <form asp-controller="Auth" asp-action="Logout" method="post">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Đăng xuất</button>
@@ -146,7 +161,7 @@
     <div id="notification-live-region" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
-    @if (isAuthenticated)
+    @if (canAccessSupplyChainFeatures)
     {
         <script src="~/lib/microsoft-signalr/8.0.0/signalr.min.js"></script>
         <script>
@@ -154,7 +169,9 @@
                 const badge = document.getElementById("unread-count");
                 const list = document.getElementById("notification-list");
                 const liveRegion = document.getElementById("notification-live-region");
-                if (!badge || !list || !window.signalR) return;
+                const markAllForm = document.getElementById("mark-all-notifications-form");
+                const markAllButton = document.getElementById("mark-all-notifications-button");
+                if (!badge || !list || !markAllForm || !markAllButton || !window.signalR) return;
 
                 const isSafeReferenceUrl = value => typeof value === "string"
                     && value.startsWith("/") && !value.startsWith("//") && !value.includes("\\");
@@ -163,6 +180,8 @@
                     badge.textContent = String(count);
                     badge.classList.toggle("d-none", count === 0);
                     badge.setAttribute("aria-label", `${count} thông báo chưa đọc`);
+                    markAllForm.classList.toggle("d-none", count === 0);
+                    markAllButton.disabled = count === 0;
                 };
                 const renderNotification = notification => {
                     const empty = document.getElementById("notification-empty");

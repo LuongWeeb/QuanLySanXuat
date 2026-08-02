@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace WmsMes.Web.Hubs;
 
-[Authorize]
+[Authorize(Roles = "Admin,Warehouse,Manager")]
 public class NotificationHub : Hub
 {
 }

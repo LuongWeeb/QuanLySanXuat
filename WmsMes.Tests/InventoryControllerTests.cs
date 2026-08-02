@@ -1,10 +1,12 @@
 using System.Data;
+using System.Data.Common;
 using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.Data.Sqlite;
@@ -496,6 +498,129 @@ public class InventoryControllerTests
         Assert.Equal(seeded.customerId, (await context.GoodsIssues.SingleAsync()).CustomerId);
         Assert.Equal(7, (await context.StockBalances.SingleAsync()).QtyAvailable);
         Assert.Single(await context.StockTransactions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreateIssue_Post_WhenProductCrossesMinimum_PublishesLowStockAfterCommit()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var seeded = await SeedIssueStockAsync(context);
+        (await context.Products.SingleAsync()).MinStock = 8m;
+        await context.SaveChangesAsync();
+        var transactionWasCleared = false;
+        var availableWhenNotified = -1m;
+        var notifications = new Mock<INotificationService>(MockBehavior.Strict);
+        notifications.Setup(service => service.SendNotificationAsync(
+                "Tồn kho dưới mức tối thiểu",
+                It.Is<string>(message =>
+                    message.Contains("P", StringComparison.Ordinal) &&
+                    message.Contains("7", StringComparison.Ordinal) &&
+                    message.Contains("8", StringComparison.Ordinal)),
+                "Warning",
+                "/Inventory"))
+            .Returns(() =>
+            {
+                transactionWasCleared = context.Database.CurrentTransaction is null;
+                availableWhenNotified = context.StockBalances
+                    .Select(balance => balance.QtyAvailable)
+                    .ToList()
+                    .Sum();
+                return Task.CompletedTask;
+            });
+        var controller = Authenticated(new InventoryController(
+            context,
+            Mock.Of<IReportExportService>(),
+            new InventoryService(context),
+            notificationService: notifications.Object));
+        controller.TempData = Mock.Of<ITempDataDictionary>();
+
+        var result = await controller.CreateIssue(IssueModel(seeded, 3m));
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.True(transactionWasCleared);
+        Assert.Equal(7m, availableWhenNotified);
+        notifications.VerifyAll();
+    }
+
+    [Fact]
+    public async Task CreateIssue_Post_WhenProductRemainsAboveMinimum_DoesNotPublishLowStock()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"IssueLowStockNoCrossing_{Guid.NewGuid()}")
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        var seeded = await SeedIssueStockAsync(context);
+        (await context.Products.SingleAsync()).MinStock = 8m;
+        await context.SaveChangesAsync();
+        var inventory = new Mock<IInventoryService>(MockBehavior.Strict);
+        inventory.Setup(service => service.CompleteGoodsIssueWithoutNotificationAsync(
+                It.IsAny<int>(),
+                "warehouse-user"))
+            .Returns(async () =>
+            {
+                (await context.StockBalances.SingleAsync()).QtyAvailable = 9m;
+                await context.SaveChangesAsync();
+                return true;
+            });
+        inventory.Setup(service => service.NotifyStockChangedAsync())
+            .Returns(Task.CompletedTask);
+        var notifications = new Mock<INotificationService>(MockBehavior.Strict);
+        var controller = Authenticated(new InventoryController(
+            context,
+            Mock.Of<IReportExportService>(),
+            inventory.Object,
+            notificationService: notifications.Object));
+        controller.TempData = Mock.Of<ITempDataDictionary>();
+
+        var result = await controller.CreateIssue(IssueModel(seeded, 1m));
+
+        Assert.IsType<RedirectToActionResult>(result);
+        notifications.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task CreateIssue_Post_CapturesLowStockBeforeCommitAndSurvivesPostCommitNotifierFailure()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var interceptor = new FailPostCommitStockReadInterceptor();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var seeded = await SeedIssueStockAsync(context);
+        (await context.Products.SingleAsync()).MinStock = 8m;
+        await context.SaveChangesAsync();
+        var notifications = new Mock<INotificationService>(MockBehavior.Strict);
+        notifications.Setup(service => service.SendNotificationAsync(
+                "Tồn kho dưới mức tối thiểu",
+                It.IsAny<string>(),
+                "Warning",
+                "/Inventory"))
+            .ThrowsAsync(new InvalidOperationException("notification store unavailable"));
+        var controller = Authenticated(new InventoryController(
+            context,
+            Mock.Of<IReportExportService>(),
+            new InventoryService(context),
+            notificationService: notifications.Object));
+        controller.TempData = Mock.Of<ITempDataDictionary>();
+        interceptor.Armed = true;
+
+        var result = await controller.CreateIssue(IssueModel(seeded, 3m));
+
+        interceptor.Armed = false;
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.False(interceptor.WasTriggered);
+        Assert.Equal(7m, (await context.StockBalances.AsNoTracking().SingleAsync()).QtyAvailable);
+        Assert.Single(await context.GoodsIssues.AsNoTracking().ToListAsync());
+        Assert.Single(await context.StockTransactions.AsNoTracking().ToListAsync());
+        notifications.VerifyAll();
     }
 
     [Fact]
@@ -1367,6 +1492,38 @@ public class InventoryControllerTests
         {
             CultureInfo.CurrentCulture = _originalCulture;
             CultureInfo.CurrentUICulture = _originalUiCulture;
+        }
+    }
+
+    private sealed class FailPostCommitStockReadInterceptor : DbCommandInterceptor
+    {
+        private bool _sawTransactionalStockRead;
+
+        public bool Armed { get; set; }
+        public bool WasTriggered { get; private set; }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Armed || !command.CommandText.Contains("StockBalances", StringComparison.Ordinal))
+            {
+                return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+            }
+
+            if (eventData.Context?.Database.CurrentTransaction is not null)
+            {
+                _sawTransactionalStockRead = true;
+            }
+            else if (_sawTransactionalStockRead)
+            {
+                WasTriggered = true;
+                throw new InvalidOperationException("post-commit stock read unavailable");
+            }
+
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
         }
     }
 }

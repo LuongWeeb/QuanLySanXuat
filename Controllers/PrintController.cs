@@ -140,6 +140,7 @@ public class PrintController : ControllerBase
     }
 
     [HttpGet("packingslip/{id:int}")]
+    [Authorize(Roles = "Admin,Warehouse,Manager")]
     public async Task<IActionResult> PrintPackingSlip(int id)
     {
         var packingSlip = await _context.PackingSlips

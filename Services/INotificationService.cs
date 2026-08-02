@@ -8,5 +8,7 @@ public interface INotificationService
 
     Task<int> GetUnreadCountAsync();
 
+    Task<int> MarkAllAsReadAsync();
+
     Task<IEnumerable<AppNotification>> GetRecentNotificationsAsync(int take = 5);
 }

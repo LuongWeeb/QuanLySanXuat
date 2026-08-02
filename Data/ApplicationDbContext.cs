@@ -260,6 +260,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .IsUnique();
 
         builder.Entity<PickList>()
+            .HasIndex(list => list.SalesOrderId)
+            .IsUnique()
+            .HasFilter("[Status] = 0")
+            .HasDatabaseName("UX_PickLists_OneDraftPerSalesOrder");
+
+        builder.Entity<PickList>()
             .HasOne(list => list.SalesOrder)
             .WithMany()
             .HasForeignKey(list => list.SalesOrderId)
@@ -298,6 +304,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             .WithMany()
             .HasForeignKey(slip => slip.SalesOrderId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<AppNotification>()
+            .HasIndex(notification => notification.IsRead);
+
+        builder.Entity<AppNotification>()
+            .HasIndex(notification => new { notification.CreatedAt, notification.Id })
+            .IsDescending();
 
         builder.Entity<PurchaseRequestItem>()
             .HasOne(item => item.PurchaseRequest)

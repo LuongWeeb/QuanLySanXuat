@@ -23,19 +23,22 @@ public class InventoryController : Controller
     private readonly IReportExportService _reportExportService;
     private readonly ILogger<InventoryController> _logger;
     private readonly ILowStockService _lowStockService;
+    private readonly INotificationService _notificationService;
 
     public InventoryController(
         ApplicationDbContext context,
         IReportExportService reportExportService,
         IInventoryService? inventoryService = null,
         ILogger<InventoryController>? logger = null,
-        ILowStockService? lowStockService = null)
+        ILowStockService? lowStockService = null,
+        INotificationService? notificationService = null)
     {
         _context = context;
         _inventoryService = inventoryService;
         _reportExportService = reportExportService ?? throw new ArgumentNullException(nameof(reportExportService));
         _logger = logger ?? NullLogger<InventoryController>.Instance;
         _lowStockService = lowStockService ?? new LowStockService(context);
+        _notificationService = notificationService ?? new NotificationService(context);
     }
 
     public async Task<IActionResult> Index()
@@ -429,9 +432,13 @@ public class InventoryController : Controller
         await using var transaction = _context.Database.IsRelational()
             ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable)
             : null;
+        IReadOnlyList<LowStockLevelBefore> lowStockLevelsBefore = [];
+        IReadOnlyList<LowStockCrossing> lowStockCrossings = [];
 
         try
         {
+            lowStockLevelsBefore = await CaptureLowStockLevelsAsync(
+                model.Lines.Select(line => line.ProductId));
             _context.GoodsIssues.Add(issue);
             await _context.SaveChangesAsync();
             if (!await _inventoryService.CompleteGoodsIssueWithoutNotificationAsync(issue.Id, userId!))
@@ -440,22 +447,39 @@ public class InventoryController : Controller
                 return await IssueCompletionErrorAsync(model, "Không thể hoàn tất phiếu xuất kho. Vui lòng thử lại.");
             }
 
+            lowStockCrossings = await CaptureLowStockCrossingsAsync(lowStockLevelsBefore);
             if (transaction is not null)
             {
                 await transaction.CommitAsync();
             }
-
-            await NotifyAfterCommitAsync();
-
-            TempData["StatusMessage"] =
-                $"Đã xuất kho {model.Lines.Sum(line => line.Qty).ToVietnameseNumber()} thành công.";
-            return RedirectToAction(nameof(Issues));
         }
         catch (Exception)
         {
             await RollbackIssueAsync(issue, transaction);
             return await IssueCompletionErrorAsync(model, "Có lỗi khi hoàn tất phiếu xuất kho. Vui lòng thử lại.");
         }
+
+        if (transaction is not null)
+        {
+            try
+            {
+                await transaction.DisposeAsync();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Goods issue {GoodsIssueId} committed but transaction cleanup failed.",
+                    issue.Id);
+            }
+        }
+
+        await NotifyAfterCommitAsync();
+        await NotifyLowStockCrossingsAfterCommitAsync(lowStockCrossings);
+
+        TempData["StatusMessage"] =
+            $"Đã xuất kho {model.Lines.Sum(line => line.Qty).ToVietnameseNumber()} thành công.";
+        return RedirectToAction(nameof(Issues));
 
         bool HasFieldError(int index, string fieldName)
         {
@@ -734,4 +758,114 @@ public class InventoryController : Controller
             _logger.LogWarning(exception, "Inventory operation committed but realtime notification failed.");
         }
     }
+
+    private async Task<IReadOnlyList<LowStockLevelBefore>> CaptureLowStockLevelsAsync(
+        IEnumerable<int> productIds)
+    {
+        var ids = productIds.Distinct().ToList();
+        var products = await _context.Products
+            .AsNoTracking()
+            .Where(product => ids.Contains(product.Id))
+            .Select(product => new
+            {
+                product.Id,
+                product.Code,
+                product.Name,
+                product.MinStock
+            })
+            .ToListAsync();
+        var levels = new List<LowStockLevelBefore>(products.Count);
+        foreach (var product in products)
+        {
+            var availableQuantities = await _context.StockBalances
+                .Where(balance => balance.ProductId == product.Id)
+                .Select(balance => balance.QtyAvailable)
+                .ToListAsync();
+            var availableBefore = availableQuantities.Sum();
+            levels.Add(new LowStockLevelBefore(
+                product.Id,
+                product.Code,
+                product.Name,
+                product.MinStock,
+                availableBefore));
+        }
+
+        return levels;
+    }
+
+    private async Task<IReadOnlyList<LowStockCrossing>> CaptureLowStockCrossingsAsync(
+        IEnumerable<LowStockLevelBefore> levelsBefore)
+    {
+        var crossings = new List<LowStockCrossing>();
+        foreach (var level in levelsBefore.Where(level =>
+                     level.AvailableBefore >= level.MinStock))
+        {
+            try
+            {
+                var availableQuantities = await _context.StockBalances
+                    .AsNoTracking()
+                    .Where(balance => balance.ProductId == level.ProductId)
+                    .Select(balance => balance.QtyAvailable)
+                    .ToListAsync();
+                var availableAfter = availableQuantities.Sum();
+                if (availableAfter >= level.MinStock)
+                {
+                    continue;
+                }
+
+                crossings.Add(new LowStockCrossing(
+                    level.ProductId,
+                    level.ProductCode,
+                    level.ProductName,
+                    level.MinStock,
+                    availableAfter));
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Could not evaluate the low-stock crossing for product {ProductId} before committing the goods issue.",
+                    level.ProductId);
+            }
+        }
+
+        return crossings;
+    }
+
+    private async Task NotifyLowStockCrossingsAfterCommitAsync(
+        IEnumerable<LowStockCrossing> crossings)
+    {
+        foreach (var crossing in crossings)
+        {
+            try
+            {
+                await _notificationService.SendNotificationAsync(
+                    "Tồn kho dưới mức tối thiểu",
+                    $"{crossing.ProductCode} - {crossing.ProductName}: tồn khả dụng {crossing.AvailableAfter.ToVietnameseNumber()} thấp hơn mức tối thiểu {crossing.MinStock.ToVietnameseNumber()}.",
+                    "Warning",
+                    "/Inventory");
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Goods issue committed but low-stock notification failed for product {ProductId}.",
+                    crossing.ProductId);
+            }
+        }
+    }
+
+    private sealed record LowStockLevelBefore(
+        int ProductId,
+        string ProductCode,
+        string ProductName,
+        decimal MinStock,
+        decimal AvailableBefore);
+
+    private sealed record LowStockCrossing(
+        int ProductId,
+        string ProductCode,
+        string ProductName,
+        decimal MinStock,
+        decimal AvailableAfter);
 }

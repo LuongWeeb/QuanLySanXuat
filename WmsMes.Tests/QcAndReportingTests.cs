@@ -66,6 +66,50 @@ public class QcAndReportingTests
         client.Verify(x => x.SendCoreAsync("ReceiveStockUpdate", It.Is<object?[]>(a => a.Length == 0), default), Times.Once);
     }
 
+    [Fact]
+    public async Task SubmitQCInspectionAsync_WhenNotifierLoggingEscapesAfterRelationalCommit_RemainsSuccessful()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedQcDataAsync(context);
+        var notifications = new Mock<INotificationService>();
+        notifications.Setup(service => service.SendNotificationAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>()))
+            .ThrowsAsync(new InvalidOperationException("notification unavailable"));
+        var logger = ThrowingLogger<QcService>();
+        var service = new QcService(
+            context,
+            qualityHub: null,
+            inventoryHub: null,
+            logger: logger.Object,
+            notificationService: notifications.Object);
+        var inspection = new QCInspection
+        {
+            WorkOrderId = 100,
+            LotId = 20,
+            Result = QCResult.REJECT,
+            Lines =
+            {
+                new QCInspectionLine { ParameterName = "Do am", ValueInspected = "20" }
+            }
+        };
+
+        Assert.True(await service.SubmitQCInspectionAsync(inspection, "qc-user"));
+
+        context.ChangeTracker.Clear();
+        Assert.Single(await context.QCInspections.ToListAsync());
+        Assert.Equal(8m, (await context.StockBalances
+            .SingleAsync(balance => balance.LocationId == 2)).QtyOnHold);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -90,6 +134,100 @@ public class QcAndReportingTests
         var outputBalance = await context.StockBalances.SingleAsync(sb => sb.LotId == outputLot.Id);
         Assert.Equal(0m, outputBalance.QtyAvailable);
         Assert.Equal(8m, outputBalance.QtyOnHold);
+    }
+
+    [Fact]
+    public async Task CompleteWorkOrderAsync_PublishesCompletionNotificationOnlyAfterSuccessfulTransition()
+    {
+        await using var context = CreateContext();
+        await SeedManufacturingDataAsync(context);
+        var notifications = new Mock<INotificationService>(MockBehavior.Strict);
+        notifications.Setup(service => service.SendNotificationAsync(
+                "Lệnh sản xuất hoàn thành",
+                It.Is<string>(message => message.Contains("WO-001", StringComparison.Ordinal)),
+                "Info",
+                "/Dashboard"))
+            .Returns(() =>
+            {
+                Assert.Equal(
+                    WorkOrderStatus.Completed,
+                    context.WorkOrders.Single(order => order.Id == 100).Status);
+                return Task.CompletedTask;
+            });
+        var service = new WorkOrderService(
+            context,
+            notificationService: notifications.Object);
+
+        Assert.True(await service.CompleteWorkOrderAsync(100, "worker"));
+        Assert.False(await service.CompleteWorkOrderAsync(100, "worker"));
+
+        notifications.VerifyAll();
+    }
+
+    [Fact]
+    public async Task CompleteWorkOrderAsync_WhenProgressBroadcastFails_RemainsCompletedAndReturnsSuccess()
+    {
+        await using var context = CreateContext();
+        await SeedManufacturingDataAsync(context);
+        var client = new Mock<IClientProxy>();
+        client.Setup(proxy => proxy.SendCoreAsync(
+                "ReceiveProgressUpdate",
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("hub unavailable"));
+        var clients = new Mock<IHubClients>();
+        clients.SetupGet(items => items.All).Returns(client.Object);
+        var hub = new Mock<IHubContext<ProductionHub>>();
+        hub.SetupGet(item => item.Clients).Returns(clients.Object);
+        var logger = new Mock<ILogger<WorkOrderService>>();
+        var service = new WorkOrderService(
+            context,
+            productionHub: hub.Object,
+            logger: logger.Object);
+
+        Assert.True(await service.CompleteWorkOrderAsync(100, "worker"));
+        Assert.Equal(
+            WorkOrderStatus.Completed,
+            (await context.WorkOrders.SingleAsync(order => order.Id == 100)).Status);
+        logger.Verify(candidate => candidate.Log(
+            LogLevel.Warning,
+            It.IsAny<EventId>(),
+            It.IsAny<It.IsAnyType>(),
+            It.IsAny<Exception>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CompleteWorkOrderAsync_WhenNotifierLoggingEscapesAfterRelationalCommit_RemainsSuccessful()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await SeedManufacturingDataAsync(context);
+        var notifications = new Mock<INotificationService>();
+        notifications.Setup(service => service.SendNotificationAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>()))
+            .ThrowsAsync(new InvalidOperationException("notification unavailable"));
+        var logger = ThrowingLogger<WorkOrderService>();
+        var service = new WorkOrderService(
+            context,
+            notificationService: notifications.Object,
+            logger: logger.Object);
+
+        Assert.True(await service.CompleteWorkOrderAsync(100, "worker"));
+
+        context.ChangeTracker.Clear();
+        Assert.Equal(
+            WorkOrderStatus.Completed,
+            (await context.WorkOrders.SingleAsync(order => order.Id == 100)).Status);
+        Assert.Single(await context.Lots.Where(lot => lot.WorkOrderId == 100).ToListAsync());
     }
 
     [Fact]
@@ -476,6 +614,19 @@ public class QcAndReportingTests
             new Location { Id = 2, ZoneId = 2, Code = QcService.QuarantineLocationCode, Name = "QC Quarantine" });
         context.WorkCenters.Add(new WorkCenter { Id = 1, Code = "WC-01", Name = "Line 1" });
         await context.SaveChangesAsync();
+    }
+
+    private static Mock<ILogger<T>> ThrowingLogger<T>()
+    {
+        var logger = new Mock<ILogger<T>>();
+        logger.Setup(candidate => candidate.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+            .Throws(new InvalidOperationException("logger unavailable"));
+        return logger;
     }
 
     private sealed class CaptureTransactionIsolationInterceptor

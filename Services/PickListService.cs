@@ -22,6 +22,12 @@ public class PickListService : IPickListService
 
     public async Task<PickList?> CreatePickListForSalesOrderAsync(int salesOrderId)
     {
+        var existingPickList = await FindActivePickListAsync(salesOrderId);
+        if (existingPickList is not null)
+        {
+            return existingPickList;
+        }
+
         var order = await _context.SalesOrders
             .Where(salesOrder => salesOrder.Id == salesOrderId
                 && salesOrder.Status == DocumentStatus.Draft
@@ -124,16 +130,22 @@ public class PickListService : IPickListService
             }
             catch (DbUpdateException exception)
             {
-                if (attempt == MaxNumberAllocationAttempts - 1 ||
-                    !await IsPickListNumberCollisionAsync(exception, pickList.PickListNo))
+                if (!IsUniqueConstraintViolation(exception))
                 {
                     throw;
                 }
 
-                _context.Entry(pickList).State = EntityState.Detached;
-                foreach (var item in pickList.Items)
+                Detach(pickList);
+                existingPickList = await FindActivePickListAsync(salesOrderId);
+                if (existingPickList is not null)
                 {
-                    _context.Entry(item).State = EntityState.Detached;
+                    return existingPickList;
+                }
+
+                if (attempt == MaxNumberAllocationAttempts - 1 ||
+                    !await IsPickListNumberCollisionAsync(exception, pickList.PickListNo))
+                {
+                    throw;
                 }
             }
         }
@@ -172,6 +184,25 @@ public class PickListService : IPickListService
         return await _context.PickLists
             .AsNoTracking()
             .AnyAsync(candidate => candidate.PickListNo == pickListNo);
+    }
+
+    private Task<PickList?> FindActivePickListAsync(int salesOrderId)
+    {
+        return _context.PickLists
+            .Include(pickList => pickList.Items)
+            .FirstOrDefaultAsync(pickList =>
+                pickList.SalesOrderId == salesOrderId &&
+                pickList.Status == DocumentStatus.Draft);
+    }
+
+    private void Detach(PickList pickList)
+    {
+        foreach (var item in pickList.Items.ToList())
+        {
+            _context.Entry(item).State = EntityState.Detached;
+        }
+
+        _context.Entry(pickList).State = EntityState.Detached;
     }
 
     private bool IsUniqueConstraintViolation(DbUpdateException exception)

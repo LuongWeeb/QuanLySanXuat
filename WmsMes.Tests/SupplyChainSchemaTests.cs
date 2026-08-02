@@ -18,6 +18,7 @@ public class SupplyChainSchemaTests
         AssertColumn(pickList, "CreatedAt", "datetime2", nullable: false);
         AssertColumn(pickList, "Status", "int", nullable: false);
         AssertUniqueIndex(pickList, "PickListNo");
+        AssertUniqueIndex(pickList, "SalesOrderId", "[Status] = 0");
         AssertForeignKey(pickList, "SalesOrderId", "SalesOrder", DeleteBehavior.Restrict);
 
         var pickListItem = AssertEntity(model, "PickListItem", "PickListItems");
@@ -40,6 +41,13 @@ public class SupplyChainSchemaTests
         AssertColumn(notification, "Severity", "nvarchar(20)", nullable: false, maxLength: 20);
         AssertColumn(notification, "UserId", "nvarchar(450)", nullable: true, maxLength: 450);
         AssertColumn(notification, "ReferenceUrl", "nvarchar(500)", nullable: true, maxLength: 500);
+        Assert.Contains(notification.GetIndexes(), index =>
+            index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { "IsRead" }));
+        var recentIndex = Assert.Single(notification.GetIndexes().Where(index =>
+            index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { "CreatedAt", "Id" })));
+        Assert.NotNull(recentIndex);
     }
 
     [Fact]
@@ -86,12 +94,16 @@ public class SupplyChainSchemaTests
         Assert.Equal(maxLength, property.GetMaxLength());
     }
 
-    private static void AssertUniqueIndex(IEntityType entity, string propertyName)
+    private static void AssertUniqueIndex(
+        IEntityType entity,
+        string propertyName,
+        string? filter = null)
     {
         var index = Assert.Single(entity.GetIndexes().Where(candidate =>
             candidate.Properties.Select(property => property.Name).SequenceEqual(new[] { propertyName })));
 
         Assert.True(index.IsUnique);
+        Assert.Equal(filter, index.GetFilter());
     }
 
     private static void AssertForeignKey(

@@ -41,6 +41,69 @@ public class PickListUiIntegrationTests : IClassFixture<InventoryCancellationWeb
         Assert.Equal(HttpStatusCode.Forbidden, unauthorizedResponse.StatusCode);
     }
 
+    [Theory]
+    [InlineData("/Report/StockValuation", HttpStatusCode.OK)]
+    [InlineData("/Report/ExportStockValuationExcel", HttpStatusCode.OK)]
+    [InlineData("/api/Print/packingslip/999", HttpStatusCode.NotFound)]
+    public async Task SensitiveSupplyChainRoutes_EnforceWarehouseBusinessRoles(
+        string route,
+        HttpStatusCode allowedStatus)
+    {
+        using var anonymous = _factory.CreateInventoryClient();
+        var anonymousResponse = await anonymous.GetAsync(route);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+
+        foreach (var role in new[] { "Worker", "QC", "Viewer" })
+        {
+            using var forbidden = _factory.CreateInventoryClient(role);
+            var forbiddenResponse = await forbidden.GetAsync(route);
+            Assert.Equal(HttpStatusCode.Forbidden, forbiddenResponse.StatusCode);
+        }
+
+        using var allowed = _factory.CreateInventoryClient("Warehouse");
+        var allowedResponse = await allowed.GetAsync(route);
+        Assert.Equal(allowedStatus, allowedResponse.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("Worker")]
+    [InlineData("QC")]
+    [InlineData("Viewer")]
+    public async Task OperationalRoles_DoNotSeeFinancialReportOrNotificationBell(string role)
+    {
+        using var client = _factory.CreateInventoryClient(role);
+
+        var response = await client.GetAsync("/");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.DoesNotContain("/Report/StockValuation", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("id=\"notificationDropdown\"", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("/notificationHub", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MarkAllReadPost_EnforcesAuthorizationBeforeAntiforgery()
+    {
+        using var anonymous = _factory.CreateInventoryClient();
+        using var forbidden = _factory.CreateInventoryClient("Viewer");
+        using var allowed = _factory.CreateInventoryClient("Warehouse");
+
+        var anonymousResponse = await anonymous.PostAsync(
+            "/Notification/MarkAllAsRead",
+            new FormUrlEncodedContent([]));
+        var forbiddenResponse = await forbidden.PostAsync(
+            "/Notification/MarkAllAsRead",
+            new FormUrlEncodedContent([]));
+        var allowedResponse = await allowed.PostAsync(
+            "/Notification/MarkAllAsRead",
+            new FormUrlEncodedContent([]));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, allowedResponse.StatusCode);
+    }
+
     [Fact]
     public async Task AuthenticatedLayout_RendersDynamicUnreadBadgeAndRecentNotificationLinks()
     {
@@ -112,7 +175,7 @@ public class PickListUiIntegrationTests : IClassFixture<InventoryCancellationWeb
         Assert.Equal("Details", redirect.ActionName);
         Assert.Equal(72, redirect.RouteValues!["id"]);
         Assert.Equal([9], service.SalesOrderIds);
-        Assert.Equal("Đã tạo danh sách lấy hàng PK-20260731-072.", controller.TempData["StatusMessage"]);
+        Assert.Equal("Danh sách lấy hàng PK-20260731-072 sẵn sàng.", controller.TempData["StatusMessage"]);
     }
 
     [Fact]
@@ -189,6 +252,20 @@ public class PickListUiIntegrationTests : IClassFixture<InventoryCancellationWeb
         Assert.True(listenerLookup >= 0);
         Assert.True(liveRegionMarkup < listenerLookup,
             "The live region must be in the DOM before the listener captures it.");
+    }
+
+    [Fact]
+    public void PickListIndex_ProvidesCaptionAndColumnHeaderScopes()
+    {
+        var view = File.ReadAllText(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "Views", "PickList", "Index.cshtml"));
+
+        Assert.Contains("<caption", view, StringComparison.Ordinal);
+        Assert.Equal(6, System.Text.RegularExpressions.Regex.Matches(
+            view,
+            "<th[^>]*scope=\"col\"",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase).Count);
     }
 
     [Fact]
@@ -289,7 +366,14 @@ public class PickListUiIntegrationTests : IClassFixture<InventoryCancellationWeb
             new SalesOrder { Id = 1, OrderNo = "SO-ACTIONABLE", Customer = customer, Status = DocumentStatus.Draft, Items = { new SalesOrderItem { Qty = 4m, DeliveredQty = 1m } } },
             new SalesOrder { Id = 2, OrderNo = "SO-COMPLETED", CustomerId = 1, Status = DocumentStatus.Completed, Items = { new SalesOrderItem { Qty = 4m } } },
             new SalesOrder { Id = 3, OrderNo = "SO-CANCELLED", CustomerId = 1, Status = DocumentStatus.Cancelled, Items = { new SalesOrderItem { Qty = 4m } } },
-            new SalesOrder { Id = 4, OrderNo = "SO-DELIVERED", CustomerId = 1, Status = DocumentStatus.Draft, Items = { new SalesOrderItem { Qty = 4m, DeliveredQty = 4m } } });
+            new SalesOrder { Id = 4, OrderNo = "SO-DELIVERED", CustomerId = 1, Status = DocumentStatus.Draft, Items = { new SalesOrderItem { Qty = 4m, DeliveredQty = 4m } } },
+            new SalesOrder { Id = 5, OrderNo = "SO-ACTIVE-PICK", CustomerId = 1, Status = DocumentStatus.Draft, Items = { new SalesOrderItem { Qty = 4m } } });
+        context.PickLists.Add(new PickList
+        {
+            PickListNo = "PK-20260731-005",
+            SalesOrderId = 5,
+            Status = DocumentStatus.Draft
+        });
         await context.SaveChangesAsync();
         var controller = new PickListController(context, new StubPickListService());
 

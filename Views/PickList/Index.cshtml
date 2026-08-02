@@ -20,8 +20,9 @@
 <section class="data-panel">
     <div class="table-responsive">
         <table class="table data-table align-middle mb-0">
+            <caption class="visually-hidden">Danh sách lấy hàng theo đơn bán hàng và trạng thái</caption>
             <thead>
-                <tr><th>Mã Pick List</th><th>Đơn bán hàng</th><th>Khách hàng</th><th>Ngày tạo</th><th>Trạng thái</th><th aria-label="Thao tác"></th></tr>
+                <tr><th scope="col">Mã Pick List</th><th scope="col">Đơn bán hàng</th><th scope="col">Khách hàng</th><th scope="col">Ngày tạo</th><th scope="col">Trạng thái</th><th scope="col" aria-label="Thao tác"></th></tr>
             </thead>
             <tbody>
             @foreach (var pickList in Model)

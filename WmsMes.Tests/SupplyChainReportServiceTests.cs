@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Moq;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
@@ -88,6 +89,40 @@ public class SupplyChainReportServiceTests
     }
 
     [Fact]
+    public async Task CreatePickListForSalesOrderAsync_ReturnsExistingDraftPickListWithoutAddingDuplicateItems()
+    {
+        await using var context = CreateContext();
+        await SeedPickListOrderAsync(context, orderId: 1, quantity: 5m);
+        await SeedPickableStockAsync(context);
+        var existing = new PickList
+        {
+            PickListNo = "PK-20260731-017",
+            SalesOrderId = 1,
+            Status = DocumentStatus.Draft,
+            Items =
+            {
+                new PickListItem
+                {
+                    ProductId = 1,
+                    LocationId = 1,
+                    LotId = 1,
+                    QtyToPick = 5m
+                }
+            }
+        };
+        context.PickLists.Add(existing);
+        await context.SaveChangesAsync();
+
+        var result = await new PickListService(context)
+            .CreatePickListForSalesOrderAsync(1);
+
+        Assert.Same(existing, result);
+        Assert.Single(await context.PickLists.ToListAsync());
+        Assert.Single(await context.PickListItems.ToListAsync());
+        Assert.Equal(5m, (await context.PickListItems.SingleAsync()).QtyToPick);
+    }
+
+    [Fact]
     public async Task CreatePickListForSalesOrderAsync_AssignsUniqueDailyThreeDigitNumbers()
     {
         await using var context = CreateContext();
@@ -133,7 +168,8 @@ public class SupplyChainReportServiceTests
         context.PickLists.AddRange(Enumerable.Range(1, 999).Select(sequence => new PickList
         {
             PickListNo = $"{prefix}{sequence:000}",
-            SalesOrderId = 1
+            SalesOrderId = 1,
+            Status = DocumentStatus.Completed
         }));
         await context.SaveChangesAsync();
 
@@ -159,6 +195,7 @@ public class SupplyChainReportServiceTests
         await using (var seedContext = await CreateRelationalContextAsync(connection))
         {
             await SeedPickListOrderAsync(seedContext, orderId: 1, quantity: 1m);
+            await SeedPickListOrderAsync(seedContext, orderId: 2, quantity: 1m);
             await SeedPickableStockAsync(seedContext);
         }
 
@@ -173,6 +210,68 @@ public class SupplyChainReportServiceTests
         Assert.Equal(
             ["PK-20260731-001", "PK-20260731-002"],
             await context.PickLists.OrderBy(list => list.PickListNo).Select(list => list.PickListNo).ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreatePickListForSalesOrderAsync_ReturnsCompetingDraftPickListWhenSameOrderRaces()
+    {
+        var now = new DateTimeOffset(2026, 7, 31, 12, 0, 0, TimeSpan.Zero);
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = $"pick-list-order-race-{Guid.NewGuid()}",
+            Mode = SqliteOpenMode.Memory,
+            Cache = SqliteCacheMode.Shared
+        }.ToString();
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+        await using (var seedContext = await CreateRelationalContextAsync(connection))
+        {
+            await SeedPickListOrderAsync(seedContext, orderId: 1, quantity: 4m);
+            await SeedPickableStockAsync(seedContext);
+        }
+
+        var interceptor = new InsertCompetingDraftPickListInterceptor(connectionString);
+        await using var context = await CreateRelationalContextAsync(connection, interceptor);
+
+        var result = await new PickListService(context, new FixedTimeProvider(now))
+            .CreatePickListForSalesOrderAsync(1);
+
+        Assert.True(interceptor.InsertedCompetingPickList);
+        Assert.Equal("PK-20260731-777", result!.PickListNo);
+        Assert.Single(await context.PickLists.Where(list => list.SalesOrderId == 1).ToListAsync());
+        Assert.Equal(4m, result.Items.Sum(item => item.QtyToPick));
+    }
+
+    [Fact]
+    public async Task DraftPickListSalesOrderReservation_IsActuallyUniqueInTheRelationalDatabase()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = await CreateRelationalContextAsync(connection);
+        await SeedPickListOrderAsync(context, orderId: 1, quantity: 1m);
+        context.PickLists.AddRange(
+            new PickList
+            {
+                PickListNo = "PK-20260731-001",
+                SalesOrderId = 1,
+                Status = DocumentStatus.Completed
+            },
+            new PickList
+            {
+                PickListNo = "PK-20260731-002",
+                SalesOrderId = 1,
+                Status = DocumentStatus.Draft
+            });
+        await context.SaveChangesAsync();
+        context.PickLists.Add(new PickList
+        {
+            PickListNo = "PK-20260731-003",
+            SalesOrderId = 1,
+            Status = DocumentStatus.Draft
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
+        Assert.Equal(2, await context.PickLists.AsNoTracking().CountAsync());
     }
 
     [Fact]
@@ -242,6 +341,36 @@ public class SupplyChainReportServiceTests
     }
 
     [Fact]
+    public async Task SendNotificationAsync_WhenHubBroadcastFails_PersistsAndCompletes()
+    {
+        await using var context = CreateContext();
+        var client = new Mock<IClientProxy>();
+        client.Setup(proxy => proxy.SendCoreAsync(
+                "ReceiveNotification",
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("hub unavailable"));
+        var clients = new Mock<IHubClients>();
+        clients.SetupGet(items => items.All).Returns(client.Object);
+        var hub = new Mock<IHubContext<NotificationHub>>();
+        hub.SetupGet(item => item.Clients).Returns(clients.Object);
+        var logger = new Mock<ILogger<NotificationService>>();
+
+        await new NotificationService(context, hub.Object, logger.Object)
+            .SendNotificationAsync("QC REJECT", "LOT-01 was rejected", "Danger", "/Qc/Details/1");
+
+        var persisted = Assert.Single(await context.AppNotifications.AsNoTracking().ToListAsync());
+        Assert.Equal("QC REJECT", persisted.Title);
+        Assert.False(persisted.IsRead);
+        logger.Verify(candidate => candidate.Log(
+            LogLevel.Warning,
+            It.IsAny<EventId>(),
+            It.IsAny<It.IsAnyType>(),
+            It.IsAny<Exception>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+    }
+
+    [Fact]
     public async Task GetRecentNotificationsAsync_ReturnsNewestNotificationsAndGetUnreadCountAsyncExcludesReadItems()
     {
         await using var context = CreateContext();
@@ -262,9 +391,10 @@ public class SupplyChainReportServiceTests
     [Fact]
     public void NotificationHub_RequiresAuthorizedConnections()
     {
-        Assert.NotNull(typeof(NotificationHub)
+        var authorize = Assert.Single(typeof(NotificationHub)
             .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
-            .SingleOrDefault());
+            .Cast<AuthorizeAttribute>());
+        Assert.Equal("Admin,Warehouse,Manager", authorize.Roles);
     }
 
     [Fact]
@@ -275,6 +405,9 @@ public class SupplyChainReportServiceTests
 
         Assert.IsType<PickListService>(scope.ServiceProvider.GetRequiredService<IPickListService>());
         Assert.IsType<NotificationService>(scope.ServiceProvider.GetRequiredService<INotificationService>());
+        Assert.IsType<QcService>(scope.ServiceProvider.GetRequiredService<IQcService>());
+        Assert.IsType<WorkOrderService>(scope.ServiceProvider.GetRequiredService<IWorkOrderService>());
+        Assert.IsType<ProductionPlanService>(scope.ServiceProvider.GetRequiredService<IProductionPlanService>());
     }
 
     private static ApplicationDbContext CreateContext() => CreateContext(Guid.NewGuid().ToString());
@@ -397,7 +530,58 @@ public class SupplyChainReportServiceTests
             competingContext.PickLists.Add(new PickList
             {
                 PickListNo = pendingPickList.PickListNo,
-                SalesOrderId = pendingPickList.SalesOrderId
+                SalesOrderId = 2
+            });
+            await competingContext.SaveChangesAsync(cancellationToken);
+
+            return result;
+        }
+    }
+
+    private sealed class InsertCompetingDraftPickListInterceptor(string connectionString) : SaveChangesInterceptor
+    {
+        private bool _hasInserted;
+
+        public bool InsertedCompetingPickList => _hasInserted;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_hasInserted || eventData.Context is null)
+            {
+                return result;
+            }
+
+            var pendingPickList = eventData.Context.ChangeTracker.Entries<PickList>()
+                .Select(entry => entry.Entity)
+                .SingleOrDefault(pickList => eventData.Context.Entry(pickList).State == EntityState.Added);
+            if (pendingPickList is null)
+            {
+                return result;
+            }
+
+            _hasInserted = true;
+            await using var competingConnection = new SqliteConnection(connectionString);
+            await competingConnection.OpenAsync(cancellationToken);
+            await using var competingContext = new ApplicationDbContext(
+                new DbContextOptionsBuilder<ApplicationDbContext>()
+                    .UseSqlite(competingConnection)
+                    .Options);
+            competingContext.PickLists.Add(new PickList
+            {
+                PickListNo = "PK-20260731-777",
+                SalesOrderId = pendingPickList.SalesOrderId,
+                Status = DocumentStatus.Draft,
+                Items = pendingPickList.Items.Select(item => new PickListItem
+                {
+                    ProductId = item.ProductId,
+                    LocationId = item.LocationId,
+                    LotId = item.LotId,
+                    QtyToPick = item.QtyToPick,
+                    SequenceOrder = item.SequenceOrder
+                }).ToList()
             });
             await competingContext.SaveChangesAsync(cancellationToken);
 

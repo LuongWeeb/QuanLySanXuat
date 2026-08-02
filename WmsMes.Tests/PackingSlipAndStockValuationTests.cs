@@ -216,9 +216,16 @@ public class PackingSlipAndStockValuationTests : IClassFixture<PdfFontRegistrati
     }
 
     [Fact]
-    public void ReportController_RequiresAuthenticatedUser()
+    public void SensitiveReportAndPackingSlipActions_RequireWarehouseBusinessRoles()
     {
-        Assert.NotNull(typeof(ReportController).GetCustomAttribute<AuthorizeAttribute>());
+        Assert.Equal(
+            "Admin,Warehouse,Manager",
+            Assert.Single(typeof(ReportController).GetCustomAttributes<AuthorizeAttribute>()).Roles);
+        var packingSlip = typeof(PrintController).GetMethod(nameof(PrintController.PrintPackingSlip));
+        Assert.NotNull(packingSlip);
+        Assert.Equal(
+            "Admin,Warehouse,Manager",
+            Assert.Single(packingSlip!.GetCustomAttributes<AuthorizeAttribute>()).Roles);
     }
 
     private static async Task SeedStockBalancesAsync(DbContextOptions<ApplicationDbContext> options)

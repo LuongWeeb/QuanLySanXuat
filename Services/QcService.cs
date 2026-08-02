@@ -18,6 +18,7 @@ public class QcService : IQcService
     private readonly IHubContext<QualityHub>? _qualityHub;
     private readonly IHubContext<InventoryHub>? _inventoryHub;
     private readonly ILogger<QcService> _logger;
+    private readonly INotificationService? _notificationService;
 
     public QcService(ApplicationDbContext context)
         : this(context, null, null)
@@ -28,17 +29,20 @@ public class QcService : IQcService
         ApplicationDbContext context,
         IHubContext<QualityHub>? qualityHub,
         IHubContext<InventoryHub>? inventoryHub = null,
-        ILogger<QcService>? logger = null)
+        ILogger<QcService>? logger = null,
+        INotificationService? notificationService = null)
     {
         _context = context;
         _qualityHub = qualityHub;
         _inventoryHub = inventoryHub;
         _logger = logger ?? NullLogger<QcService>.Instance;
+        _notificationService = notificationService;
     }
 
     public async Task<bool> SubmitQCInspectionAsync(QCInspection inspection, string userId)
     {
-        await using var transaction = await BeginTransactionIfRelationalAsync();
+        var transaction = await BeginTransactionIfRelationalAsync();
+        string? committedLotNo = null;
         try
         {
             var lot = await _context.Lots
@@ -95,18 +99,22 @@ public class QcService : IQcService
                     userId);
             }
 
+            committedLotNo = lot.LotNo;
             await _context.SaveChangesAsync();
             await CommitIfRelationalAsync(transaction);
-
-            await NotifyAfterCommitAsync(inspection, lot.LotNo);
-
-            return true;
         }
         catch
         {
             await RollbackIfRelationalAsync(transaction);
             throw;
         }
+        finally
+        {
+            await DisposeTransactionSafelyAsync(transaction, inspection.Id);
+        }
+
+        await NotifyAfterCommitWithoutThrowAsync(inspection, committedLotNo!);
+        return true;
     }
 
     private async Task EvaluateLinesAsync(QCInspection inspection, int productId)
@@ -193,6 +201,25 @@ public class QcService : IQcService
 
     private async Task NotifyAfterCommitAsync(QCInspection inspection, string lotNo)
     {
+        if (inspection.Result == QCResult.REJECT && _notificationService is not null)
+        {
+            try
+            {
+                await _notificationService.SendNotificationAsync(
+                    "QC REJECT",
+                    $"Lô {lotNo} không đạt kiểm định và đã được chuyển sang khu cách ly.",
+                    "Danger",
+                    "/Dashboard");
+            }
+            catch (Exception exception)
+            {
+                LogWarningSafely(
+                    exception,
+                    "QC inspection {InspectionId} committed but business notification persistence failed.",
+                    inspection.Id);
+            }
+        }
+
         if (inspection.Result == QCResult.REJECT && _qualityHub is not null)
         {
             try
@@ -201,7 +228,10 @@ public class QcService : IQcService
             }
             catch (Exception exception)
             {
-                _logger.LogWarning(exception, "QC inspection {InspectionId} committed but quality notification failed.", inspection.Id);
+                LogWarningSafely(
+                    exception,
+                    "QC inspection {InspectionId} committed but quality notification failed.",
+                    inspection.Id);
             }
         }
 
@@ -213,8 +243,60 @@ public class QcService : IQcService
             }
             catch (Exception exception)
             {
-                _logger.LogWarning(exception, "QC inspection {InspectionId} committed but inventory notification failed.", inspection.Id);
+                LogWarningSafely(
+                    exception,
+                    "QC inspection {InspectionId} committed but inventory notification failed.",
+                    inspection.Id);
             }
+        }
+    }
+
+    private async Task NotifyAfterCommitWithoutThrowAsync(QCInspection inspection, string lotNo)
+    {
+        try
+        {
+            await NotifyAfterCommitAsync(inspection, lotNo);
+        }
+        catch (Exception exception)
+        {
+            LogWarningSafely(
+                exception,
+                "QC inspection {InspectionId} committed but post-commit notification handling failed.",
+                inspection.Id);
+        }
+    }
+
+    private async Task DisposeTransactionSafelyAsync(
+        IDbContextTransaction? transaction,
+        int inspectionId)
+    {
+        if (transaction is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await transaction.DisposeAsync();
+        }
+        catch (Exception exception)
+        {
+            LogWarningSafely(
+                exception,
+                "QC inspection {InspectionId} committed but transaction cleanup failed.",
+                inspectionId);
+        }
+    }
+
+    private void LogWarningSafely(Exception exception, string message, int inspectionId)
+    {
+        try
+        {
+            _logger.LogWarning(exception, message, inspectionId);
+        }
+        catch
+        {
+            // Logging is best effort after the business transaction has completed.
         }
     }
 

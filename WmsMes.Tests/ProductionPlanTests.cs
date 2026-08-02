@@ -1,10 +1,12 @@
 using System.Reflection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Moq;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
 using WmsMes.Web.DTOs;
+using WmsMes.Web.Services;
 using Xunit;
 
 namespace WmsMes.Tests;
@@ -122,6 +124,75 @@ public class ProductionPlanTests
         Assert.True(await InvokeAsync<bool>(service, "CompletePlanAsync", 1));
         Assert.False(await InvokeAsync<bool>(service, "CompletePlanAsync", 1));
         Assert.Equal(DocumentStatus.Completed, (await context.ProductionPlans.FindAsync(1))!.Status);
+    }
+
+    [Fact]
+    public async Task CompletePlan_PublishesCompletionNotificationOnlyOnce()
+    {
+        await using var context = CreateInMemoryContext();
+        context.ProductionPlans.Add(new ProductionPlan { Id = 1, PlanNo = "PP-300" });
+        await context.SaveChangesAsync();
+        var notifications = new Mock<INotificationService>(MockBehavior.Strict);
+        notifications.Setup(service => service.SendNotificationAsync(
+                "Kế hoạch sản xuất hoàn thành",
+                It.Is<string>(message => message.Contains("PP-300", StringComparison.Ordinal)),
+                "Info",
+                "/Dashboard"))
+            .Returns(() =>
+            {
+                Assert.Equal(
+                    DocumentStatus.Completed,
+                    context.ProductionPlans.Single(plan => plan.Id == 1).Status);
+                return Task.CompletedTask;
+            });
+        var service = new ProductionPlanService(
+            context,
+            notificationService: notifications.Object);
+
+        Assert.True(await service.CompletePlanAsync(1));
+        Assert.False(await service.CompletePlanAsync(1));
+
+        notifications.VerifyAll();
+    }
+
+    [Fact]
+    public async Task CompletePlan_WithStaleRelationalContexts_PublishesOnlyOneCompletionNotification()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using (var seed = new ApplicationDbContext(options))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            seed.ProductionPlans.Add(new ProductionPlan { Id = 1, PlanNo = "PP-RACE" });
+            await seed.SaveChangesAsync();
+        }
+        await using var firstContext = new ApplicationDbContext(options);
+        await using var staleContext = new ApplicationDbContext(options);
+        await firstContext.ProductionPlans.FindAsync(1);
+        await staleContext.ProductionPlans.FindAsync(1);
+        var notifications = new Mock<INotificationService>();
+        notifications.Setup(service => service.SendNotificationAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>()))
+            .Returns(Task.CompletedTask);
+
+        var first = await new ProductionPlanService(firstContext, notifications.Object)
+            .CompletePlanAsync(1);
+        var second = await new ProductionPlanService(staleContext, notifications.Object)
+            .CompletePlanAsync(1);
+
+        Assert.True(first);
+        Assert.False(second);
+        notifications.Verify(service => service.SendNotificationAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string?>()), Times.Once);
     }
 
     private static ApplicationDbContext CreateInMemoryContext()

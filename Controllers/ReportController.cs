@@ -8,7 +8,7 @@ using WmsMes.Web.ViewModels;
 
 namespace WmsMes.Web.Controllers;
 
-[Authorize]
+[Authorize(Roles = "Admin,Warehouse,Manager")]
 public class ReportController : Controller
 {
     private const string WorksheetName = "Báo cáo Tài chính Kho";

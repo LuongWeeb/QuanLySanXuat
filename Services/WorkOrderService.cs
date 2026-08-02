@@ -2,6 +2,7 @@ using System.Data;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging.Abstractions;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -16,17 +17,23 @@ public class WorkOrderService : IWorkOrderService
     private readonly IHubContext<ProductionHub>? _productionHub;
     private readonly TimeProvider _timeProvider;
     private readonly TimeZoneInfo _businessTimeZone;
+    private readonly INotificationService? _notificationService;
+    private readonly ILogger<WorkOrderService> _logger;
 
     public WorkOrderService(
         ApplicationDbContext context,
         IHubContext<ProductionHub>? productionHub = null,
         TimeProvider? timeProvider = null,
-        TimeZoneInfo? businessTimeZone = null)
+        TimeZoneInfo? businessTimeZone = null,
+        INotificationService? notificationService = null,
+        ILogger<WorkOrderService>? logger = null)
     {
         _context = context;
         _productionHub = productionHub;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _businessTimeZone = businessTimeZone ?? TimeZoneInfo.Local;
+        _notificationService = notificationService;
+        _logger = logger ?? NullLogger<WorkOrderService>.Instance;
     }
 
     public async Task<WorkOrder?> GetByIdAsync(int id)
@@ -265,7 +272,8 @@ public class WorkOrderService : IWorkOrderService
 
     public async Task<bool> CompleteWorkOrderAsync(int workOrderId, string userId)
     {
-        await using var transaction = await BeginTransactionIfSupportedAsync();
+        var transaction = await BeginTransactionIfSupportedAsync();
+        WorkOrder? completedWorkOrder = null;
         try
         {
             var workOrder = await _context.WorkOrders
@@ -457,14 +465,21 @@ public class WorkOrderService : IWorkOrderService
             workOrder.Status = WorkOrderStatus.Completed;
             await _context.SaveChangesAsync();
             await CommitIfSupportedAsync(transaction);
-            await NotifyProgressAsync();
-            return true;
+            completedWorkOrder = workOrder;
         }
         catch
         {
             await RollbackIfSupportedAsync(transaction);
             throw;
         }
+        finally
+        {
+            await DisposeTransactionSafelyAsync(transaction, workOrderId);
+        }
+
+        await NotifyCompletionSafelyAsync(completedWorkOrder!);
+        await NotifyProgressAsync();
+        return true;
     }
 
     private async Task<IDbContextTransaction?> BeginTransactionIfSupportedAsync()
@@ -492,9 +507,81 @@ public class WorkOrderService : IWorkOrderService
 
     private async Task NotifyProgressAsync()
     {
-        if (_productionHub != null)
+        if (_productionHub is null)
+        {
+            return;
+        }
+
+        try
         {
             await _productionHub.Clients.All.SendAsync("ReceiveProgressUpdate");
+        }
+        catch (Exception exception)
+        {
+            LogWarningSafely(
+                exception,
+                "Production mutation committed but realtime progress broadcast failed.");
+        }
+    }
+
+    private async Task NotifyCompletionSafelyAsync(WorkOrder workOrder)
+    {
+        if (_notificationService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _notificationService.SendNotificationAsync(
+                "Lệnh sản xuất hoàn thành",
+                $"Lệnh sản xuất {workOrder.Code} đã hoàn thành.",
+                "Info",
+                "/Dashboard");
+        }
+        catch (Exception exception)
+        {
+            LogWarningSafely(
+                exception,
+                "Work order {WorkOrderId} committed but business notification persistence failed.",
+                workOrder.Id);
+        }
+    }
+
+    private async Task DisposeTransactionSafelyAsync(
+        IDbContextTransaction? transaction,
+        int workOrderId)
+    {
+        if (transaction is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await transaction.DisposeAsync();
+        }
+        catch (Exception exception)
+        {
+            LogWarningSafely(
+                exception,
+                "Work order {WorkOrderId} committed but transaction cleanup failed.",
+                workOrderId);
+        }
+    }
+
+    private void LogWarningSafely(
+        Exception exception,
+        string message,
+        params object?[] arguments)
+    {
+        try
+        {
+            _logger.LogWarning(exception, message, arguments);
+        }
+        catch
+        {
+            // Logging is best effort after the business transaction has completed.
         }
     }
 }

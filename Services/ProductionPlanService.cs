@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using WmsMes.Web.Data;
 using WmsMes.Web.Domain.Entities;
 using WmsMes.Web.Domain.Enums;
@@ -9,10 +10,22 @@ namespace WmsMes.Web.Services;
 public class ProductionPlanService : IProductionPlanService
 {
     private readonly ApplicationDbContext _context;
+    private readonly INotificationService? _notificationService;
+    private readonly ILogger<ProductionPlanService> _logger;
 
     public ProductionPlanService(ApplicationDbContext context)
+        : this(context, null, null)
+    {
+    }
+
+    public ProductionPlanService(
+        ApplicationDbContext context,
+        INotificationService? notificationService = null,
+        ILogger<ProductionPlanService>? logger = null)
     {
         _context = context;
+        _notificationService = notificationService;
+        _logger = logger ?? NullLogger<ProductionPlanService>.Instance;
     }
 
     public Task<ProductionPlan?> GetByIdAsync(int id)
@@ -157,14 +170,74 @@ public class ProductionPlanService : IProductionPlanService
 
     public async Task<bool> CompletePlanAsync(int planId)
     {
-        var plan = await _context.ProductionPlans.FindAsync(planId);
-        if (plan is null || plan.Status != DocumentStatus.Draft)
+        ProductionPlan? plan;
+        if (_context.Database.IsRelational())
         {
-            return false;
+            plan = await _context.ProductionPlans
+                .AsNoTracking()
+                .SingleOrDefaultAsync(candidate => candidate.Id == planId);
+            if (plan is null)
+            {
+                return false;
+            }
+
+            var transitioned = await _context.ProductionPlans
+                .Where(candidate =>
+                    candidate.Id == planId &&
+                    candidate.Status == DocumentStatus.Draft)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(candidate => candidate.Status, DocumentStatus.Completed));
+            if (transitioned != 1)
+            {
+                return false;
+            }
+
+            plan.Status = DocumentStatus.Completed;
+            var trackedPlan = _context.ChangeTracker.Entries<ProductionPlan>()
+                .FirstOrDefault(entry => entry.Entity.Id == planId);
+            if (trackedPlan is not null)
+            {
+                trackedPlan.Entity.Status = DocumentStatus.Completed;
+                trackedPlan.State = EntityState.Unchanged;
+            }
+        }
+        else
+        {
+            plan = await _context.ProductionPlans.FindAsync(planId);
+            if (plan is null || plan.Status != DocumentStatus.Draft)
+            {
+                return false;
+            }
+
+            plan.Status = DocumentStatus.Completed;
+            await _context.SaveChangesAsync();
         }
 
-        plan.Status = DocumentStatus.Completed;
-        await _context.SaveChangesAsync();
+        await NotifyCompletionSafelyAsync(plan);
         return true;
+    }
+
+    private async Task NotifyCompletionSafelyAsync(ProductionPlan plan)
+    {
+        if (_notificationService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _notificationService.SendNotificationAsync(
+                "Kế hoạch sản xuất hoàn thành",
+                $"Kế hoạch sản xuất {plan.PlanNo} đã hoàn thành.",
+                "Info",
+                "/Dashboard");
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Production plan {ProductionPlanId} completed but business notification persistence failed.",
+                plan.Id);
+        }
     }
 }
