@@ -119,6 +119,7 @@ public static class DbSeeder
         await SeedInventoryDataAsync(context);
         await SeedWorkOrdersAsync(context);
         await SeedCycleCountDataAsync(context);
+        await SeedSalesAndPurchaseOrdersAsync(context);
     }
 
     public static async Task SeedCycleCountDataAsync(ApplicationDbContext context)
@@ -539,6 +540,106 @@ public static class DbSeeder
         if (result.Succeeded)
         {
             await userManager.AddToRoleAsync(user, role);
+        }
+    }
+
+    public static async Task SeedSalesAndPurchaseOrdersAsync(ApplicationDbContext context)
+    {
+        var customers = await context.Customers.ToDictionaryAsync(c => c.Code);
+        var suppliers = await context.Suppliers.ToDictionaryAsync(s => s.Code);
+        var products = await context.Products.ToDictionaryAsync(p => p.Code);
+
+        // Seed Sales Orders (SO)
+        if (!await context.SalesOrders.AnyAsync(s => s.OrderNo == "SO-20260801-01"))
+        {
+            if (customers.TryGetValue("CUST-DECA-01", out var customer) &&
+                products.TryGetValue("PROD-BIKE-01", out var bike) &&
+                products.TryGetValue("PROD-HELM-01", out var helm))
+            {
+                var so = new SalesOrder
+                {
+                    OrderNo = "SO-20260801-01",
+                    CustomerId = customer.Id,
+                    OrderDate = DateTime.UtcNow.AddDays(-1),
+                    Status = DocumentStatus.Draft,
+                    Items = new List<SalesOrderItem>
+                    {
+                        new SalesOrderItem { ProductId = bike.Id, Qty = 5m, UnitPrice = 3500000m, DeliveredQty = 0m },
+                        new SalesOrderItem { ProductId = helm.Id, Qty = 10m, UnitPrice = 450000m, DeliveredQty = 0m }
+                    }
+                };
+                context.SalesOrders.Add(so);
+                await context.SaveChangesAsync();
+            }
+        }
+
+        if (!await context.SalesOrders.AnyAsync(s => s.OrderNo == "SO-20260801-02"))
+        {
+            if (customers.TryGetValue("CUST-HN-01", out var customer) &&
+                products.TryGetValue("PROD-BIKE-01", out var bike))
+            {
+                var so = new SalesOrder
+                {
+                    OrderNo = "SO-20260801-02",
+                    CustomerId = customer.Id,
+                    OrderDate = DateTime.UtcNow.AddDays(-2),
+                    Status = DocumentStatus.Draft,
+                    Items = new List<SalesOrderItem>
+                    {
+                        new SalesOrderItem { ProductId = bike.Id, Qty = 3m, UnitPrice = 3600000m, DeliveredQty = 0m }
+                    }
+                };
+                context.SalesOrders.Add(so);
+                await context.SaveChangesAsync();
+            }
+        }
+
+        // Seed Purchase Requests (PR)
+        if (!await context.PurchaseRequests.AnyAsync(p => p.RequestNo == "PR-20260801-01"))
+        {
+            if (products.TryGetValue("RM-FRAME-01", out var frame) &&
+                products.TryGetValue("RM-ABS-01", out var abs))
+            {
+                var pr = new PurchaseRequest
+                {
+                    RequestNo = "PR-20260801-01",
+                    RequestDate = DateTime.UtcNow.AddDays(-2),
+                    RequiredDate = DateTime.UtcNow.AddDays(3),
+                    Status = DocumentStatus.Draft,
+                    Items = new List<PurchaseRequestItem>
+                    {
+                        new PurchaseRequestItem { ProductId = frame.Id, Qty = 50m },
+                        new PurchaseRequestItem { ProductId = abs.Id, Qty = 200m }
+                    }
+                };
+                context.PurchaseRequests.Add(pr);
+                await context.SaveChangesAsync();
+            }
+        }
+
+        // Seed Purchase Orders (PO)
+        if (!await context.PurchaseOrders.AnyAsync(p => p.OrderNo == "PO-20260801-01"))
+        {
+            if (suppliers.TryGetValue("SUPP-HN-01", out var supplier) &&
+                products.TryGetValue("RM-FRAME-01", out var frame) &&
+                products.TryGetValue("RM-WHEEL-01", out var wheel))
+            {
+                var po = new PurchaseOrder
+                {
+                    OrderNo = "PO-20260801-01",
+                    SupplierId = supplier.Id,
+                    OrderDate = DateTime.UtcNow.AddDays(-1),
+                    ExpectedDeliveryDate = DateTime.UtcNow.AddDays(5),
+                    Status = DocumentStatus.Draft,
+                    Items = new List<PurchaseOrderItem>
+                    {
+                        new PurchaseOrderItem { ProductId = frame.Id, Qty = 50m, UnitPrice = 1200000m, ReceivedQty = 0m },
+                        new PurchaseOrderItem { ProductId = wheel.Id, Qty = 100m, UnitPrice = 450000m, ReceivedQty = 0m }
+                    }
+                };
+                context.PurchaseOrders.Add(po);
+                await context.SaveChangesAsync();
+            }
         }
     }
 }
