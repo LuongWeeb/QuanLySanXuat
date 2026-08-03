@@ -16,14 +16,22 @@ public class ProductionPlanController : Controller
     private readonly IProductionPlanService _planService;
     private readonly IPurchaseRequestService? _purchaseRequestService;
 
+    [ActivatorUtilitiesConstructor]
     public ProductionPlanController(
         ApplicationDbContext context,
         IProductionPlanService planService,
-        IPurchaseRequestService? purchaseRequestService = null)
+        IPurchaseRequestService? purchaseRequestService)
     {
         _context = context;
         _planService = planService;
         _purchaseRequestService = purchaseRequestService;
+    }
+
+    public ProductionPlanController(
+        ApplicationDbContext context,
+        IProductionPlanService planService)
+        : this(context, planService, null)
+    {
     }
 
     public async Task<IActionResult> Index()
