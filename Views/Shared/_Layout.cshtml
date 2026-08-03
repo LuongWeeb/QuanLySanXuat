@@ -39,15 +39,15 @@
         </a>
         <nav class="side-nav">
             <div class="nav-section-title">Tổng quan</div>
-            <a asp-controller="Home" asp-action="Index">Bảng điều khiển</a>
-            <a asp-controller="Dashboard" asp-action="Index">Dashboard Nhà máy & OEE</a>
+            <a class="@(currentController == "Home" && ViewContext.RouteData.Values["action"]?.ToString() == "Index" ? "active" : null)" asp-controller="Home" asp-action="Index">Bảng điều khiển</a>
+            <a class="@(currentController == "Dashboard" ? "active" : null)" asp-controller="Dashboard" asp-action="Index">Dashboard Nhà máy & OEE</a>
 
             <div class="nav-section-title">Quản lý Kho (WMS)</div>
-            <a asp-controller="Inventory" asp-action="Index">Số dư tồn kho</a>
-            <a asp-controller="Inventory" asp-action="Receipts">Nhập kho</a>
-            <a asp-controller="Inventory" asp-action="Issues">Xuất kho</a>
-            <a asp-controller="Warehouse" asp-action="Index">Kho & Vị trí</a>
-            <a asp-controller="CycleCount" asp-action="Index">Kiểm kê kho (Stocktake)</a>
+            <a class="@(currentController == "Inventory" && ViewContext.RouteData.Values["action"]?.ToString() == "Index" ? "active" : null)" asp-controller="Inventory" asp-action="Index">Số dư tồn kho</a>
+            <a class="@(currentController == "Inventory" && ViewContext.RouteData.Values["action"]?.ToString() == "Receipts" ? "active" : null)" asp-controller="Inventory" asp-action="Receipts">Nhập kho</a>
+            <a class="@(currentController == "Inventory" && ViewContext.RouteData.Values["action"]?.ToString() == "Issues" ? "active" : null)" asp-controller="Inventory" asp-action="Issues">Xuất kho</a>
+            <a class="@(currentController == "Warehouse" ? "active" : null)" asp-controller="Warehouse" asp-action="Index">Kho & Vị trí</a>
+            <a class="@(currentController == "CycleCount" ? "active" : null)" asp-controller="CycleCount" asp-action="Index">Kiểm kê kho (Stocktake)</a>
             @if (User.IsInRole("Admin") || User.IsInRole("Warehouse") || User.IsInRole("Manager"))
             {
                 <a class="@(currentController == "PickList" ? "active" : null)" asp-controller="PickList" asp-action="Index">Danh sách lấy hàng</a>
@@ -62,23 +62,23 @@
             <div class="nav-section-title">Quản lý Sản xuất (MES)</div>
             @if (User.IsInRole("Admin") || User.IsInRole("Planner") || User.IsInRole("Manager"))
             {
-                <a asp-controller="WorkOrder" asp-action="Index">Lệnh sản xuất</a>
-                <a asp-controller="ProductionPlan" asp-action="Index">Kế hoạch sản xuất (MRP)</a>
-                <a asp-controller="Mrp" asp-action="Index">Lập kế hoạch MRP</a>
-                <a asp-controller="Bom" asp-action="Index">Định mức vật tư (BOM)</a>
-                <a asp-controller="WorkCenter" asp-action="Index">Trạm sản xuất & chi phí</a>
+                <a class="@(currentController == "WorkOrder" ? "active" : null)" asp-controller="WorkOrder" asp-action="Index">Lệnh sản xuất</a>
+                <a class="@(currentController == "ProductionPlan" ? "active" : null)" asp-controller="ProductionPlan" asp-action="Index">Kế hoạch sản xuất (MRP)</a>
+                <a class="@(currentController == "Mrp" ? "active" : null)" asp-controller="Mrp" asp-action="Index">Lập kế hoạch MRP</a>
+                <a class="@(currentController == "Bom" ? "active" : null)" asp-controller="Bom" asp-action="Index">Định mức vật tư (BOM)</a>
+                <a class="@(currentController == "WorkCenter" ? "active" : null)" asp-controller="WorkCenter" asp-action="Index">Trạm sản xuất & chi phí</a>
                 <div class="nav-section-title">Mua hàng & Bán hàng</div>
-                <a asp-controller="SalesOrder" asp-action="Index">Đơn bán hàng (SO)</a>
-                <a asp-controller="PurchaseOrder" asp-action="Index">Đơn mua hàng (PO)</a>
-                <a asp-controller="PurchaseOrder" asp-action="Requests">Yêu cầu mua hàng (PR)</a>
+                <a class="@(currentController == "SalesOrder" ? "active" : null)" asp-controller="SalesOrder" asp-action="Index">Đơn bán hàng (SO)</a>
+                <a class="@(currentController == "PurchaseOrder" && ViewContext.RouteData.Values["action"]?.ToString() == "Index" ? "active" : null)" asp-controller="PurchaseOrder" asp-action="Index">Đơn mua hàng (PO)</a>
+                <a class="@(currentController == "PurchaseOrder" && ViewContext.RouteData.Values["action"]?.ToString() == "Requests" ? "active" : null)" asp-controller="PurchaseOrder" asp-action="Requests">Yêu cầu mua hàng (PR)</a>
             }
-            <a asp-controller="Worker" asp-action="Index">Trạm vận hành</a>
-            <a asp-controller="Product" asp-action="Index">Sản phẩm (SKU)</a>
+            <a class="@(currentController == "Worker" ? "active" : null)" asp-controller="Worker" asp-action="Index">Trạm vận hành</a>
+            <a class="@(currentController == "Product" ? "active" : null)" asp-controller="Product" asp-action="Index">Sản phẩm (SKU)</a>
 
             <div class="nav-section-title">Kiểm soát Chất lượng & Truy vết</div>
-            <a asp-controller="QcChecklist" asp-action="Index">Mẫu tiêu chuẩn QC</a>
-            <a asp-controller="Qc" asp-action="Pending">Đợt kiểm định QC</a>
-            <a asp-controller="Traceability" asp-action="Index">Truy vết lô hàng</a>
+            <a class="@(currentController == "QcChecklist" ? "active" : null)" asp-controller="QcChecklist" asp-action="Index">Mẫu tiêu chuẩn QC</a>
+            <a class="@(currentController == "Qc" ? "active" : null)" asp-controller="Qc" asp-action="Pending">Đợt kiểm định QC</a>
+            <a class="@(currentController == "Traceability" ? "active" : null)" asp-controller="Traceability" asp-action="Index">Truy vết lô hàng</a>
         </nav>
     </aside>
     <div class="app-main">
