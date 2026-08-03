@@ -18,15 +18,8 @@ public class ProductionPlanController : Controller
 
     public ProductionPlanController(
         ApplicationDbContext context,
-        IProductionPlanService planService)
-        : this(context, planService, null)
-    {
-    }
-
-    public ProductionPlanController(
-        ApplicationDbContext context,
         IProductionPlanService planService,
-        IPurchaseRequestService? purchaseRequestService)
+        IPurchaseRequestService? purchaseRequestService = null)
     {
         _context = context;
         _planService = planService;
