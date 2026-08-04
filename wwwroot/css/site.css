@@ -1,4 +1,9 @@
 :root {
+  /* Override Bootstrap's own font variables so every component that reads them
+     directly (modal, dropdown, tooltip, popover, toast, offcanvas) uses Inter
+     too, instead of falling back to the system font stack. */
+  --bs-font-sans-serif: "Inter", "Segoe UI", Arial, sans-serif;
+  --bs-body-font-family: var(--bs-font-sans-serif);
   --color-primary: #334155;
   --color-primary-strong: #0f172a;
   --color-secondary: #475569;
@@ -9,8 +14,9 @@
   --color-muted: #f2f3f4;
   --color-border: #e6e8ea;
   --color-foreground: #0f172a;
-  --color-subtle: #64748b;
+  --color-subtle: #475569;
   --color-danger: #dc2626;
+  --color-warning: #d97706;
   --shadow-panel: 0 10px 30px rgba(15, 23, 42, 0.08);
   --radius: 8px;
 }
@@ -25,7 +31,9 @@ body {
   margin: 0;
   background: var(--color-background);
   color: var(--color-foreground);
-  font-family: "Fira Sans", Arial, sans-serif;
+  font-family: "Inter", "Segoe UI", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 a {
@@ -144,7 +152,7 @@ a:focus-visible {
 }
 
 .side-nav a {
-  min-height: 38px;
+  min-height: 40px;
   padding: 9px 12px;
   border-radius: 8px;
   color: #cbd5e1;
@@ -152,6 +160,7 @@ a:focus-visible {
   text-decoration: none;
   display: flex;
   align-items: center;
+  gap: 10px;
 }
 
 .side-nav a:hover,
@@ -166,23 +175,23 @@ a:focus-visible {
   font-weight: 700;
 }
 
+.nav-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.side-nav a:hover .nav-icon,
+.side-nav a:focus-visible .nav-icon,
+.side-nav a.active .nav-icon {
+  opacity: 1;
+}
+
 .app-main {
   min-width: 0;
 }
 
-.app-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 82px;
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--color-border);
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(10px);
-}
-
-.app-topbar h1,
 .toolbar-row h2 {
   margin: 0;
   font-size: 1.35rem;
@@ -199,10 +208,79 @@ a:focus-visible {
   text-transform: uppercase;
 }
 
-.topbar-actions {
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-footer-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 0.88rem;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.sidebar-footer-btn:hover,
+.sidebar-footer-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.sidebar-footer-btn .nav-icon {
+  opacity: 0.85;
+}
+
+.sidebar-account {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-account .user-chip {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-account form {
+  flex-shrink: 0;
+}
+
+.sidebar-account .sidebar-footer-btn {
+  width: auto;
+  padding: 8px;
+}
+
+.sidebar-account .sidebar-footer-btn span:last-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.user-chip {
+  overflow: hidden;
+  padding: 7px 10px;
+  color: #cbd5e1;
+  font-size: 0.86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .notification-menu {
@@ -220,19 +298,8 @@ a:focus-visible {
   border-bottom: 0;
 }
 
-.user-chip {
-  max-width: 220px;
-  overflow: hidden;
-  padding: 7px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  color: var(--color-secondary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .content-frame {
-  padding: 22px 24px 36px;
+  padding: 28px 24px 36px;
 }
 
 .toolbar-row {
@@ -448,6 +515,21 @@ code {
   color: #475569;
 }
 
+.status-pill.is-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-pill.is-danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.status-pill.is-info {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
 .warehouse-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -639,6 +721,78 @@ code {
   border: 1px solid var(--color-border);
 }
 
+/* Field-level validation: ASP.NET Core auto-applies .input-validation-error to
+   asp-for inputs on ModelState errors (server round-trip) and jquery.validate.unobtrusive
+   applies it live on the client, so styling this class covers every asp-for form. */
+.input-validation-error {
+  border-color: var(--color-danger) !important;
+}
+
+.input-validation-error:focus {
+  box-shadow: 0 0 0 0.2rem rgba(220, 38, 38, 0.22) !important;
+}
+
+.field-validation-error {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-danger);
+  font-size: 0.82rem;
+}
+
+.field-validation-valid {
+  display: none;
+}
+
+.validation-summary-errors {
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius);
+  background: #fef2f2;
+  color: var(--color-danger);
+}
+
+.validation-summary-errors ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.validation-summary-valid {
+  display: none;
+}
+
+.btn.is-submitting {
+  position: relative;
+  color: transparent !important;
+  pointer-events: none;
+}
+
+.btn.is-submitting::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1rem;
+  height: 1rem;
+  margin: -0.5rem 0 0 -0.5rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  color: #fff;
+  animation: btn-spin 0.6s linear infinite;
+}
+
+.btn-outline-primary.is-submitting::after,
+.btn-outline-secondary.is-submitting::after {
+  color: var(--color-primary);
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -657,7 +811,6 @@ code {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .app-topbar,
   .toolbar-row {
     align-items: flex-start;
     flex-direction: column;
@@ -669,18 +822,12 @@ code {
 }
 
 @media (max-width: 520px) {
-  .content-frame,
-  .app-topbar {
+  .content-frame {
     padding-inline: 14px;
   }
 
   .side-nav {
     grid-template-columns: 1fr;
-  }
-
-  .topbar-actions {
-    width: 100%;
-    justify-content: space-between;
   }
 
   .metric-grid {

@@ -6,6 +6,11 @@
     var products = (IEnumerable<Product>)ViewBag.Products;
     var locations = (IEnumerable<Location>)ViewBag.Locations;
     var purchaseOrders = (IEnumerable<PurchaseOrder>)ViewBag.PurchaseOrders;
+
+    string ErrorClass(string key) =>
+        ViewData.ModelState.TryGetValue(key, out var entry) && entry.Errors.Count > 0
+            ? "input-validation-error"
+            : "";
 }
 
 <section class="toolbar-row">
@@ -83,52 +88,55 @@
                         var reasonValue = ViewData.ModelState.TryGetValue(reasonKey, out var reasonEntry)
                             ? reasonEntry.AttemptedValue
                             : line.VarianceReason;
+                        var productKey = $"Lines[{index}].ProductId";
+                        var lotKey = $"Lines[{index}].LotNo";
+                        var locationKey = $"Lines[{index}].LocationId";
                         <tr data-line-row>
                             <td>
                                 <label class="visually-hidden" data-label-for="ProductId">Sản phẩm</label>
-                                <select name="Lines[@index].ProductId" data-field="ProductId" class="form-select" required>
+                                <select name="Lines[@index].ProductId" data-field="ProductId" class="form-select @ErrorClass(productKey)" required>
                                     <option value="">-- Chọn sản phẩm --</option>
                                     @foreach (var product in ViewBag.Products)
                                     {
                                         <option value="@product.Id" selected="@(product.Id == line.ProductId ? "selected" : null)">@product.Code - @product.Name</option>
                                     }
                                 </select>
-                                @Html.ValidationMessage($"Lines[{index}].ProductId", null, new { @class = "text-danger", data_validation_for = "ProductId" })
+                                @Html.ValidationMessage($"Lines[{index}].ProductId", null, new { @class = "field-validation-error", data_validation_for = "ProductId" })
                             </td>
                             <td>
                                 <label class="visually-hidden" data-label-for="LotNo">Số lô</label>
-                                <input name="Lines[@index].LotNo" value="@line.LotNo" data-field="LotNo" class="form-control" required />
-                                @Html.ValidationMessage($"Lines[{index}].LotNo", null, new { @class = "text-danger", data_validation_for = "LotNo" })
+                                <input name="Lines[@index].LotNo" value="@line.LotNo" data-field="LotNo" class="form-control @ErrorClass(lotKey)" required />
+                                @Html.ValidationMessage($"Lines[{index}].LotNo", null, new { @class = "field-validation-error", data_validation_for = "LotNo" })
                             </td>
                             <td>
                                 <label class="visually-hidden" data-label-for="Qty">Số lượng</label>
-                                <input name="Lines[@index].Qty" value="@qtyValue" data-field="Qty" type="number" class="form-control" min="0.01" step="0.01" required />
-                                @Html.ValidationMessage($"Lines[{index}].Qty", null, new { @class = "text-danger", data_validation_for = "Qty" })
+                                <input name="Lines[@index].Qty" value="@qtyValue" data-field="Qty" type="number" class="form-control @ErrorClass(qtyKey)" min="0.01" step="0.01" required />
+                                @Html.ValidationMessage($"Lines[{index}].Qty", null, new { @class = "field-validation-error", data_validation_for = "Qty" })
                             </td>
                             <td>
                                 <label class="visually-hidden" data-label-for="UnitPrice">Đơn giá</label>
-                                <input name="Lines[@index].UnitPrice" value="@unitPriceValue" data-field="UnitPrice" type="number" class="form-control" min="0" step="0.01" required />
-                                @Html.ValidationMessage($"Lines[{index}].UnitPrice", null, new { @class = "text-danger", data_validation_for = "UnitPrice" })
+                                <input name="Lines[@index].UnitPrice" value="@unitPriceValue" data-field="UnitPrice" type="number" class="form-control @ErrorClass(unitPriceKey)" min="0" step="0.01" required />
+                                @Html.ValidationMessage($"Lines[{index}].UnitPrice", null, new { @class = "field-validation-error", data_validation_for = "UnitPrice" })
                             </td>
                             <td>
                                 <label class="visually-hidden" data-label-for="LocationId">Vị trí</label>
-                                <select name="Lines[@index].LocationId" data-field="LocationId" class="form-select" required>
+                                <select name="Lines[@index].LocationId" data-field="LocationId" class="form-select @ErrorClass(locationKey)" required>
                                     <option value="">-- Chọn vị trí --</option>
                                     @foreach (var location in ViewBag.Locations)
                                     {
                                         <option value="@location.Id" selected="@(location.Id == line.LocationId ? "selected" : null)">@location.Code</option>
                                     }
                                 </select>
-                                @Html.ValidationMessage($"Lines[{index}].LocationId", null, new { @class = "text-danger", data_validation_for = "LocationId" })
+                                @Html.ValidationMessage($"Lines[{index}].LocationId", null, new { @class = "field-validation-error", data_validation_for = "LocationId" })
                             </td>
                             <td style="min-width: 220px">
                                 <label class="visually-hidden" data-label-for="VarianceReason">Lý do chênh lệch</label>
                                 <textarea name="Lines[@index].VarianceReason"
                                           data-field="VarianceReason"
-                                          class="form-control"
+                                          class="form-control @ErrorClass(reasonKey)"
                                           maxlength="250"
                                           rows="2">@reasonValue</textarea>
-                                @Html.ValidationMessage($"Lines[{index}].VarianceReason", null, new { @class = "text-danger", data_validation_for = "VarianceReason" })
+                                @Html.ValidationMessage($"Lines[{index}].VarianceReason", null, new { @class = "field-validation-error", data_validation_for = "VarianceReason" })
                             </td>
                             <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-line>Xóa dòng</button></td>
                         </tr>
@@ -137,7 +145,7 @@
             </table>
         </div>
 
-        @Html.ValidationMessage("Lines", null, new { @class = "text-danger d-block mb-2" })
+        @Html.ValidationMessage("Lines", null, new { @class = "field-validation-error mb-2" })
         <button type="button" id="add-receipt-line" class="btn btn-outline-primary mb-3">Thêm dòng</button>
         <div class="d-flex gap-2">
             <button type="submit" class="btn btn-primary">Xác nhận nhập kho</button>

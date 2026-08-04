@@ -1,3 +1,4 @@
+@using Microsoft.AspNetCore.Html
 @using WmsMes.Web.Domain.Entities
 @using WmsMes.Web.Services
 @inject INotificationService NotificationService
@@ -14,6 +15,9 @@
     }
 
     var currentController = ViewContext.RouteData.Values["controller"]?.ToString();
+
+    IHtmlContent NavIcon(string path) => Html.Raw(
+        $"<svg class=\"nav-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\">{path}</svg>");
 }
 <!DOCTYPE html>
 <html lang="vi">
@@ -24,7 +28,7 @@
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@500;600&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@500;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/WmsMes.Web.styles.css" asp-append-version="true" />
 </head>
@@ -39,121 +43,120 @@
         </a>
         <nav class="side-nav">
             <div class="nav-section-title">Tổng quan</div>
-            <a class="@(currentController == "Home" && ViewContext.RouteData.Values["action"]?.ToString() == "Index" ? "active" : null)" asp-controller="Home" asp-action="Index">Bảng điều khiển</a>
-            <a class="@(currentController == "Dashboard" ? "active" : null)" asp-controller="Dashboard" asp-action="Index">Dashboard Nhà máy & OEE</a>
+            <a class="@(currentController == "Home" && ViewContext.RouteData.Values["action"]?.ToString() == "Index" ? "active" : null)" asp-controller="Home" asp-action="Index">@NavIcon("<rect x=\"3\" y=\"3\" width=\"7\" height=\"7\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\"/>")<span>Bảng điều khiển</span></a>
+            <a class="@(currentController == "Dashboard" ? "active" : null)" asp-controller="Dashboard" asp-action="Index">@NavIcon("<polyline points=\"22 12 18 12 15 21 9 3 6 12 2 12\"/>")<span>Dashboard Nhà máy &amp; OEE</span></a>
 
             <div class="nav-section-title">Quản lý Kho (WMS)</div>
-            <a class="@(currentController == "Inventory" && ViewContext.RouteData.Values["action"]?.ToString() == "Index" ? "active" : null)" asp-controller="Inventory" asp-action="Index">Số dư tồn kho</a>
-            <a class="@(currentController == "Inventory" && ViewContext.RouteData.Values["action"]?.ToString() == "Receipts" ? "active" : null)" asp-controller="Inventory" asp-action="Receipts">Nhập kho</a>
-            <a class="@(currentController == "Inventory" && ViewContext.RouteData.Values["action"]?.ToString() == "Issues" ? "active" : null)" asp-controller="Inventory" asp-action="Issues">Xuất kho</a>
-            <a class="@(currentController == "Warehouse" ? "active" : null)" asp-controller="Warehouse" asp-action="Index">Kho & Vị trí</a>
-            <a class="@(currentController == "CycleCount" ? "active" : null)" asp-controller="CycleCount" asp-action="Index">Kiểm kê kho (Stocktake)</a>
+            <a class="@(currentController == "Inventory" && ViewContext.RouteData.Values["action"]?.ToString() == "Index" ? "active" : null)" asp-controller="Inventory" asp-action="Index">@NavIcon("<path d=\"M16.5 9.4 7.5 4.21\"/><path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/><polyline points=\"3.27 6.96 12 12.01 20.73 6.96\"/><line x1=\"12\" y1=\"22.08\" x2=\"12\" y2=\"12\"/>")<span>Số dư tồn kho</span></a>
+            <a class="@(currentController == "Inventory" && ViewContext.RouteData.Values["action"]?.ToString() == "Receipts" ? "active" : null)" asp-controller="Inventory" asp-action="Receipts">@NavIcon("<path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/><polyline points=\"7 10 12 15 17 10\"/><line x1=\"12\" y1=\"15\" x2=\"12\" y2=\"3\"/>")<span>Nhập kho</span></a>
+            <a class="@(currentController == "Inventory" && ViewContext.RouteData.Values["action"]?.ToString() == "Issues" ? "active" : null)" asp-controller="Inventory" asp-action="Issues">@NavIcon("<path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/><polyline points=\"17 8 12 3 7 8\"/><line x1=\"12\" y1=\"3\" x2=\"12\" y2=\"15\"/>")<span>Xuất kho</span></a>
+            <a class="@(currentController == "Warehouse" ? "active" : null)" asp-controller="Warehouse" asp-action="Index">@NavIcon("<path d=\"M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z\"/><circle cx=\"12\" cy=\"10\" r=\"3\"/>")<span>Kho &amp; Vị trí</span></a>
+            <a class="@(currentController == "CycleCount" ? "active" : null)" asp-controller="CycleCount" asp-action="Index">@NavIcon("<polyline points=\"9 11 12 14 22 4\"/><path d=\"M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11\"/>")<span>Kiểm kê kho (Stocktake)</span></a>
             @if (User.IsInRole("Admin") || User.IsInRole("Warehouse") || User.IsInRole("Manager"))
             {
-                <a class="@(currentController == "PickList" ? "active" : null)" asp-controller="PickList" asp-action="Index">Danh sách lấy hàng</a>
+                <a class="@(currentController == "PickList" ? "active" : null)" asp-controller="PickList" asp-action="Index">@NavIcon("<line x1=\"8\" y1=\"6\" x2=\"21\" y2=\"6\"/><line x1=\"8\" y1=\"12\" x2=\"21\" y2=\"12\"/><line x1=\"8\" y1=\"18\" x2=\"21\" y2=\"18\"/><line x1=\"3\" y1=\"6\" x2=\"3.01\" y2=\"6\"/><line x1=\"3\" y1=\"12\" x2=\"3.01\" y2=\"12\"/><line x1=\"3\" y1=\"18\" x2=\"3.01\" y2=\"18\"/>")<span>Danh sách lấy hàng</span></a>
             }
 
             <div class="nav-section-title">Báo cáo &amp; Phân tích</div>
             @if (canAccessSupplyChainFeatures)
             {
-                <a class="@(currentController == "Report" ? "active" : null)" asp-controller="Report" asp-action="StockValuation">Báo cáo Tài chính Kho</a>
+                <a class="@(currentController == "Report" ? "active" : null)" asp-controller="Report" asp-action="StockValuation">@NavIcon("<line x1=\"18\" y1=\"20\" x2=\"18\" y2=\"10\"/><line x1=\"12\" y1=\"20\" x2=\"12\" y2=\"4\"/><line x1=\"6\" y1=\"20\" x2=\"6\" y2=\"14\"/>")<span>Báo cáo Tài chính Kho</span></a>
             }
 
             <div class="nav-section-title">Quản lý Sản xuất (MES)</div>
             @if (User.IsInRole("Admin") || User.IsInRole("Planner") || User.IsInRole("Manager"))
             {
-                <a class="@(currentController == "WorkOrder" ? "active" : null)" asp-controller="WorkOrder" asp-action="Index">Lệnh sản xuất</a>
-                <a class="@(currentController == "ProductionPlan" ? "active" : null)" asp-controller="ProductionPlan" asp-action="Index">Kế hoạch sản xuất (MRP)</a>
-                <a class="@(currentController == "Mrp" ? "active" : null)" asp-controller="Mrp" asp-action="Index">Lập kế hoạch MRP</a>
-                <a class="@(currentController == "Bom" ? "active" : null)" asp-controller="Bom" asp-action="Index">Định mức vật tư (BOM)</a>
-                <a class="@(currentController == "WorkCenter" ? "active" : null)" asp-controller="WorkCenter" asp-action="Index">Trạm sản xuất & chi phí</a>
-                <div class="nav-section-title">Mua hàng & Bán hàng</div>
-                <a class="@(currentController == "SalesOrder" ? "active" : null)" asp-controller="SalesOrder" asp-action="Index">Đơn bán hàng (SO)</a>
-                <a class="@(currentController == "PurchaseOrder" && ViewContext.RouteData.Values["action"]?.ToString() == "Index" ? "active" : null)" asp-controller="PurchaseOrder" asp-action="Index">Đơn mua hàng (PO)</a>
-                <a class="@(currentController == "PurchaseOrder" && ViewContext.RouteData.Values["action"]?.ToString() == "Requests" ? "active" : null)" asp-controller="PurchaseOrder" asp-action="Requests">Yêu cầu mua hàng (PR)</a>
+                <a class="@(currentController == "WorkOrder" ? "active" : null)" asp-controller="WorkOrder" asp-action="Index">@NavIcon("<path d=\"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2\"/><rect x=\"8\" y=\"2\" width=\"8\" height=\"4\" rx=\"1\"/>")<span>Lệnh sản xuất</span></a>
+                <a class="@(currentController == "ProductionPlan" ? "active" : null)" asp-controller="ProductionPlan" asp-action="Index">@NavIcon("<rect x=\"3\" y=\"4\" width=\"18\" height=\"18\" rx=\"2\"/><line x1=\"16\" y1=\"2\" x2=\"16\" y2=\"6\"/><line x1=\"8\" y1=\"2\" x2=\"8\" y2=\"6\"/><line x1=\"3\" y1=\"10\" x2=\"21\" y2=\"10\"/>")<span>Kế hoạch sản xuất (MRP)</span></a>
+                <a class="@(currentController == "Mrp" ? "active" : null)" asp-controller="Mrp" asp-action="Index">@NavIcon("<polygon points=\"12 2 2 7 12 12 22 7 12 2\"/><polyline points=\"2 17 12 22 22 17\"/><polyline points=\"2 12 12 17 22 12\"/>")<span>Lập kế hoạch MRP</span></a>
+                <a class="@(currentController == "Bom" ? "active" : null)" asp-controller="Bom" asp-action="Index">@NavIcon("<line x1=\"4\" y1=\"6\" x2=\"20\" y2=\"6\"/><line x1=\"4\" y1=\"12\" x2=\"14\" y2=\"12\"/><line x1=\"4\" y1=\"18\" x2=\"18\" y2=\"18\"/>")<span>Định mức vật tư (BOM)</span></a>
+                <a class="@(currentController == "WorkCenter" ? "active" : null)" asp-controller="WorkCenter" asp-action="Index">@NavIcon("<rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"2\"/><rect x=\"9\" y=\"9\" width=\"6\" height=\"6\"/><line x1=\"9\" y1=\"1\" x2=\"9\" y2=\"4\"/><line x1=\"15\" y1=\"1\" x2=\"15\" y2=\"4\"/><line x1=\"9\" y1=\"20\" x2=\"9\" y2=\"23\"/><line x1=\"15\" y1=\"20\" x2=\"15\" y2=\"23\"/><line x1=\"20\" y1=\"9\" x2=\"23\" y2=\"9\"/><line x1=\"20\" y1=\"14\" x2=\"23\" y2=\"14\"/><line x1=\"1\" y1=\"9\" x2=\"4\" y2=\"9\"/><line x1=\"1\" y1=\"14\" x2=\"4\" y2=\"14\"/>")<span>Trạm sản xuất &amp; chi phí</span></a>
+                <div class="nav-section-title">Mua hàng &amp; Bán hàng</div>
+                <a class="@(currentController == "SalesOrder" ? "active" : null)" asp-controller="SalesOrder" asp-action="Index">@NavIcon("<circle cx=\"9\" cy=\"21\" r=\"1\"/><circle cx=\"20\" cy=\"21\" r=\"1\"/><path d=\"M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6\"/>")<span>Đơn bán hàng (SO)</span></a>
+                <a class="@(currentController == "PurchaseOrder" && ViewContext.RouteData.Values["action"]?.ToString() == "Index" ? "active" : null)" asp-controller="PurchaseOrder" asp-action="Index">@NavIcon("<rect x=\"1\" y=\"3\" width=\"15\" height=\"13\"/><polygon points=\"16 8 20 8 23 11 23 16 16 16 16 8\"/><circle cx=\"5.5\" cy=\"18.5\" r=\"2.5\"/><circle cx=\"18.5\" cy=\"18.5\" r=\"2.5\"/>")<span>Đơn mua hàng (PO)</span></a>
+                <a class="@(currentController == "PurchaseOrder" && ViewContext.RouteData.Values["action"]?.ToString() == "Requests" ? "active" : null)" asp-controller="PurchaseOrder" asp-action="Requests">@NavIcon("<path d=\"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z\"/><polyline points=\"14 2 14 8 20 8\"/><line x1=\"12\" y1=\"18\" x2=\"12\" y2=\"12\"/><line x1=\"9\" y1=\"15\" x2=\"15\" y2=\"15\"/>")<span>Yêu cầu mua hàng (PR)</span></a>
             }
-            <a class="@(currentController == "Worker" ? "active" : null)" asp-controller="Worker" asp-action="Index">Trạm vận hành</a>
-            <a class="@(currentController == "Product" ? "active" : null)" asp-controller="Product" asp-action="Index">Sản phẩm (SKU)</a>
+            <a class="@(currentController == "Worker" ? "active" : null)" asp-controller="Worker" asp-action="Index">@NavIcon("<path d=\"M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2\"/><circle cx=\"12\" cy=\"7\" r=\"4\"/>")<span>Trạm vận hành</span></a>
+            <a class="@(currentController == "Product" ? "active" : null)" asp-controller="Product" asp-action="Index">@NavIcon("<path d=\"M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z\"/><line x1=\"7\" y1=\"7\" x2=\"7.01\" y2=\"7\"/>")<span>Sản phẩm (SKU)</span></a>
 
-            <div class="nav-section-title">Kiểm soát Chất lượng & Truy vết</div>
-            <a class="@(currentController == "QcChecklist" ? "active" : null)" asp-controller="QcChecklist" asp-action="Index">Mẫu tiêu chuẩn QC</a>
-            <a class="@(currentController == "Qc" ? "active" : null)" asp-controller="Qc" asp-action="Pending">Đợt kiểm định QC</a>
-            <a class="@(currentController == "Traceability" ? "active" : null)" asp-controller="Traceability" asp-action="Index">Truy vết lô hàng</a>
+            <div class="nav-section-title">Kiểm soát Chất lượng &amp; Truy vết</div>
+            <a class="@(currentController == "QcChecklist" ? "active" : null)" asp-controller="QcChecklist" asp-action="Index">@NavIcon("<path d=\"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2\"/><rect x=\"8\" y=\"2\" width=\"8\" height=\"4\" rx=\"1\"/><path d=\"m9 14 2 2 4-4\"/>")<span>Mẫu tiêu chuẩn QC</span></a>
+            <a class="@(currentController == "Qc" ? "active" : null)" asp-controller="Qc" asp-action="Pending">@NavIcon("<circle cx=\"12\" cy=\"12\" r=\"10\"/><line x1=\"12\" y1=\"8\" x2=\"12\" y2=\"12\"/><line x1=\"12\" y1=\"16\" x2=\"12.01\" y2=\"16\"/>")<span>Đợt kiểm định QC</span></a>
+            <a class="@(currentController == "Traceability" ? "active" : null)" asp-controller="Traceability" asp-action="Index">@NavIcon("<line x1=\"6\" y1=\"3\" x2=\"6\" y2=\"15\"/><circle cx=\"18\" cy=\"6\" r=\"3\"/><circle cx=\"6\" cy=\"18\" r=\"3\"/><path d=\"M18 9a9 9 0 0 1-9 9\"/>")<span>Truy vết lô hàng</span></a>
         </nav>
-    </aside>
-    <div class="app-main">
-        <header class="app-topbar">
-            <div>
-                <p class="eyebrow">Nền tảng vận hành</p>
-                <h1>@ViewData["Title"]</h1>
-            </div>
-            <div class="topbar-actions">
-                <form class="d-flex gap-2" asp-controller="Home" asp-action="Search" method="get">
-                    <label class="visually-hidden" for="global-search">Tìm kiếm toàn hệ thống</label>
-                    <input class="form-control form-control-sm" id="global-search" type="search" name="q" required
-                           style="max-width: 250px" placeholder="Tìm SKU, lệnh SX, số lô..." />
-                    <button class="btn btn-outline-primary btn-sm" type="submit">Tìm</button>
-                </form>
-                @if (isAuthenticated)
+        <div class="sidebar-footer">
+            @if (isAuthenticated)
+            {
+                @if (canAccessSupplyChainFeatures)
                 {
-                    @if (canAccessSupplyChainFeatures)
-                    {
-                        <div class="dropdown">
-                        <button class="btn btn-link position-relative p-1 text-decoration-none" type="button"
-                                id="notificationDropdown" data-bs-toggle="dropdown" aria-expanded="false"
-                                aria-label="Thông báo hệ thống">
-                            <span aria-hidden="true" class="fs-5">&#128276;</span>
+                    <div class="dropup">
+                    <button class="sidebar-footer-btn" type="button"
+                            id="notificationDropdown" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false"
+                            aria-label="Thông báo hệ thống">
+                        <span class="position-relative d-inline-flex">
+                            @NavIcon("<path d=\"M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9\"/><path d=\"M13.73 21a2 2 0 0 1-3.46 0\"/>")
                             <span id="unread-count" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger @(unreadNotificationCount == 0 ? "d-none" : null)"
                                   aria-label="@unreadNotificationCount thông báo chưa đọc">@unreadNotificationCount</span>
-                        </button>
-                        <div class="dropdown-menu dropdown-menu-end p-0 notification-menu" aria-labelledby="notificationDropdown">
-                            <div class="d-flex align-items-center justify-content-between px-3 py-2">
-                                <strong>Thông báo hệ thống</strong>
-                                <form id="mark-all-notifications-form"
-                                      class="@(unreadNotificationCount == 0 ? "d-none" : null)"
-                                      asp-controller="Notification" asp-action="MarkAllAsRead" method="post">
-                                    <button id="mark-all-notifications-button"
-                                            class="btn btn-link btn-sm p-0 text-decoration-none"
-                                            type="submit"
-                                            disabled="@(unreadNotificationCount == 0 ? "disabled" : null)">Đánh dấu đã đọc</button>
-                                </form>
-                            </div>
-                            <div class="dropdown-divider my-0"></div>
-                            <div id="notification-list" aria-label="Danh sách thông báo gần đây">
-                                @foreach (var notification in recentNotifications)
-                                {
-                                    var isSafeReferenceUrl = !string.IsNullOrWhiteSpace(notification.ReferenceUrl)
-                                        && notification.ReferenceUrl.StartsWith('/')
-                                        && !notification.ReferenceUrl.StartsWith("//", StringComparison.Ordinal)
-                                        && !notification.ReferenceUrl.Contains('\\');
-                                    <div class="notification-item px-3 py-2">
-                                        <div class="d-flex justify-content-between gap-2"><strong class="small">@notification.Title</strong><time class="small text-muted text-nowrap" datetime="@notification.CreatedAt.ToUniversalTime().ToString("O")">@notification.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm")</time></div>
-                                        <div class="small text-muted">@notification.Message</div>
-                                        @if (isSafeReferenceUrl)
-                                        {
-                                            <a class="small stretched-link" href="@notification.ReferenceUrl">Xem chi tiết</a>
-                                        }
-                                    </div>
-                                }
-                                @if (recentNotifications.Length == 0)
-                                {
-                                    <p class="text-muted small text-center mb-0 px-3 py-3" id="notification-empty">Chưa có thông báo mới.</p>
-                                }
-                            </div>
+                        </span>
+                        <span>Thông báo</span>
+                    </button>
+                    <div class="dropdown-menu p-0 notification-menu" aria-labelledby="notificationDropdown">
+                        <div class="d-flex align-items-center justify-content-between px-3 py-2">
+                            <strong>Thông báo hệ thống</strong>
+                            <form id="mark-all-notifications-form"
+                                  class="@(unreadNotificationCount == 0 ? "d-none" : null)"
+                                  asp-controller="Notification" asp-action="MarkAllAsRead" method="post">
+                                <button id="mark-all-notifications-button"
+                                        class="btn btn-link btn-sm p-0 text-decoration-none"
+                                        type="submit"
+                                        disabled="@(unreadNotificationCount == 0 ? "disabled" : null)">Đánh dấu đã đọc</button>
+                            </form>
                         </div>
+                        <div class="dropdown-divider my-0"></div>
+                        <div id="notification-list" aria-label="Danh sách thông báo gần đây">
+                            @foreach (var notification in recentNotifications)
+                            {
+                                var isSafeReferenceUrl = !string.IsNullOrWhiteSpace(notification.ReferenceUrl)
+                                    && notification.ReferenceUrl.StartsWith('/')
+                                    && !notification.ReferenceUrl.StartsWith("//", StringComparison.Ordinal)
+                                    && !notification.ReferenceUrl.Contains('\\');
+                                <div class="notification-item px-3 py-2">
+                                    <div class="d-flex justify-content-between gap-2"><strong class="small">@notification.Title</strong><time class="small text-muted text-nowrap" datetime="@notification.CreatedAt.ToUniversalTime().ToString("O")">@notification.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm")</time></div>
+                                    <div class="small text-muted">@notification.Message</div>
+                                    @if (isSafeReferenceUrl)
+                                    {
+                                        <a class="small stretched-link" href="@notification.ReferenceUrl">Xem chi tiết</a>
+                                    }
+                                </div>
+                            }
+                            @if (recentNotifications.Length == 0)
+                            {
+                                <p class="text-muted small text-center mb-0 px-3 py-3" id="notification-empty">Chưa có thông báo mới.</p>
+                            }
                         </div>
-                    }
-                    <span class="user-chip">@User.Identity?.Name</span>
+                    </div>
+                    </div>
+                }
+                <div class="sidebar-account">
+                    <span class="user-chip" title="@User.Identity?.Name">@User.Identity?.Name</span>
                     <form asp-controller="Auth" asp-action="Logout" method="post">
-                        <button class="btn btn-outline-secondary btn-sm" type="submit">Đăng xuất</button>
+                        <button class="sidebar-footer-btn" type="submit" aria-label="Đăng xuất">
+                            @NavIcon("<path d=\"M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4\"/><polyline points=\"16 17 21 12 16 7\"/><line x1=\"21\" y1=\"12\" x2=\"9\" y2=\"12\"/>")
+                            <span>Đăng xuất</span>
+                        </button>
                     </form>
-                }
-                else
-                {
-                    <a class="btn btn-primary btn-sm" asp-controller="Auth" asp-action="Login">Đăng nhập</a>
-                }
-            </div>
-        </header>
+                </div>
+            }
+            else
+            {
+                <a class="sidebar-footer-btn" asp-controller="Auth" asp-action="Login">
+                    @NavIcon("<path d=\"M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4\"/><polyline points=\"10 17 15 12 10 7\"/><line x1=\"15\" y1=\"12\" x2=\"3\" y2=\"12\"/>")
+                    <span>Đăng nhập</span>
+                </a>
+            }
+        </div>
+    </aside>
+    <div class="app-main">
         <main role="main" class="content-frame">
             @RenderBody()
         </main>
