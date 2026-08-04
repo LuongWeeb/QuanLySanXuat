@@ -1,0 +1,14 @@
+# Local-only override: Docker Desktop (Windows) creates the named volume owned by
+# root, so the image's default mssql user (uid 10001) cannot initialise
+# /var/opt/mssql/data. Running the DB container as root works around it locally.
+services:
+  wmsmes-db:
+    user: "0:0"
+
+  # Demo users are only seeded in Development with SeedDemoUsers enabled
+  # (StartupDatabaseInitializer.ShouldSeedDemoUsers). The base compose file runs
+  # this one-shot container as Production, so the app ends up with no login at all.
+  wmsmes-migrate:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      DatabaseInitialization__SeedDemoUsers: "true"

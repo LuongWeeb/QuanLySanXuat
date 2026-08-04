@@ -74,7 +74,7 @@ public static class DatabaseConnectionStringFactory
             UserID = user,
             Password = password,
             TrustServerCertificate = trustServerCertificate,
-            MultipleActiveResultSets = true
+            MultipleActiveResultSets = false
         };
         return builder.ConnectionString;
     }
