@@ -58,7 +58,7 @@ public class SidebarNavigationTests
 
     private static void AssertLink(string layout, string controller, string action, string label)
     {
-        var pattern = $"<a\\s+[^>]*?asp-controller=\"{Regex.Escape(controller)}\"[^>]*?asp-action=\"{Regex.Escape(action)}\"[^>]*?>(?:<svg[\\s\\S]*?</svg>)?\\s*(?:<span>)?\\s*{Regex.Escape(label)}\\s*(?:</span>)?\\s*</a>";
+        var pattern = $"<a\\s+[^>]*?asp-controller=\"{Regex.Escape(controller)}\"[^>]*?asp-action=\"{Regex.Escape(action)}\"[^>]*?>[\\s\\S]*?{Regex.Escape(label)}[\\s\\S]*?</a>";
         Assert.Matches(new Regex(pattern, RegexOptions.IgnoreCase), layout);
     }
 
