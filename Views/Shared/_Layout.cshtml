@@ -57,7 +57,7 @@
                 <a class="@(currentController == "PickList" ? "active" : null)" asp-controller="PickList" asp-action="Index">@NavIcon("<line x1=\"8\" y1=\"6\" x2=\"21\" y2=\"6\"/><line x1=\"8\" y1=\"12\" x2=\"21\" y2=\"12\"/><line x1=\"8\" y1=\"18\" x2=\"21\" y2=\"18\"/><line x1=\"3\" y1=\"6\" x2=\"3.01\" y2=\"6\"/><line x1=\"3\" y1=\"12\" x2=\"3.01\" y2=\"12\"/><line x1=\"3\" y1=\"18\" x2=\"3.01\" y2=\"18\"/>")<span>Danh sách lấy hàng</span></a>
             }
 
-            <div class="nav-section-title">Báo cáo &amp; Phân tích</div>
+            <div class="nav-section-title">Báo cáo & Phân tích</div>
             @if (canAccessSupplyChainFeatures)
             {
                 <a class="@(currentController == "Report" ? "active" : null)" asp-controller="Report" asp-action="StockValuation">@NavIcon("<line x1=\"18\" y1=\"20\" x2=\"18\" y2=\"10\"/><line x1=\"12\" y1=\"20\" x2=\"12\" y2=\"4\"/><line x1=\"6\" y1=\"20\" x2=\"6\" y2=\"14\"/>")<span>Báo cáo Tài chính Kho</span></a>
@@ -79,7 +79,7 @@
             <a class="@(currentController == "Worker" ? "active" : null)" asp-controller="Worker" asp-action="Index">@NavIcon("<path d=\"M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2\"/><circle cx=\"12\" cy=\"7\" r=\"4\"/>")<span>Trạm vận hành</span></a>
             <a class="@(currentController == "Product" ? "active" : null)" asp-controller="Product" asp-action="Index">@NavIcon("<path d=\"M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z\"/><line x1=\"7\" y1=\"7\" x2=\"7.01\" y2=\"7\"/>")<span>Sản phẩm (SKU)</span></a>
 
-            <div class="nav-section-title">Kiểm soát Chất lượng &amp; Truy vết</div>
+            <div class="nav-section-title">Kiểm soát Chất lượng & Truy vết</div>
             <a class="@(currentController == "QcChecklist" ? "active" : null)" asp-controller="QcChecklist" asp-action="Index">@NavIcon("<path d=\"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2\"/><rect x=\"8\" y=\"2\" width=\"8\" height=\"4\" rx=\"1\"/><path d=\"m9 14 2 2 4-4\"/>")<span>Mẫu tiêu chuẩn QC</span></a>
             <a class="@(currentController == "Qc" ? "active" : null)" asp-controller="Qc" asp-action="Pending">@NavIcon("<circle cx=\"12\" cy=\"12\" r=\"10\"/><line x1=\"12\" y1=\"8\" x2=\"12\" y2=\"12\"/><line x1=\"12\" y1=\"16\" x2=\"12.01\" y2=\"16\"/>")<span>Đợt kiểm định QC</span></a>
             <a class="@(currentController == "Traceability" ? "active" : null)" asp-controller="Traceability" asp-action="Index">@NavIcon("<line x1=\"6\" y1=\"3\" x2=\"6\" y2=\"15\"/><circle cx=\"18\" cy=\"6\" r=\"3\"/><circle cx=\"6\" cy=\"18\" r=\"3\"/><path d=\"M18 9a9 9 0 0 1-9 9\"/>")<span>Truy vết lô hàng</span></a>
@@ -157,6 +157,20 @@
         </div>
     </aside>
     <div class="app-main">
+        <header class="app-topbar">
+            <div>
+                <p class="eyebrow">Nền tảng vận hành</p>
+                <h1>@ViewData["Title"]</h1>
+            </div>
+            <div class="topbar-actions">
+                <form class="d-flex gap-2" asp-controller="Home" asp-action="Search" method="get">
+                    <label class="visually-hidden" for="global-search">Tìm kiếm toàn hệ thống</label>
+                    <input class="form-control form-control-sm" id="global-search" type="search" name="q" required
+                           style="max-width: 250px" placeholder="Tìm SKU, lệnh SX, số lô..." />
+                    <button class="btn btn-outline-primary btn-sm" type="submit">Tìm</button>
+                </form>
+            </div>
+        </header>
         <main role="main" class="content-frame">
             @RenderBody()
         </main>

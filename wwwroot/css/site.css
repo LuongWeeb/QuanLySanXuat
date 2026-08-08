@@ -1,24 +1,39 @@
 :root {
-  /* Override Bootstrap's own font variables so every component that reads them
-     directly (modal, dropdown, tooltip, popover, toast, offcanvas) uses Inter
-     too, instead of falling back to the system font stack. */
-  --bs-font-sans-serif: "Inter", "Segoe UI", Arial, sans-serif;
+  /* Override Bootstrap's own font variables so every component uses Inter & Fira Code */
+  --bs-font-sans-serif: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --bs-font-monospace: "Fira Code", SFMono-Regular, Consolas, monospace;
   --bs-body-font-family: var(--bs-font-sans-serif);
-  --color-primary: #334155;
+  
+  /* Brand Color Palette - Deep Navy & Emerald Slate */
+  --color-primary: #1e293b;
   --color-primary-strong: #0f172a;
   --color-secondary: #475569;
-  --color-accent: #059669;
-  --color-accent-strong: #047857;
+  --color-accent: #10b981;
+  --color-accent-strong: #059669;
+  --color-accent-subtle: rgba(16, 185, 129, 0.12);
   --color-background: #f8fafc;
   --color-surface: #ffffff;
-  --color-muted: #f2f3f4;
-  --color-border: #e6e8ea;
+  --color-surface-hover: #f1f5f9;
+  --color-muted: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-border-subtle: #f1f5f9;
   --color-foreground: #0f172a;
-  --color-subtle: #475569;
-  --color-danger: #dc2626;
-  --color-warning: #d97706;
-  --shadow-panel: 0 10px 30px rgba(15, 23, 42, 0.08);
-  --radius: 8px;
+  --color-subtle: #64748b;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+  --color-info: #0284c7;
+
+  /* Shadows & Elevation */
+  --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+  --shadow-panel: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.03);
+  --shadow-lg: 0 12px 30px -4px rgba(15, 23, 42, 0.1), 0 4px 8px -2px rgba(15, 23, 42, 0.05);
+  --shadow-glass: 0 8px 32px 0 rgba(15, 23, 42, 0.08);
+
+  /* Radius Scales */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 9999px;
 }
 
 html {
