@@ -158,12 +158,43 @@ a:focus-visible {
 .nav-section-title {
   margin-top: 14px;
   margin-bottom: 4px;
-  padding: 4px 8px 0;
+  padding: 6px 8px;
   color: #94a3b8;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.nav-section-title:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f1f5f9;
+}
+
+.nav-section-title::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-right: 2px solid #94a3b8;
+  border-bottom: 2px solid #94a3b8;
+  transform: rotate(45deg);
+  transition: transform 200ms ease;
+}
+
+.nav-section-title:hover::after {
+  border-color: #f1f5f9;
+}
+
+.nav-section-title.is-collapsed::after {
+  transform: rotate(-45deg);
 }
 
 .side-nav a {

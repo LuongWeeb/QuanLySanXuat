@@ -1,4 +1,4 @@
-﻿// Please see documentation at https://learn.microsoft.com/aspnet/core/client-side/bundling-and-minification
+// Please see documentation at https://learn.microsoft.com/aspnet/core/client-side/bundling-and-minification
 // for details on configuring this project to bundle and minify static web assets.
 
 // Disable the submit button and show a spinner while a form is being submitted,
@@ -31,4 +31,40 @@ document.addEventListener("DOMContentLoaded", () => {
         firstInvalid.focus({ preventScroll: false });
         firstInvalid.scrollIntoView({ behavior: "smooth", block: "center" });
     }
+
+    // Collapsible Sidebar Navigation Accordion
+    const titles = document.querySelectorAll(".side-nav .nav-section-title");
+    titles.forEach(title => {
+        const links = [];
+        let next = title.nextElementSibling;
+        while (next && !next.classList.contains("nav-section-title")) {
+            if (next.tagName === "A" || next.querySelector("a")) {
+                links.push(next);
+            }
+            next = next.nextElementSibling;
+        }
+
+        if (links.length === 0) return;
+
+        title.setAttribute("role", "button");
+        title.setAttribute("tabindex", "0");
+        title.setAttribute("aria-expanded", "true");
+        title.setAttribute("title", "Bấm để ẩn/hiện danh mục");
+
+        const toggleSection = () => {
+            const isCollapsed = title.classList.toggle("is-collapsed");
+            title.setAttribute("aria-expanded", (!isCollapsed).toString());
+            links.forEach(link => {
+                link.style.display = isCollapsed ? "none" : "";
+            });
+        };
+
+        title.addEventListener("click", toggleSection);
+        title.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                toggleSection();
+            }
+        });
+    });
 });
